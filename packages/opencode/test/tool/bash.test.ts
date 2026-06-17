@@ -190,6 +190,53 @@ describe("tool.bash", () => {
   })
 })
 
+describe("tool.bash PowerShell", () => {
+  for (const item of ps) {
+    test(
+      `returns plain UTF-8 errors [${item.label}]`,
+      withShell(item, async () => {
+        await Instance.provide({
+          directory: projectRoot,
+          fn: async () => {
+            const bash = await initBash()
+            const result = await Effect.runPromise(
+              bash.execute(
+                {
+                  command: 'Write-Error "测试错误"',
+                  description: "PowerShell error output",
+                },
+                ctx,
+              ),
+            )
+
+            expect(result.metadata.exit).toBe(1)
+            expect(result.output).toContain("测试错误")
+            expect(result.output).not.toContain("CLIXML")
+            expect(result.output).not.toContain("<Objs")
+            expect(result.output).not.toContain("_x000D_")
+          },
+        })
+      }),
+    )
+
+    test(
+      `describes the PowerShell dialect [${item.label}]`,
+      withShell(item, async () => {
+        await Instance.provide({
+          directory: projectRoot,
+          fn: async () => {
+            const bash = await initBash()
+            expect(bash.description).toContain("Use PowerShell syntax only")
+            expect(bash.description).toContain("2>$null")
+            expect(bash.description).toContain("never use `/dev/null`")
+            expect(bash.description).not.toContain("use a single Bash call with '&&'")
+          },
+        })
+      }),
+    )
+  }
+})
+
 describe("tool.bash permissions", () => {
   each("asks for bash permission with correct pattern", async () => {
     await using tmp = await tmpdir()

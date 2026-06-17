@@ -24,6 +24,9 @@ import { ChildProcessSpawner } from "effect/unstable/process/ChildProcessSpawner
 import * as BashInteractive from "./bash-interactive"
 import * as BashTokenEfficient from "./bash_token_efficient_pipeline"
 import * as BashTokenEfficientHeuristic from "./bash_token_efficient_heuristic"
+import { powerShellCommandArgs } from "@/shell/powershell"
+
+export { powerShellCommandArgs } from "@/shell/powershell"
 
 const MAX_METADATA_LENGTH = 30_000
 const DEFAULT_TIMEOUT = Flag.MIMOCODE_EXPERIMENTAL_BASH_DEFAULT_TIMEOUT_MS || 2 * 60 * 1000
@@ -377,8 +380,7 @@ const askDelete = Effect.fn("BashTool.askDelete")(function* (ctx: Tool.Context, 
 
 function cmd(shell: string, name: string, command: string, cwd: string, env: NodeJS.ProcessEnv) {
   if (process.platform === "win32" && PS.has(name)) {
-    const prefixed = `${Shell.POWERSHELL_UTF8_PREFIX}${command}`
-    return ChildProcess.make(shell, ["-NoLogo", "-NoProfile", "-NonInteractive", "-Command", prefixed], {
+    return ChildProcess.make(shell, powerShellCommandArgs(command, name === "powershell" ? "powershell" : "pwsh"), {
       cwd,
       env,
       stdin: "ignore",
@@ -731,16 +733,28 @@ export const BashTool = Tool.define(
       Effect.sync(() => {
         const shell = Shell.acceptable()
         const name = Shell.name(shell)
+        const powershell = PS.has(name)
+        const dialect = powershell
+          ? `PowerShell syntax requirements:
+  - Use PowerShell syntax only. Redirect discarded output with \`$null\` (for example, \`2>$null\`); never use \`/dev/null\`.
+  - Prefer \`Get-ChildItem -LiteralPath <path> -Force\` over GNU-style commands such as \`ls -la\`.
+  - Do not combine POSIX and PowerShell fallback commands in one invocation.`
+          : name === "cmd"
+            ? "cmd.exe syntax requirements: use cmd.exe commands and redirect discarded output to `nul`; do not use `/dev/null` or PowerShell's `$null`."
+            : `Use ${name} / POSIX shell syntax. Redirect discarded output to \`/dev/null\`; do not use PowerShell's \`$null\`.`
         const chain =
           name === "powershell"
-            ? "If the commands depend on each other and must run sequentially, avoid '&&' in this shell because Windows PowerShell 5.1 does not support it. Use PowerShell conditionals such as `cmd1; if ($?) { cmd2 }` when later commands must depend on earlier success."
-            : "If the commands depend on each other and must run sequentially, use a single Bash call with '&&' to chain them together (e.g., `git add . && git commit -m \"message\" && git push`). For instance, if one operation must complete before another starts (like mkdir before cp, Write before Bash for git operations, or git add before git commit), run these operations sequentially instead."
+            ? "If the commands depend on each other and must run sequentially, avoid '&&' and '||' because Windows PowerShell 5.1 does not support pipeline-chain operators. Use PowerShell conditionals such as `cmd1; if ($?) { cmd2 }` when later commands depend on earlier success."
+            : name === "pwsh"
+              ? "PowerShell 7 supports `&&` and `||` pipeline-chain operators. Use them only with PowerShell syntax and PowerShell redirection targets."
+              : "If the commands depend on each other and must run sequentially, use '&&' to chain them (e.g., `git add . && git commit -m \"message\" && git push`)."
         log.info("bash tool using shell", { shell })
 
         return {
           description: DESCRIPTION.replaceAll("${directory}", Instance.directory)
             .replaceAll("${os}", process.platform)
             .replaceAll("${shell}", name)
+            .replaceAll("${dialect}", dialect)
             .replaceAll("${chaining}", chain)
             .replaceAll("${maxLines}", String(Truncate.MAX_LINES))
             .replaceAll("${maxBytes}", String(Truncate.MAX_BYTES)),
