@@ -1,5 +1,5 @@
 import { Effect, Layer, Context, Option } from "effect"
-import { generateObject, streamObject, type ModelMessage } from "ai"
+import { generateText, streamObject, type ModelMessage } from "ai"
 import z from "zod"
 import * as OtelTracer from "@effect/opentelemetry/Tracer"
 import { InstanceState } from "@/effect"
@@ -78,6 +78,70 @@ const judgeUser = (condition: string) =>
 
 Condition: ${condition}`
 
+export class GoalJudgeParseError extends Error {
+  constructor(message: string) {
+    super(message)
+    this.name = "GoalJudgeParseError"
+  }
+}
+
+function stripMarkdownFence(text: string): string {
+  return text
+    .trim()
+    .replace(/^```(?:json)?\s*/i, "")
+    .replace(/\s*```$/i, "")
+    .trim()
+}
+
+function extractLastJsonObject(text: string): string | undefined {
+  for (let start = text.lastIndexOf("{"); start >= 0; start = text.lastIndexOf("{", start - 1)) {
+    let depth = 0
+    let inString = false
+    let escaped = false
+
+    for (let i = start; i < text.length; i++) {
+      const ch = text[i]
+      if (escaped) {
+        escaped = false
+        continue
+      }
+      if (inString && ch === "\\") {
+        escaped = true
+        continue
+      }
+      if (ch === '"') {
+        inString = !inString
+        continue
+      }
+      if (inString) continue
+      if (ch === "{") depth++
+      if (ch === "}") {
+        depth--
+        if (depth === 0) return text.slice(start, i + 1)
+      }
+    }
+  }
+  return undefined
+}
+
+function parseVerdictText(text: string): Verdict {
+  const trimmed = text.trim()
+  const unfenced = stripMarkdownFence(trimmed)
+
+  try {
+    return Verdict.parse(JSON.parse(unfenced))
+  } catch {}
+
+  const json = extractLastJsonObject(unfenced)
+  if (json) {
+    try {
+      return Verdict.parse(JSON.parse(json))
+    } catch {}
+  }
+
+  throw new GoalJudgeParseError(`Goal judge returned non-JSON response: ${trimmed.slice(0, 500)}`)
+}
+
 export interface Interface {
   readonly set: (sessionID: SessionID, condition: string) => Effect.Effect<void>
   readonly get: (sessionID: SessionID) => Effect.Effect<Goal | undefined>
@@ -94,7 +158,7 @@ export interface Interface {
     condition: string
     msgs: MessageV2.WithParts[]
     model: { providerID: ProviderID; modelID: ModelID }
-  }) => Effect.Effect<Verdict>
+  }) => Effect.Effect<Verdict, unknown>
 }
 
 export class Service extends Context.Service<Service, Interface>()("@opencode/SessionGoal") {}
@@ -196,10 +260,10 @@ export const layer = Layer.effect(
         ],
         model: language,
         schema: Verdict,
-      } satisfies Parameters<typeof generateObject>[0]
+      } satisfies Parameters<typeof streamObject>[0]
 
       if (isOpenaiOauth) {
-        return yield* Effect.promise(async () => {
+        return yield* Effect.tryPromise({ try: async () => {
           const result = streamObject({
             ...params,
             providerOptions: ProviderTransform.providerOptions(resolved, {
@@ -212,10 +276,27 @@ export const layer = Layer.effect(
             if (part.type === "error") throw part.error
           }
           return Verdict.parse(await result.object)
-        })
+        }, catch: (e) => e })
       }
 
-      return yield* Effect.promise(() => generateObject(params).then((r) => Verdict.parse(r.object)))
+      return yield* Effect.tryPromise({ try: async () => {
+        const result = await generateText({
+          experimental_telemetry: params.experimental_telemetry,
+          temperature: params.temperature,
+          model: params.model,
+          messages: [
+            ...(isOpenaiOauth ? [] : [{ role: "system", content: JUDGE_SYSTEM } satisfies ModelMessage]),
+            ...conversation,
+            {
+              role: "user",
+              content:
+                judgeUser(input.condition) +
+                "\n\nReturn ONLY a compact JSON object matching exactly one of the documented shapes. No markdown. No prose.",
+            } satisfies ModelMessage,
+          ],
+        })
+        return parseVerdictText(result.text)
+      }, catch: (e) => e })
     })
 
     return Service.of({ set, get, clear, bumpReact, evaluate })

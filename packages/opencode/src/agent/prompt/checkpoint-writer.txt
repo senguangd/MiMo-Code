@@ -67,7 +67,7 @@ For §3 Directives in checkpoint.md, scan content:
   - Lines that are genuine session-only working preferences stay in §3
 
 For §4 Task tree, pull from the task tool only:
-  1. Call `task` tool with operation="list" — this is the authoritative source of truth (done/blocked/open/abandoned).
+  1. Call `task` tool as `task({ operation: { action: "list" } })` — this is the authoritative source of truth (done/blocked/open/abandoned).
 
   Render: parent task with task-tool status icon (🔵 open / 🔄 in_progress / 🟡 blocked / ✅ done / ❌ abandoned), use task summary for one-line body. Indent sub-tasks two spaces. Suffix the line as follows:
     - If the SUBAGENT PROGRESS block listed this task as NEW or CHANGED: `(progress: tasks/<id>/progress.md, last-reconciled-written-at: <the written-at from the block>)`

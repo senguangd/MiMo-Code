@@ -27,6 +27,7 @@ import { Effect, Context, Layer } from "effect"
 import { InstanceState } from "@/effect"
 import * as Option from "effect/Option"
 import * as OtelTracer from "@effect/opentelemetry/Tracer"
+import { CHECKPOINT_WRITER_TOOL_ALLOWLIST } from "./config"
 
 export const Info = z
   .object({
@@ -347,29 +348,19 @@ export const layer = Layer.effect(
             options: {},
             native: true,
             hidden: true,
-            // No `prompt` field — fork agent contract: at spawn time,
-            // tryStartCheckpointWriter captures parent's full LLM request prefix
-            // (system + tools + messages-to-watermark) into a frozen ForkContext,
-            // stored in Actor service's in-memory map. fork's runLoop reads from
-            // that snapshot instead of recomputing from this agent's identity.
-            // See docs/superpowers/specs/2026-05-26-fork-agent-prefix-cache-design.md
+            // Checkpoint writer is a system-spawned background actor. Its
+            // LLM-visible tool schema must match the runtime actor.tools whitelist;
+            // otherwise models see tools such as `bash`, call them, and only then
+            // get rejected by the runtime whitelist. That mismatch causes noisy
+            // checkpoint loops and breaks weak/tool-call-sensitive providers.
             //
-            // No `toolAllowlist` field — fork agents must mirror parent's tool
-            // schema for prefix-cache alignment. Runtime tool restriction is
-            // enforced via actor.tools whitelist (set in tryStartCheckpointWriter).
-            // Permission inherits `defaults` (+ user) only — NO bespoke block.
-            // At runtime the fork's LLM-visible tool schema is filtered against the
-            // PARENT agent's permission (ForkContext.parentPermission, fed to
-            // handle.process in prompt.ts's fork branch), so it matches the parent
-            // (prompt-cache parity). NOTE: the per-call ctx.ask still evaluates this
-            // agent's own permission, but that is bounded by the actor.tools whitelist
-            // (set in tryStartCheckpointWriter) and memory-path-guard — the real write
-            // authority — so inheriting `defaults` over-grants nothing in practice.
-            // Memory writes skip the edit ask (askEditUnlessMemory), and any
-            // un-answerable ask fails clean (SYSTEM_SPAWNED_AGENT_TYPES →
-            // interactive:false). See
+            // Permission still inherits defaults (+ user); actual write authority
+            // is bounded by this toolAllowlist, actor.tools, and memory-path guards.
+            // Un-answerable permission asks fail cleanly because checkpoint-writer
+            // is in SYSTEM_SPAWNED_AGENT_TYPES. See
             // docs/superpowers/specs/2026-06-05-checkpoint-writer-permission-deadlock-design.md
             permission: Permission.merge(defaults, user),
+            toolAllowlist: [...CHECKPOINT_WRITER_TOOL_ALLOWLIST],
           },
           dream: {
             name: "dream",
