@@ -24,6 +24,9 @@ import { ChildProcessSpawner } from "effect/unstable/process/ChildProcessSpawner
 import * as BashInteractive from "./bash-interactive"
 import * as BashTokenEfficient from "./bash_token_efficient_pipeline"
 import * as BashTokenEfficientHeuristic from "./bash_token_efficient_heuristic"
+import { powerShellCommandArgs } from "@/shell/powershell"
+
+export { powerShellCommandArgs } from "@/shell/powershell"
 
 const MAX_METADATA_LENGTH = 30_000
 const DEFAULT_TIMEOUT = Flag.MIMOCODE_EXPERIMENTAL_BASH_DEFAULT_TIMEOUT_MS || 2 * 60 * 1000
@@ -377,8 +380,7 @@ const askDelete = Effect.fn("BashTool.askDelete")(function* (ctx: Tool.Context, 
 
 function cmd(shell: string, name: string, command: string, cwd: string, env: NodeJS.ProcessEnv) {
   if (process.platform === "win32" && PS.has(name)) {
-    const prefixed = `${Shell.POWERSHELL_UTF8_PREFIX}${command}`
-    return ChildProcess.make(shell, ["-NoLogo", "-NoProfile", "-NonInteractive", "-Command", prefixed], {
+    return ChildProcess.make(shell, powerShellCommandArgs(command), {
       cwd,
       env,
       stdin: "ignore",
