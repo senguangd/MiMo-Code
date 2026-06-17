@@ -124,7 +124,9 @@ globalThis.AI_SDK_LOG_WARNINGS = false
 // always JSON. Exported for unit testing.
 export function recallHintLines(toolCfg: ToolStyleConfig | undefined): string[] {
   const taskHint =
-    resolveInvocationStyle(toolCfg, "task") === "shell" ? "- task list" : `- task({ operation: "list" })`
+    resolveInvocationStyle(toolCfg, "task") === "shell"
+      ? "- task list"
+      : `- task({ operation: { action: "list" } })`
   const actorHint =
     resolveInvocationStyle(toolCfg, "actor") === "shell"
       ? "- actor status <actor_id>"
@@ -2339,7 +2341,8 @@ NOTE: At any point in time through this workflow you should feel free to ask the
         // reason as a synthetic user turn and signal the caller to keep working
         // (return true). This is the main-loop analogue of actor.preStop ReAct
         // re-entry, which only fires for spawned actors. fail-open on any judge
-        // error so a flaky judge can never trap the user.
+        // API/runtime error so a flaky judge can never trap the user; fail-closed
+        // on invalid verdict text so parse errors are not treated as success.
         const goalGate = Effect.fn("SessionPrompt.goalGate")(function* (lastUser: MessageV2.User) {
           if ((agentID ?? "main") !== "main") return false
           const active = yield* goal.get(sessionID)
@@ -2362,6 +2365,14 @@ NOTE: At any point in time through this workflow you should feel free to ask the
             .pipe(
               Effect.catch((err) =>
                 Effect.gen(function* () {
+                  if (err instanceof Goal.GoalJudgeParseError) {
+                    yield* slog.warn("goal judge returned invalid verdict; continuing", { error: String(err) })
+                    return {
+                      ok: false,
+                      reason: "goal judge returned an invalid JSON verdict; continuing instead of treating it as satisfied",
+                      judgeFailed: true,
+                    } as Goal.Verdict & { judgeFailed: true }
+                  }
                   yield* slog.warn("goal judge failed; allowing stop", { error: String(err) })
                   return { ok: true, reason: "judge error", judgeFailed: true } as Goal.Verdict & {
                     judgeFailed: true

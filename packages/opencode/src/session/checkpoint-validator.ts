@@ -35,6 +35,27 @@ export const LEARNING_REQUIRED_SECTIONS = [
   "### Dead ends",
 ] as const
 
+export const CHECKPOINT_REQUIRED_SECTIONS = [
+  "## §1 Active intent",
+  "## §2 Next concrete action",
+  "## §3 Directives (this session)",
+  "## §4 Task tree",
+  "## §5 Current work",
+  "## §6 Files and code sections",
+  "## §7 Discovered knowledge (cross-task)",
+  "## §8 Errors and fixes",
+  "## §9 Live resources",
+  "## §10 Design decisions and discussion outcomes",
+  "## §11 Open notes",
+] as const
+
+function isCurrentCheckpointFormat(body: string, firstNonEmptyLine: string): boolean {
+  return (
+    firstNonEmptyLine.trim() === "# Session checkpoint" ||
+    body.includes("## §1 Active intent")
+  )
+}
+
 function checkTopicAndSections(
   body: string,
   filename: string,
@@ -42,6 +63,8 @@ function checkTopicAndSections(
 ): Violation[] {
   const violations: Violation[] = []
   const firstNonEmptyLine = body.split("\n").find((l) => l.trim().length > 0) ?? ""
+  const currentCheckpointFormat = isCurrentCheckpointFormat(body, firstNonEmptyLine)
+  const sectionsToCheck = currentCheckpointFormat ? CHECKPOINT_REQUIRED_SECTIONS : requiredSections
 
   if (/^# Checkpoint #\d+/.test(firstNonEmptyLine)) {
     violations.push({
@@ -52,27 +75,29 @@ function checkTopicAndSections(
     })
   }
 
-  const topicMatch = body.match(/^Topic:\s*(.+?)$/m)
-  if (!topicMatch) {
-    violations.push({
-      file: filename,
-      rule: "topic-missing",
-      severity: "error",
-      detail: `Missing required first-line "Topic: <summary>". Add it as the first non-blank line.`,
-    })
-  } else {
-    const topic = topicMatch[1].trim()
-    if (topic.length > TOPIC_MAX_CHARS) {
+  if (!currentCheckpointFormat) {
+    const topicMatch = body.match(/^Topic:\s*(.+?)$/m)
+    if (!topicMatch) {
       violations.push({
         file: filename,
-        rule: "topic-too-long",
-        severity: "warn",
-        detail: `Topic line is ${topic.length} chars (limit ${TOPIC_MAX_CHARS}). Rewrite shorter.`,
+        rule: "topic-missing",
+        severity: "error",
+        detail: `Missing required first-line "Topic: <summary>". Add it as the first non-blank line.`,
       })
+    } else {
+      const topic = topicMatch[1].trim()
+      if (topic.length > TOPIC_MAX_CHARS) {
+        violations.push({
+          file: filename,
+          rule: "topic-too-long",
+          severity: "warn",
+          detail: `Topic line is ${topic.length} chars (limit ${TOPIC_MAX_CHARS}). Rewrite shorter.`,
+        })
+      }
     }
   }
 
-  const sectionPositions = requiredSections.map((s) => ({ section: s, idx: body.indexOf(s) }))
+  const sectionPositions = sectionsToCheck.map((s) => ({ section: s, idx: body.indexOf(s) }))
   for (const pos of sectionPositions) {
     if (pos.idx === -1) {
       violations.push({
