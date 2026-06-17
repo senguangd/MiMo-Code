@@ -94,6 +94,7 @@ import { SessionStatus } from "./status"
 import { LLM } from "./llm"
 import { MaxMode } from "./max-mode"
 import { Shell } from "@/shell/shell"
+import { powerShellCommandArgs } from "@/shell/powershell"
 import { AppFileSystem } from "@mimo-ai/shared/filesystem"
 import { Truncate } from "@/tool"
 import { decodeDataUrl } from "@/util/data-url"
@@ -1508,12 +1509,8 @@ NOTE: At any point in time through this workflow you should feel free to ask the
           ],
         },
         cmd: { args: ["/c", `${Shell.CMD_UTF8_PREFIX}${input.command}`] },
-        powershell: {
-          args: ["-NoProfile", "-Command", `${Shell.POWERSHELL_UTF8_PREFIX}${input.command}`],
-        },
-        pwsh: {
-          args: ["-NoProfile", "-Command", `${Shell.POWERSHELL_UTF8_PREFIX}${input.command}`],
-        },
+        powershell: { args: powerShellCommandArgs(input.command) },
+        pwsh: { args: powerShellCommandArgs(input.command) },
         "": { args: ["-c", input.command] },
       }
 
