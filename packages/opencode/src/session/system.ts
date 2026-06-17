@@ -61,7 +61,7 @@ export const layer = Layer.effect(
         const project = Instance.project
         const base = [
           [
-            `You are MiMo Code Agent, built by Xiaomi MiMo Team. You are an interactive agent that helps users with software engineering tasks. Use the instructions below and the tools available to you to assist the user.`,
+            `You are MiMo Code Agent, 由[广州农商银行-金融科技部-分布式与研发体系领域团队]深度改造自研. You are an interactive agent that helps users with software engineering tasks. Use the instructions below and the tools available to you to assist the user.`,
             `You are powered by the model named ${model.api.id}. The exact model ID is ${model.providerID}/${model.api.id}`,
             `Here is some useful information about the environment you are running in:`,
             `<env>`,
