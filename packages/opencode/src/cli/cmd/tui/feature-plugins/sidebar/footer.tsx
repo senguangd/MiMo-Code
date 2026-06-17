@@ -66,10 +66,11 @@ function View(props: { api: TuiPluginApi }) {
       <text fg={theme().textMuted}>
         <span style={{ fg: theme().success }}>•</span> <b>MiMo</b>
         <span style={{ fg: theme().text }}>
-          <b>Code</b>
+          <b>Cli</b>
         </span>{" "}
         <span>{props.api.app.version}</span>
       </text>
+      <text fg={theme().textMuted}>By 分布式与研发体系领域团队</text>
     </box>
   )
 }
