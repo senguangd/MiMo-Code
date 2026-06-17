@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import { validateSnapshot, TOPIC_MAX_CHARS, validateLearning, validateMemory, validateProgress, validateBudget, validateBudgetSections } from "../../src/session/checkpoint-validator"
-import { CHECKPOINT_SECTION_BUDGETS } from "../../src/session/checkpoint-templates"
+import { CHECKPOINT_TEMPLATE, CHECKPOINT_SECTION_BUDGETS } from "../../src/session/checkpoint-templates"
 
 describe("validateSnapshot", () => {
   const valid = `Topic: parseDecl handles forward declarations in unifier
@@ -60,6 +60,26 @@ describe("validateSnapshot", () => {
 `
     const v = validateSnapshot(reordered, "snapshot-001.md")
     expect(v).toContainEqual(expect.objectContaining({ rule: "subsection-out-of-order", severity: "error" }))
+  })
+
+  test("current single-file checkpoint template passes structural validation", () => {
+    expect(validateSnapshot(CHECKPOINT_TEMPLATE, "checkpoint.md")).toEqual([])
+    expect(validateLearning(CHECKPOINT_TEMPLATE, "checkpoint.md", new Set())).toEqual([])
+  })
+
+  test("current single-file checkpoint template still flags missing required sections", () => {
+    const body = CHECKPOINT_TEMPLATE.replace(
+      /\n## §9 Live resources[\s\S]*?(?=\n## §10 Design decisions and discussion outcomes)/,
+      "\n",
+    )
+    const v = validateSnapshot(body, "checkpoint.md")
+    expect(v).toContainEqual(
+      expect.objectContaining({
+        rule: "subsection-missing",
+        severity: "error",
+        detail: expect.stringContaining("## §9 Live resources"),
+      }),
+    )
   })
 })
 

@@ -44,3 +44,13 @@ export function decideAskRouting(input: {
   }
   return { interactive: !input.askActor?.background }
 }
+
+/**
+ * Tools the checkpoint-writer may see and execute. Keep this single source of
+ * truth aligned across:
+ * - the agent's LLM-visible toolAllowlist
+ * - the actor.spawn runtime whitelist
+ */
+export const CHECKPOINT_WRITER_TOOL_ALLOWLIST = [
+  "read", "write", "edit", "apply_patch", "glob", "grep", "task",
+] as const
