@@ -1,4 +1,4 @@
-import type { BoxRenderable, TextareaRenderable, KeyEvent, ScrollBoxRenderable } from "@opentui/core"
+import type { BoxRenderable, TextareaRenderable, ScrollBoxRenderable } from "@opentui/core"
 import { pathToFileURL } from "bun"
 import fuzzysort from "fuzzysort"
 import { firstBy } from "remeda"
@@ -18,10 +18,33 @@ import { skillDescription } from "@tui/i18n/skill"
 import { useTerminalDimensions } from "@opentui/solid"
 import { Locale } from "@/util"
 import { Flag } from "@/flag/flag"
+import {
+  createOpencodeBindingLookup,
+  OPENCODE_AUTOCOMPLETE_MODE,
+  useBindings,
+  useOpencodeModeStack,
+} from "../../keymap"
 import type { PromptInfo } from "./history"
 import { useFrecency } from "./frecency"
 import { detectTrigger } from "./autocomplete-detect"
 import { charAfterCursor, tokenEndWidth } from "./offset"
+
+// Some terminals/OpenTUI keyboard backends distinguish the main Return key from
+// the numeric keypad Enter key. The configured `return` binding covers the main
+// key, while keypad Enter can surface under one of these names depending on the
+// terminal protocol/platform. Use raw key objects so the existing string alias
+// expander (`enter` -> `return`) does not collapse these fallbacks away.
+const KEYPAD_ENTER_KEY_NAMES = [
+  "enter",
+  "kpenter",
+  "kp_enter",
+  "numenter",
+  "num_enter",
+  "numpadenter",
+  "numpad_enter",
+  "keypadenter",
+  "keypad_enter",
+] as const
 
 function removeLineRange(input: string) {
   const hashIndex = input.lastIndexOf("#")
@@ -57,7 +80,6 @@ function extractLineRange(input: string) {
 
 export type AutocompleteRef = {
   onInput: (value: string) => void
-  onKeyDown: (e: KeyEvent) => void
   visible: false | "@" | "$" | "/"
 }
 
@@ -93,6 +115,8 @@ export function Autocomplete(props: {
   const dimensions = useTerminalDimensions()
   const frecency = useFrecency()
   const tuiConfig = useTuiConfig()
+  const modeStack = useOpencodeModeStack()
+  const bindingLookup = createMemo(() => createOpencodeBindingLookup(tuiConfig))
 
   const [store, setStore] = createStore({
     index: 0,
@@ -102,6 +126,12 @@ export function Autocomplete(props: {
   })
 
   const [positionTick, setPositionTick] = createSignal(0)
+
+  createEffect(() => {
+    if (!store.visible) return
+    const popMode = modeStack.push(OPENCODE_AUTOCOMPLETE_MODE)
+    onCleanup(popMode)
+  })
 
   createEffect(() => {
     if (store.visible) {
@@ -519,8 +549,77 @@ export function Autocomplete(props: {
     setStore("selected", 0)
   }
 
+  useBindings(() => ({
+    target: props.input,
+    enabled: () => Boolean(store.visible),
+    commands: [
+      {
+        name: "prompt.autocomplete.prev",
+        title: "Previous autocomplete item",
+        category: "Autocomplete",
+        run() {
+          setStore("input", "keyboard")
+          move(-1)
+        },
+      },
+      {
+        name: "prompt.autocomplete.next",
+        title: "Next autocomplete item",
+        category: "Autocomplete",
+        run() {
+          setStore("input", "keyboard")
+          move(1)
+        },
+      },
+      {
+        name: "prompt.autocomplete.hide",
+        title: "Hide autocomplete",
+        category: "Autocomplete",
+        run() {
+          hide()
+        },
+      },
+      {
+        name: "prompt.autocomplete.select",
+        title: "Select autocomplete item",
+        category: "Autocomplete",
+        run() {
+          select()
+        },
+      },
+      {
+        name: "prompt.autocomplete.complete",
+        title: "Complete autocomplete item",
+        category: "Autocomplete",
+        run() {
+          const selected = options()[store.selected]
+          if (selected?.isDirectory) {
+            expandDirectory()
+            return
+          }
+
+          select()
+        },
+      },
+    ],
+    bindings: [
+      ...bindingLookup().gather("prompt.autocomplete", [
+        "prompt.autocomplete.prev",
+        "prompt.autocomplete.next",
+        "prompt.autocomplete.hide",
+        "prompt.autocomplete.select",
+        "prompt.autocomplete.complete",
+      ]),
+      ...KEYPAD_ENTER_KEY_NAMES.map((name) => ({
+        key: { name },
+        desc: "Select autocomplete item",
+        group: "Autocomplete",
+        cmd: "prompt.autocomplete.select",
+      })),
+    ],
+  }))
+
   function show(mode: "@" | "$" | "/") {
-    command.keybinds(false)
     setStore({
       visible: mode,
       index: props.input().cursorOffset,
@@ -528,7 +627,15 @@ export function Autocomplete(props: {
   }
 
   function hide() {
-    command.keybinds(true)
+    const text = props.input().plainText
+    if (store.visible === "/" && !text.endsWith(" ") && text.startsWith("/")) {
+      const cursor = props.input().logicalCursor
+      props.input().deleteRange(0, 0, cursor.row, cursor.col)
+      // Sync the prompt store immediately since onContentChange is async
+      props.setPrompt((draft) => {
+        draft.input = props.input().plainText
+      })
+    }
     setStore("visible", false)
   }
 
@@ -572,61 +679,6 @@ export function Autocomplete(props: {
         if (!trigger) return
         show(trigger.kind)
         setStore("index", trigger.index)
-      },
-      onKeyDown(e: KeyEvent) {
-        if (store.visible) {
-          const name = e.name?.toLowerCase()
-          const ctrlOnly = e.ctrl && !e.meta && !e.shift
-          const isNavUp = name === "up" || (ctrlOnly && name === "p")
-          const isNavDown = name === "down" || (ctrlOnly && name === "n")
-
-          if (isNavUp) {
-            setStore("input", "keyboard")
-            move(-1)
-            e.preventDefault()
-            return
-          }
-          if (isNavDown) {
-            setStore("input", "keyboard")
-            move(1)
-            e.preventDefault()
-            return
-          }
-          if (name === "escape") {
-            clearTriggerRange()
-            hide()
-            e.preventDefault()
-            return
-          }
-          if (name === "return") {
-            select()
-            e.preventDefault()
-            return
-          }
-          if (name === "tab") {
-            const selected = options()[store.selected]
-            if (selected?.isDirectory) {
-              expandDirectory()
-            } else {
-              select()
-            }
-            e.preventDefault()
-            return
-          }
-        }
-        if (!store.visible) {
-          if (e.name === "@" || e.name === "$") {
-            const cursorOffset = props.input().cursorOffset
-            const charBeforeCursor =
-              cursorOffset === 0 ? undefined : props.input().getTextRange(cursorOffset - 1, cursorOffset)
-            const canTrigger = charBeforeCursor === undefined || charBeforeCursor === "" || /\s/.test(charBeforeCursor)
-            if (canTrigger) show(e.name)
-          }
-
-          if (e.name === "/") {
-            if (props.input().cursorOffset === 0) show("/")
-          }
-        }
       },
     })
   })

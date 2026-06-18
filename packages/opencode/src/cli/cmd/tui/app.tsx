@@ -1,4 +1,5 @@
 import { render, TimeToFirstDraw, useKeyboard, useRenderer, useTerminalDimensions } from "@opentui/solid"
+import { createDefaultOpenTuiKeymap } from "@opentui/keymap/opentui"
 import * as Clipboard from "@tui/util/clipboard"
 import * as Selection from "@tui/util/selection"
 import { createCliRenderer, MouseButton, type CliRendererConfig } from "@opentui/core"
@@ -74,6 +75,7 @@ import { isPlainTerminal } from "./util/terminal"
 import type { EventSource } from "./context/sdk"
 import { DialogVariant } from "./component/dialog-variant"
 import { DialogModalities } from "./component/dialog-modalities"
+import { OpencodeKeymapProvider, registerOpencodeKeymap } from "./keymap"
 
 function rendererConfig(_config: TuiConfig.Info, plainTerminal: boolean): CliRendererConfig {
   const mouseEnabled = !plainTerminal && !Flag.MIMOCODE_DISABLE_MOUSE && (_config.mouse ?? true)
@@ -139,20 +141,33 @@ export function tui(input: {
   // promise to prevent immediate exit
   // oxlint-disable-next-line no-async-promise-executor -- intentional: async executor used for sequential setup before resolve
   return new Promise<void>(async (resolve) => {
+    let unregisterKeymap: (() => void) | undefined
+    let keymapDisposed = false
+    const disposeKeymap = () => {
+      if (keymapDisposed) return
+      keymapDisposed = true
+      unregisterKeymap?.()
+    }
+
     const unguard = win32InstallCtrlCGuard()
     win32DisableProcessedInput()
 
     const onExit = async () => {
+      disposeKeymap()
       unguard?.()
       resolve()
     }
 
     const onBeforeExit = async () => {
+      disposeKeymap()
       await TuiPluginRuntime.dispose()
     }
 
     const plainTerminal = isPlainTerminal()
     const renderer = await createCliRenderer(rendererConfig(input.config, plainTerminal))
+    const keymap = createDefaultOpenTuiKeymap(renderer)
+    unregisterKeymap = registerOpencodeKeymap(keymap, renderer, input.config)
+
     // 默认使用 dark 模式(不跟随终端背景);用户手动切换后会被 theme_mode_lock 记住并优先。
     const mode = "dark"
 
@@ -163,6 +178,7 @@ export function tui(input: {
             <ErrorComponent error={error} reset={reset} onBeforeExit={onBeforeExit} onExit={onExit} mode={mode} />
           )}
         >
+          <OpencodeKeymapProvider keymap={keymap}>
           <ArgsProvider {...input.args}>
             <ExitProvider onBeforeExit={onBeforeExit} onExit={onExit}>
               <KVProvider>
@@ -219,6 +235,7 @@ export function tui(input: {
               </KVProvider>
             </ExitProvider>
           </ArgsProvider>
+          </OpencodeKeymapProvider>
         </ErrorBoundary>
       )
     }, renderer)

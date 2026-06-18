@@ -12,4 +12,7 @@ export default defineConfig({
     target: "esnext",
     // sourcemap: true,
   },
+  css: {
+    transformer: "lightningcss",
+  },
 })

@@ -8,14 +8,12 @@ import { useLanguage } from "../../context/language"
 import type { QuestionAnswer, QuestionRequest } from "@mimo-ai/sdk/v2"
 import { useSDK } from "../../context/sdk"
 import { SplitBorder } from "../../component/border"
-import { useTextareaKeybindings } from "../../component/textarea-keybindings"
 import { useDialog } from "../../ui/dialog"
 
 export function QuestionPrompt(props: { request: QuestionRequest }) {
   const sdk = useSDK()
   const { theme } = useTheme()
   const keybind = useKeybind()
-  const bindings = useTextareaKeybindings()
   const { t } = useLanguage()
 
   const translateQuestion = (q: QuestionRequest["questions"][number]) => {
@@ -139,72 +137,57 @@ export function QuestionPrompt(props: { request: QuestionRequest }) {
     pick(originalLabel)
   }
 
+  function confirmCustomAnswer() {
+    const text = textarea?.plainText?.trim() ?? ""
+    const prev = store.custom[store.tab]
+
+    if (!text) {
+      if (prev) {
+        const inputs = [...store.custom]
+        inputs[store.tab] = ""
+        setStore("custom", inputs)
+
+        const answers = [...store.answers]
+        answers[store.tab] = (answers[store.tab] ?? []).filter((x) => x !== prev)
+        setStore("answers", answers)
+      }
+      setStore("editing", false)
+      return
+    }
+
+    if (multi()) {
+      const inputs = [...store.custom]
+      inputs[store.tab] = text
+      setStore("custom", inputs)
+
+      const existing = store.answers[store.tab] ?? []
+      const next = [...existing]
+      if (prev) {
+        const index = next.indexOf(prev)
+        if (index !== -1) next.splice(index, 1)
+      }
+      if (!next.includes(text)) next.push(text)
+      const answers = [...store.answers]
+      answers[store.tab] = next
+      setStore("answers", answers)
+      setStore("editing", false)
+      return
+    }
+
+    pick(text, true)
+    setStore("editing", false)
+  }
+
   const dialog = useDialog()
 
   useKeyboard((evt) => {
     // Skip processing if a dialog (e.g., command palette) is open
     if (dialog.stack.length > 0) return
 
-    // When editing custom answer textarea
+    // When editing custom answer textarea, let the focused textarea own text input,
+    // submit, and editing shortcuts. Parent-level keyboard handling owns only
+    // the option list / confirm tab state.
     if (store.editing && !confirm()) {
-      if (evt.name === "escape") {
-        evt.preventDefault()
-        setStore("editing", false)
-        return
-      }
-      if (keybind.match("input_clear", evt)) {
-        evt.preventDefault()
-        const text = textarea?.plainText ?? ""
-        if (!text) {
-          setStore("editing", false)
-          return
-        }
-        textarea?.setText("")
-        return
-      }
-      if (evt.name === "return") {
-        evt.preventDefault()
-        const text = textarea?.plainText?.trim() ?? ""
-        const prev = store.custom[store.tab]
-
-        if (!text) {
-          if (prev) {
-            const inputs = [...store.custom]
-            inputs[store.tab] = ""
-            setStore("custom", inputs)
-
-            const answers = [...store.answers]
-            answers[store.tab] = (answers[store.tab] ?? []).filter((x) => x !== prev)
-            setStore("answers", answers)
-          }
-          setStore("editing", false)
-          return
-        }
-
-        if (multi()) {
-          const inputs = [...store.custom]
-          inputs[store.tab] = text
-          setStore("custom", inputs)
-
-          const existing = store.answers[store.tab] ?? []
-          const next = [...existing]
-          if (prev) {
-            const index = next.indexOf(prev)
-            if (index !== -1) next.splice(index, 1)
-          }
-          if (!next.includes(text)) next.push(text)
-          const answers = [...store.answers]
-          answers[store.tab] = next
-          setStore("answers", answers)
-          setStore("editing", false)
-          return
-        }
-
-        pick(text, true)
-        setStore("editing", false)
-        return
-      }
-      // Let textarea handle all other keys
       return
     }
 
@@ -398,6 +381,28 @@ export function QuestionPrompt(props: { request: QuestionRequest }) {
                   <Show when={store.editing}>
                     <box paddingLeft={3}>
                       <textarea
+                        onKeyDown={(evt) => {
+                          if (evt.name === "escape") {
+                            evt.preventDefault()
+                            setStore("editing", false)
+                            return
+                          }
+
+                          if (keybind.match("input_clear", evt)) {
+                            evt.preventDefault()
+                            const text = textarea?.plainText ?? ""
+                            if (!text) {
+                              setStore("editing", false)
+                              return
+                            }
+                            textarea?.setText("")
+                            return
+                          }
+                        }}
+                        onSubmit={() => {
+                          // Match the main prompt: let IME composition flush before reading plainText.
+                          setTimeout(() => setTimeout(confirmCustomAnswer, 0), 0)
+                        }}
                         ref={(val: TextareaRenderable) => {
                           textarea = val
                           val.traits = { status: "ANSWER" }
@@ -414,7 +419,6 @@ export function QuestionPrompt(props: { request: QuestionRequest }) {
                         textColor={theme.text}
                         focusedTextColor={theme.text}
                         cursorColor={theme.primary}
-                        keyBindings={bindings()}
                       />
                     </box>
                   </Show>

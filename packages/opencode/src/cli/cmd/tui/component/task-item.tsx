@@ -1,7 +1,10 @@
 import { Show } from "solid-js"
 import { useTheme } from "../context/theme"
 import { useKV } from "../context/kv"
-import "opentui-spinner/solid"
+import { SpinnerRenderable } from "opentui-spinner"
+import { extend } from "@opentui/solid/components"
+
+extend({ spinner: SpinnerRenderable })
 
 // Inlined (not the shared <Spinner>) so the animated glyph occupies exactly
 // one column inside the `[ ]` marker — matching the width and trailing space
