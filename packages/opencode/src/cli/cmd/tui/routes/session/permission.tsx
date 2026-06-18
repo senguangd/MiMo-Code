@@ -8,7 +8,6 @@ import type { PermissionRequest } from "@mimo-ai/sdk/v2"
 import { useSDK } from "../../context/sdk"
 import { SplitBorder } from "../../component/border"
 import { useSync } from "../../context/sync"
-import { useTextareaKeybindings } from "../../component/textarea-keybindings"
 import path from "path"
 import { LANGUAGE_EXTENSIONS } from "@/lsp/language"
 import { Keybind } from "@/util"
@@ -511,7 +510,6 @@ function RejectPrompt(props: { onConfirm: (message: string) => void; onCancel: (
   let input: TextareaRenderable
   const { theme } = useTheme()
   const keybind = useKeybind()
-  const textareaKeybindings = useTextareaKeybindings()
   const dimensions = useTerminalDimensions()
   const narrow = createMemo(() => dimensions().width < 80)
   const dialog = useDialog()
@@ -567,7 +565,6 @@ function RejectPrompt(props: { onConfirm: (message: string) => void; onCancel: (
           textColor={theme.text}
           focusedTextColor={theme.text}
           cursorColor={theme.primary}
-          keyBindings={textareaKeybindings()}
         />
         <box flexDirection="row" gap={2} flexShrink={0}>
           <text fg={theme.text}>

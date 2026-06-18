@@ -1,6 +1,9 @@
 import { BoxRenderable, RGBA, TextareaRenderable, MouseEvent, PasteEvent, decodePasteBytes, TextAttributes } from "@opentui/core"
 import { createEffect, createMemo, onMount, createSignal, onCleanup, on, Show, Switch, Match } from "solid-js"
-import "opentui-spinner/solid"
+import { SpinnerRenderable } from "opentui-spinner"
+import { extend } from "@opentui/solid/components"
+
+extend({ spinner: SpinnerRenderable })
 import path from "path"
 import { fileURLToPath } from "url"
 import { Filesystem } from "@/util"
@@ -41,7 +44,6 @@ import { DialogPrompt } from "../../ui/dialog-prompt"
 import { useToast } from "../../ui/toast"
 import { useKV } from "../../context/kv"
 import { createFadeIn } from "../../util/signal"
-import { useTextareaKeybindings } from "../textarea-keybindings"
 import { DialogSkill } from "../dialog-skill"
 import { DialogWorkspaceCreate, restoreWorkspaceSession } from "../dialog-workspace-create"
 import { DialogWorkspaceUnavailable } from "../dialog-workspace-unavailable"
@@ -376,8 +378,6 @@ export function Prompt(props: PromptProps) {
     }
   }
 
-  const textareaKeybindings = useTextareaKeybindings()
-
   const fileStyleId = syntax().getStyleId("extmark.file")!
   const agentStyleId = syntax().getStyleId("extmark.agent")!
   const pasteStyleId = syntax().getStyleId("extmark.paste")!
@@ -551,7 +551,7 @@ export function Prompt(props: PromptProps) {
       {
         title: t("tui.command.prompt.submit.title"),
         value: "prompt.submit",
-        keybind: "input_submit",
+        keybind: "prompt_submit",
         category: "prompt",
         hidden: true,
         onSelect: async (dialog) => {
@@ -862,7 +862,7 @@ export function Prompt(props: PromptProps) {
         : undefined
     input.traits = {
       capture,
-      suspend: !!props.disabled || store.mode === "shell",
+      suspend: !!props.disabled,
       status: store.mode === "shell" ? "SHELL" : undefined,
     }
   })
@@ -1592,7 +1592,6 @@ export function Prompt(props: PromptProps) {
                 autocomplete.onInput(value)
                 syncExtmarksWithPromptParts()
               }}
-              keyBindings={textareaKeybindings()}
               onKeyDown={async (e) => {
                 if (props.disabled) {
                   e.preventDefault()
@@ -1660,7 +1659,6 @@ export function Prompt(props: PromptProps) {
                     return
                   }
                 }
-                if (store.mode === "normal") autocomplete.onKeyDown(e)
                 if (!autocomplete.visible) {
                   if (
                     (keybind.match("history_previous", e) && input.cursorOffset === 0) ||

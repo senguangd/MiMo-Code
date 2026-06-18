@@ -101,7 +101,6 @@ export function DialogExportOptions(props: DialogExportOptionsProps) {
             })
           }}
           height={3}
-          keyBindings={[{ name: "return", action: "submit" }]}
           ref={(val: TextareaRenderable) => {
             textarea = val
             val.traits = { status: "FILENAME" }

@@ -1,6 +1,5 @@
 import { useDialog } from "@tui/ui/dialog"
 import { DialogSelect, type DialogSelectOption, type DialogSelectRef } from "@tui/ui/dialog-select"
-import { isEditBufferRenderable } from "@opentui/core"
 import {
   createContext,
   createMemo,
@@ -12,9 +11,10 @@ import {
   type Accessor,
   type ParentProps,
 } from "solid-js"
-import { useKeyboard, useRenderer } from "@opentui/solid"
 import { useKeybind } from "@tui/context/keybind"
 import { useLanguage } from "@tui/context/language"
+import { useTuiConfig } from "@tui/context/tui-config"
+import { OPENCODE_BASE_MODE, commandForKeybind, createOpencodeBindingLookup, useBindings } from "../keymap"
 
 const CATEGORY_KEYS: Record<string, string> = {
   session: "tui.command.category.session",
@@ -49,7 +49,7 @@ function init() {
   const dialog = useDialog()
   const keybind = useKeybind()
   const lang = useLanguage()
-  const renderer = useRenderer()
+  const tuiConfig = useTuiConfig()
 
   const localizeCategory = (category: string | undefined) => {
     if (!category) return category
@@ -92,29 +92,51 @@ function init() {
       })),
   )
   const suspended = () => suspendCount() > 0
-  const isTextEditingKey = (evt: Parameters<typeof keybind.match>[1]) =>
-    Object.keys(keybind.all).some(
-      (name) =>
-        (name.startsWith("input_") || name === "history_previous" || name === "history_next") &&
-        keybind.match(name, evt),
-    )
-
-  useKeyboard((evt) => {
+  const bindingLookup = createMemo(() => createOpencodeBindingLookup(tuiConfig))
+  const commandEntries = createMemo(() =>
+    entries().map((option) => ({
+      namespace: "palette",
+      name: option.value,
+      title: option.title,
+      desc: option.description,
+      category: option.category,
+      hidden: option.hidden,
+      enabled: isEnabled(option),
+      run: () => {
+        if (!isEnabled(option)) return
+        option.onSelect?.(dialog)
+      },
+    })),
+  )
+  const showCommandPalette = () => {
     if (suspended()) return
     if (dialog.stack.length > 0) return
-    if (evt.defaultPrevented) return
-    const textInputFocused = isEditBufferRenderable(renderer.currentFocusedRenderable)
-    const textEditingKey = textInputFocused && isTextEditingKey(evt)
-    for (const option of entries()) {
-      if (!isEnabled(option)) continue
-      if (textEditingKey && !option.keybind?.startsWith("input_")) continue
-      if (option.keybind && keybind.match(option.keybind, evt)) {
-        evt.preventDefault()
-        option.onSelect?.(dialog)
-        return
-      }
-    }
-  })
+    dialog.replace(() => <DialogCommand options={visibleOptions()} suggestedOptions={suggestedOptions()} />)
+  }
+
+  useBindings(() => ({
+    commands: commandEntries(),
+  }))
+
+  useBindings(() => ({
+    mode: OPENCODE_BASE_MODE,
+    bindings:
+      suspended() || dialog.stack.length > 0
+        ? []
+        : entries().flatMap((option) => {
+            if (!isEnabled(option)) return []
+            if (!option.keybind) return []
+            // input.submit is handled by registerManagedTextareaLayer and textarea onSubmit.
+            if (option.keybind === "input_submit") return []
+            return bindingLookup().get(commandForKeybind(option.keybind))
+          }),
+  }))
+
+  useBindings(() => ({
+    mode: OPENCODE_BASE_MODE,
+    commands: [{ namespace: "palette", name: "command.palette.show", title: lang.t("tui.command.palette.title"), hidden: true, run: showCommandPalette }],
+    bindings: suspended() || dialog.stack.length > 0 ? [] : bindingLookup().get(commandForKeybind("command_list")),
+  }))
 
   const result = {
     trigger(name: string) {
@@ -147,7 +169,7 @@ function init() {
     },
     suspended,
     show() {
-      dialog.replace(() => <DialogCommand options={visibleOptions()} suggestedOptions={suggestedOptions()} />)
+      showCommandPalette()
     },
     register(cb: () => CommandOption[]) {
       const owner = getOwner() ?? root
@@ -191,20 +213,6 @@ export function useCommandDialog() {
 
 export function CommandProvider(props: ParentProps) {
   const value = init()
-  const dialog = useDialog()
-  const keybind = useKeybind()
-
-  useKeyboard((evt) => {
-    if (value.suspended()) return
-    if (dialog.stack.length > 0) return
-    if (evt.defaultPrevented) return
-    if (keybind.match("command_list", evt)) {
-      evt.preventDefault()
-      value.show()
-      return
-    }
-  })
-
   return <ctx.Provider value={value}>{props.children}</ctx.Provider>
 }
 
