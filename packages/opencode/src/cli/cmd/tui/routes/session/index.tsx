@@ -455,6 +455,34 @@ export function Session() {
     navigate({ ...fullRoute.data, agentID: list[next].actor_id, fromWorkflowRunID: undefined })
   }
 
+  const nestedSessionNavigationEnabled = createMemo(() => currentAgentID() !== "main" || !!session()?.parentID)
+
+  function runNestedSessionNavigation(dialog: DialogContext, action: () => void) {
+    if (!nestedSessionNavigationEnabled()) return
+    action()
+    dialog.clear()
+  }
+
+  function moveParent() {
+    if (fullRoute.data.type === "session" && currentAgentID() !== "main") {
+      // Agent opened FROM a workflow page → back returns to that workflow.
+      if (fromWorkflowRunID()) {
+        navigate({ ...fullRoute.data, agentID: undefined, fromWorkflowRunID: undefined, workflowRunID: fromWorkflowRunID() })
+        return
+      }
+      navigate({ ...fullRoute.data, agentID: undefined })
+      return
+    }
+
+    const parentID = session()?.parentID
+    if (parentID) {
+      navigate({
+        type: "session",
+        sessionID: parentID,
+      })
+    }
+  }
+
   const command = useCommandDialog()
   const t = useLanguage().t
   command.register(() => [
@@ -1095,7 +1123,7 @@ export function Session() {
       keybind: "session_parent",
       category: "session",
       hidden: true,
-      enabled: currentAgentID() !== "main" || !!workflowRunID() || !!session()?.parentID,
+      enabled: nestedSessionNavigationEnabled() || !!workflowRunID(),
       onSelect: (dialog) => {
         // Workflow page → back to the conversation (parallels agentID → main).
         if (fullRoute.data.type === "session" && workflowRunID()) {
@@ -1103,25 +1131,7 @@ export function Session() {
           dialog.clear()
           return
         }
-        // Agent opened FROM a workflow page → back returns to that workflow.
-        if (fullRoute.data.type === "session" && currentAgentID() !== "main" && fromWorkflowRunID()) {
-          navigate({ ...fullRoute.data, agentID: undefined, fromWorkflowRunID: undefined, workflowRunID: fromWorkflowRunID() })
-          dialog.clear()
-          return
-        }
-        if (fullRoute.data.type === "session" && currentAgentID() !== "main") {
-          navigate({ ...fullRoute.data, agentID: undefined })
-          dialog.clear()
-          return
-        }
-        const parentID = session()?.parentID
-        if (parentID) {
-          navigate({
-            type: "session",
-            sessionID: parentID,
-          })
-        }
-        dialog.clear()
+        runNestedSessionNavigation(dialog, moveParent)
       },
     },
     {
@@ -1130,10 +1140,8 @@ export function Session() {
       keybind: "session_child_cycle",
       category: "session",
       hidden: true,
-      onSelect: (dialog) => {
-        moveChild(1)
-        dialog.clear()
-      },
+      enabled: nestedSessionNavigationEnabled(),
+      onSelect: (dialog) => runNestedSessionNavigation(dialog, () => moveChild(1)),
     },
     {
       title: t("tui.command.session.child_previous.title"),
@@ -1141,10 +1149,8 @@ export function Session() {
       keybind: "session_child_cycle_reverse",
       category: "session",
       hidden: true,
-      onSelect: (dialog) => {
-        moveChild(-1)
-        dialog.clear()
-      },
+      enabled: nestedSessionNavigationEnabled(),
+      onSelect: (dialog) => runNestedSessionNavigation(dialog, () => moveChild(-1)),
     },
   ])
 
