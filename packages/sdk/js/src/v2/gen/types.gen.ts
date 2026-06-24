@@ -561,6 +561,7 @@ export type EventSessionError = {
   type: "session.error"
   properties: {
     sessionID?: string
+    messageID?: string
     error?:
       | ProviderAuthError
       | UnknownError

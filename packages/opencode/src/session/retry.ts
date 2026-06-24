@@ -31,9 +31,75 @@ export const RETRY_BACKOFF_FACTOR = 2
 export const RETRY_MAX_DELAY_NO_HEADERS = 30_000 // 30 seconds
 export const RETRY_MAX_DELAY = 2_147_483_647 // max 32-bit signed integer for setTimeout
 
-const NETWORK_ERROR_CODES = new Set(["ECONNRESET", "EPIPE", "ETIMEDOUT"])
 const SSE_TIMEOUT_MESSAGE = "SSE read timed out"
+
+const NETWORK_ERROR_CODES = new Set(["ECONNRESET", "EPIPE", "ETIMEDOUT", "UND_ERR_SOCKET"])
+// Keep these phrase-level. Single words such as "terminated" are too broad and
+// can classify unrelated application errors as transient network failures.
+const NETWORK_ERROR_MESSAGES = [
+  "socket connection was closed unexpectedly",
+  "cannot connect to api",
+  "fetch failed",
+  "connection closed",
+  "other side closed",
+  "network connection lost",
+]
 const RETRYABLE_HTTP_STATUS = new Set([429, 500, 502, 503, 504, 529])
+
+function messageOf(error: unknown) {
+  if (typeof error === "string") return error
+  if (error instanceof Error) return error.message
+  if (!error || typeof error !== "object") return undefined
+
+  const message = (error as { message?: unknown }).message
+  return typeof message === "string" ? message : undefined
+}
+
+function codeOf(error: unknown) {
+  if (!error || typeof error !== "object") return undefined
+
+  const code = (error as { code?: unknown }).code
+  return typeof code === "string" ? code : undefined
+}
+
+function statusOf(error: unknown) {
+  if (!error || typeof error !== "object") return undefined
+
+  // Some providers surface the HTTP status as a numeric string (e.g. "429")
+  // rather than a number — coerce before matching so the 429 path is not missed.
+  const toNum = (value: unknown): number | undefined => {
+    if (typeof value === "number") return value
+    if (typeof value === "string") {
+      const parsed = Number.parseInt(value, 10)
+      return Number.isNaN(parsed) ? undefined : parsed
+    }
+    return undefined
+  }
+
+  const direct = toNum((error as { status?: unknown }).status) ?? toNum((error as { statusCode?: unknown }).statusCode)
+  if (direct !== undefined) return direct
+
+  const response = (error as { response?: unknown }).response
+  if (!response || typeof response !== "object") return undefined
+
+  return toNum((response as { status?: unknown }).status)
+}
+
+function causeOf(error: unknown) {
+  if (!error || typeof error !== "object") return undefined
+  return (error as { cause?: unknown }).cause
+}
+
+function retryableNetworkMessage(message: string) {
+  const lower = message.toLowerCase()
+  if (lower === SSE_TIMEOUT_MESSAGE.toLowerCase()) return true
+  return NETWORK_ERROR_MESSAGES.some((pattern) => lower.includes(pattern))
+}
+
+function retryableRaw(error: unknown) {
+  if (!isRetryableTransientError(error)) return undefined
+  return messageOf(error) ?? "Transient network error"
+}
 
 /**
  * Single source of truth for "is this transient and retryable?".
@@ -46,21 +112,26 @@ const RETRYABLE_HTTP_STATUS = new Set([429, 500, 502, 503, 504, 529])
  * SSE timeouts that one path retried but the other dropped. See Spec ③.
  */
 export function isRetryableTransientError(error: unknown): boolean {
-  if (!(error instanceof Error)) return false
+  const seen = new Set<unknown>()
+  let current: unknown = error
 
-  const status =
-    (error as { status?: number | string }).status ??
-    (error as { statusCode?: number | string }).statusCode ??
-    (error as { response?: { status?: number | string } }).response?.status
-  // Some providers surface the HTTP status as a numeric string (e.g. "429")
-  // rather than a number — coerce before matching so the 429 path is not missed.
-  const statusNum = typeof status === "string" ? Number.parseInt(status, 10) : status
-  if (typeof statusNum === "number" && !Number.isNaN(statusNum) && RETRYABLE_HTTP_STATUS.has(statusNum)) return true
+  while (current && !seen.has(current)) {
+    seen.add(current)
 
-  const code = (error as { code?: string }).code
-  if (typeof code === "string" && NETWORK_ERROR_CODES.has(code)) return true
+    const status = statusOf(current)
+    if (typeof status === "number" && RETRYABLE_HTTP_STATUS.has(status)) return true
 
-  if (error.message === SSE_TIMEOUT_MESSAGE) return true
+    const code = codeOf(current)
+    if (code && NETWORK_ERROR_CODES.has(code)) return true
+
+    const message = messageOf(current)
+    if (message && retryableNetworkMessage(message)) return true
+
+    const cause = causeOf(current)
+    if (!cause || cause === current) break
+
+    current = cause
+  }
 
   return false
 }
@@ -209,8 +280,9 @@ export function policy(opts: {
   return Schedule.fromStepWithMetadata(
     Effect.succeed((meta: Schedule.InputMetadata<unknown>) => {
       const error = opts.parse(meta.input)
-      const message = retryable(error)
+      const message = retryableRaw(meta.input) ?? retryable(error)
       if (!message) return Cause.done(meta.attempt)
+
       return Effect.gen(function* () {
         const wait = delay(meta.attempt, MessageV2.APIError.isInstance(error) ? error : undefined)
         const now = yield* Clock.currentTimeMillis

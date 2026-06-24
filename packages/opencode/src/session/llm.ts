@@ -1,7 +1,7 @@
 import path from "path"
 import { Provider } from "@/provider"
 import { Log } from "@/util"
-import { Context, Duration, Effect, Layer, Record, Schedule, Ref, Cause } from "effect"
+import { Clock, Context, Duration, Effect, Layer, Record, Schedule, Ref, Cause } from "effect"
 import * as Stream from "effect/Stream"
 import { streamText, wrapLanguageModel, type ModelMessage, type Tool, tool, jsonSchema } from "ai"
 import { mergeDeep, pipe } from "remeda"
@@ -194,6 +194,13 @@ export type StreamInput = {
   retries?: number
   toolChoice?: "auto" | "required" | "none"
   agentID?: string
+  onRetry?: (info: {
+    attempt: number
+    maxAttempts: number
+    message: string
+    next: number
+    delay: number
+  }) => Effect.Effect<void>
 }
 
 export type StreamRequest = StreamInput & {
@@ -684,21 +691,36 @@ const live: Layer.Layer<
 
               const publishRetryEvent = (error: unknown, nextAttempt: number) =>
                 Effect.gen(function* () {
+                  const reason = error instanceof Error ? error.message : String(error)
                   log.debug("retry attempt", {
                     sessionID: input.sessionID,
                     messageID: input.user.id,
                     attempt: nextAttempt,
-                    reason: error instanceof Error ? error.message : String(error),
+                    reason,
                   })
                   if (nextAttempt > 10) return
+
                   const delayMs = Math.min(500 * 2 ** (nextAttempt - 1), 300_000)
+                  const now = yield* Clock.currentTimeMillis
+                  const next = now + delayMs
+
+                  if (input.onRetry) {
+                    yield* input.onRetry({
+                      attempt: nextAttempt,
+                      maxAttempts: 10,
+                      message: reason,
+                      next,
+                      delay: delayMs,
+                    })
+                  }
+
                   yield* Effect.promise(() =>
                     Bus.publish(Session.Event.RetryAttempt, {
                       sessionID: SessionID.make(input.sessionID),
                       messageID: input.user.id,
                       attempt: nextAttempt,
                       maxAttempts: 10,
-                      reason: error instanceof Error ? error.message : String(error),
+                      reason,
                       nextDelayMs: delayMs,
                     })
                   )

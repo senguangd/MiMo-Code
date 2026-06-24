@@ -186,7 +186,7 @@ export function Session() {
   })
 
   const lastAssistant = createMemo(() => {
-    return messages().findLast((x) => x.role === "assistant")
+    return messages().findLast((x): x is AssistantMessage => x.role === "assistant")
   })
 
   const dimensions = useTerminalDimensions()
