@@ -1268,7 +1268,11 @@ NOTE: At any point in time through this workflow you should feel free to ask the
         const available = (yield* agents.list()).filter((a) => !a.hidden).map((a) => a.name)
         const hint = available.length ? ` Available agents: ${available.join(", ")}` : ""
         const error = new NamedError.Unknown({ message: `Agent not found: "${task.agent}".${hint}` })
-        yield* bus.publish(Session.Event.Error, { sessionID, error: error.toObject() })
+        yield* bus.publish(Session.Event.Error, {
+          sessionID,
+          messageID: assistantMessage.id,
+          error: error.toObject(),
+        })
         throw error
       }
 
@@ -2111,6 +2115,11 @@ NOTE: At any point in time through this workflow you should feel free to ask the
         let cancelled = false
         let cancelReason: string | undefined
 
+        const contextStatus = (message: string) =>
+          resolvedAgentID === "main"
+            ? status.set(sessionID, { type: "busy" as const, message })
+            : Effect.void
+
         // Fires session.post exactly once via Effect.onExit on the body below.
         // Without this wrapper any yielded failure inside the while loop (provider
         // error, network error, thrown defect) would skip the hook entirely.
@@ -2225,6 +2234,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
             yield* sessions.updateMessage(input.assistant)
             yield* bus.publish(Session.Event.Error, {
               sessionID: input.assistant.sessionID,
+              messageID: input.assistant.id,
               error: input.assistant.error,
             })
             return false
@@ -2467,6 +2477,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
             yield* sessions.updateMessage(input.assistant)
             yield* bus.publish(Session.Event.Error, {
               sessionID: input.assistant.sessionID,
+              messageID: input.assistant.id,
               error: input.assistant.error,
             })
             return false
@@ -2585,6 +2596,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
             yield* sessions.updateMessage(input.assistant)
             yield* bus.publish(Session.Event.Error, {
               sessionID: input.assistant.sessionID,
+              messageID: input.assistant.id,
               error: input.assistant.error,
             })
             return false
@@ -2762,6 +2774,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
           yield* sessions.updateMessage(input.assistant)
           yield* bus.publish(Session.Event.Error, {
             sessionID: input.assistant.sessionID,
+            messageID: input.assistant.id,
             error: input.assistant.error,
           })
         })
@@ -2780,6 +2793,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
           yield* sessions.updateMessage(input.assistant)
           yield* bus.publish(Session.Event.Error, {
             sessionID: input.assistant.sessionID,
+            messageID: input.assistant.id,
             error: input.assistant.error,
           })
         })
@@ -2990,6 +3004,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
             const compactionPart = lastUserMsgForCompaction.parts.find(
               (p): p is MessageV2.CompactionPart => p.type === "compaction",
             )
+            yield* contextStatus(compactionPart?.overflow ? "Compacting context after overflow..." : "Compacting context...")
             const allMsgs = yield* sessions.messages({ sessionID, agentID: lastUser.agentID ?? "main" })
             const result = yield* compaction.process({
               parentID: lastUser.id,
@@ -3149,6 +3164,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
             // main to this subagent path and skip the checkpoint rebuild
             // below. See checkpoint.ts:715 for the matching gate.
             if (lastUser.agentID && lastUser.agentID !== "main") {
+              yield* contextStatus("Compacting subagent context...")
               yield* compaction
                 .create({
                   sessionID,
@@ -3171,6 +3187,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
             // freshest checkpoint. Shared with the manual `/rebuild` command via
             // rebuildFromCheckpoint so logic/boundary conditions can't drift.
             // Falls back to compaction only when no boundary can be produced.
+            yield* contextStatus("Preparing context rebuild...")
             const inserted = yield* rebuildFromCheckpoint({
               sessionID,
               msgs,
@@ -3185,6 +3202,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
 
             // F39: no checkpoint — fall back to compaction (LLM-driven lossy summary).
             // Better than mechanical trim: preserves semantic content via summary.
+            yield* contextStatus("No checkpoint available; compacting context...")
             yield* compaction
               .create({
                 sessionID,
@@ -3713,6 +3731,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
               yield* slog.warn("degraded final on abnormal finish", { finish: handle.message.finish })
             if (result === "stop") return "break" as const
             if (!isBoundedComputation && result === "overflow") {
+              yield* contextStatus("Recovering from context overflow...")
               // Subagent overflow → per-actor compaction. Insert a boundary
               // tagged with the subagent's agent_id; the next runLoop iteration
               // will see a trimmed context (filterCompactedEffect stops at
@@ -3720,6 +3739,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
               // Gate must exclude "main" — see comment at the matching gate
               // earlier in this file (~line 1716) and at checkpoint.ts:715.
               if (lastUser.agentID && lastUser.agentID !== "main") {
+                yield* contextStatus("Compacting subagent context after overflow...")
                 yield* compaction
                   .create({
                     sessionID,
@@ -3738,6 +3758,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
               // rebuildFromCheckpoint (does not block on the writer; uses the
               // on-disk checkpoint). Fall back to compaction only when no
               // boundary can be produced.
+              yield* contextStatus("Preparing context rebuild...")
               const inserted2 = yield* rebuildFromCheckpoint({
                 sessionID,
                 msgs,
@@ -3745,9 +3766,13 @@ NOTE: At any point in time through this workflow you should feel free to ask the
                 agent: lastUser.agent,
                 model: { providerID: model.providerID, id: model.id },
               })
-              if (inserted2) return "continue" as const
+              if (inserted2) {
+                yield* contextStatus("Rebuilding context from checkpoint...")
+                return "continue" as const
+              }
 
               // F39: no checkpoint — fall back to compaction (LLM-driven lossy summary).
+              yield* contextStatus("No checkpoint available; compacting context after overflow...")
               yield* compaction
                 .create({
                   sessionID,

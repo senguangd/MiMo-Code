@@ -2,7 +2,7 @@ import { render, TimeToFirstDraw, useKeyboard, useRenderer, useTerminalDimension
 import * as Clipboard from "@tui/util/clipboard"
 import * as Selection from "@tui/util/selection"
 import { createCliRenderer, MouseButton, type CliRendererConfig } from "@opentui/core"
-import { RouteProvider, useRoute } from "@tui/context/route"
+import { RouteProvider, useCurrentAgentID, useRoute } from "@tui/context/route"
 import {
   Switch,
   Match,
@@ -229,6 +229,7 @@ function App(props: { onSnapshot?: () => Promise<string[]> }) {
   const tuiConfig = useTuiConfig()
   const plainTerminal = isPlainTerminal()
   const route = useRoute()
+  const currentAgentID = useCurrentAgentID()
   const dimensions = useTerminalDimensions()
   const renderer = useRenderer()
   const dialog = useDialog()
@@ -247,6 +248,84 @@ function App(props: { onSnapshot?: () => Promise<string[]> }) {
   const lang = useLanguage()
   const t = lang.t
   const routes: RouteMap = new Map()
+  const SESSION_ERROR_TOAST_DEDUP_MS = 10_000
+  const SESSION_ERROR_TOAST_CACHE_LIMIT = 256
+  const sessionErrorToastSeen = new Map<string, number>()
+
+  function shouldShowSessionErrorToast(input: {
+    sessionID?: string
+    messageID?: string
+    errorName: string
+    message: string
+  }) {
+    if (input.sessionID && route.data.type === "session" && route.data.sessionID === input.sessionID) {
+      const messages = (sync.data.message[input.sessionID]?.[currentAgentID()] ?? [])
+        .toSorted((a, b) => {
+          if (a.time.created !== b.time.created) return a.time.created - b.time.created
+          return a.id.localeCompare(b.id)
+        })
+
+      if (input.messageID) {
+        // Suppress only when the exact message is already visible inline in the
+        // currently rendered transcript. Do not suppress merely because
+        // messageID exists: some session.error events are not backed by
+        // assistantMessage.error yet, and subagent buckets may not be visible.
+        const hasInlineErrorForMessage = messages.some((msg) => {
+          if (msg.id !== input.messageID) return false
+          if (msg.role !== "assistant") return false
+          if (!msg.error || msg.error.name === "MessageAbortedError") return false
+          return msg.error.name === input.errorName
+        })
+
+        if (hasInlineErrorForMessage) return false
+      } else {
+        // Backwards-compatible fallback for older servers / external event
+        // producers that do not include messageID yet.
+        const latestUser = messages.findLast((msg) => msg.role === "user")
+
+        const hasCurrentInlineError = messages.some((msg) => {
+          if (msg.role !== "assistant") return false
+          if (!msg.error || msg.error.name === "MessageAbortedError") return false
+          if (!latestUser) return true
+
+          if (latestUser.time.created !== msg.time.created) {
+            return latestUser.time.created < msg.time.created
+          }
+
+          return latestUser.id < msg.id
+        })
+
+        if (hasCurrentInlineError) {
+          return false
+        }
+      }
+    }
+
+    const key = input.messageID
+      ? `${input.sessionID ?? "global"}:${input.messageID}:${input.errorName}`
+      : `${input.sessionID ?? "global"}:${input.errorName}:${input.message}`
+
+    const now = Date.now()
+    const seenAt = sessionErrorToastSeen.get(key)
+    if (seenAt && now - seenAt < SESSION_ERROR_TOAST_DEDUP_MS) return false
+    sessionErrorToastSeen.set(key, now)
+
+    if (sessionErrorToastSeen.size > SESSION_ERROR_TOAST_CACHE_LIMIT) {
+      const cutoff = now - SESSION_ERROR_TOAST_DEDUP_MS
+      for (const [seenKey, seenTime] of sessionErrorToastSeen) {
+        if (seenTime < cutoff) sessionErrorToastSeen.delete(seenKey)
+      }
+
+      // If every entry was recent, still cap growth deterministically.
+      if (sessionErrorToastSeen.size > SESSION_ERROR_TOAST_CACHE_LIMIT) {
+        const first = sessionErrorToastSeen.keys().next().value
+        if (first) sessionErrorToastSeen.delete(first)
+      }
+    }
+
+    return true
+  }
+
   const [routeRev, setRouteRev] = createSignal(0)
   const routeView = (name: string) => {
     routeRev()
@@ -1022,8 +1101,18 @@ function App(props: { onSnapshot?: () => Promise<string[]> }) {
 
   event.on("session.error", (evt) => {
     const error = evt.properties.error
-    if (error && typeof error === "object" && error.name === "MessageAbortedError") return
+    if (!error || error.name === "MessageAbortedError") return
     const message = errorMessage(error)
+    if (
+      !shouldShowSessionErrorToast({
+        sessionID: evt.properties.sessionID,
+        messageID: evt.properties.messageID,
+        errorName: error.name,
+        message,
+      })
+    ) {
+      return
+    }
 
     toast.show({
       variant: "error",

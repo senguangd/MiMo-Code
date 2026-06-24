@@ -207,6 +207,91 @@ export const layer: Layer.Layer<
         textNgramRepeat: false,
       }
       let aborted = false
+      let halted = false
+      let retryStatusActive = false
+      let busyStatusActive = false
+
+
+      const clearPublishedStatusFlags = () => {
+        retryStatusActive = false
+        busyStatusActive = false
+      }
+
+      const resetAttemptState = () => {
+        ctx.currentText = undefined
+        ctx.reasoningMap = {}
+        ctx.stepPartIds = []
+        ctx.toolcalls = {}
+        ctx.stepStartedAt = undefined
+        ctx.firstTokenAt = undefined
+      }
+
+
+      const publishBusyStatus = Effect.fn("SessionProcessor.publishBusyStatus")(function* (
+        message?: string,
+        opts?: { force?: boolean; recoveredFromRetry?: boolean },
+      ) {
+        if (!isMain) return
+
+        // Avoid spamming identical busy status updates for every token.
+        // The important transition is retry -> busy once forward progress resumes.
+        if (!opts?.force && busyStatusActive && !retryStatusActive) return
+
+        retryStatusActive = false
+        busyStatusActive = true
+
+        yield* status.set(ctx.sessionID, {
+          type: "busy",
+          ...(message ? { message } : {}),
+          messageID: ctx.assistantMessage.id,
+          ...(opts?.recoveredFromRetry ? { recoveredFromRetry: true } : {}),
+        })
+      })
+
+      const publishRetryStatus = Effect.fn("SessionProcessor.publishRetryStatus")(function* (info: {
+        attempt: number
+        message: string
+        next: number
+      }) {
+        if (!isMain) return
+
+        retryStatusActive = true
+        busyStatusActive = false
+
+        yield* status.set(ctx.sessionID, {
+          type: "retry",
+          attempt: info.attempt,
+          message: info.message,
+          next: info.next,
+          messageID: ctx.assistantMessage.id,
+        })
+      })
+
+      const beginAttempt = Effect.fn("SessionProcessor.beginAttempt")(function* () {
+        // Effect.retry re-runs only the inner attempt body; beginRun() is outside
+        // that retry boundary. Without this, a retry banner published after a
+        // socket failure remains visible during the next attempt's connection
+        // handshake / AI-SDK internal retries / early stream setup.
+        resetAttemptState()
+
+        // Do NOT clear retry here. A retry attempt has merely started; the
+        // network may still be down, or AI SDK may still be inside its own
+        // connection/retry loop. Keep the retry footer visible until the stream
+        // proves recovery by emitting start/text/reasoning/tool progress.
+      })
+
+      const rollbackAttemptParts = Effect.fn("SessionProcessor.rollbackAttemptParts")(function* () {
+        for (const partId of ctx.stepPartIds) {
+          yield* session.removePart({
+            sessionID: ctx.sessionID,
+            messageID: ctx.assistantMessage.id,
+            partID: partId,
+          })
+        }
+
+        resetAttemptState()
+      })
+
       // Only the main agent owns session-level status. Subagents (explore,
       // general, checkpoint-writer, etc.) share the parent sessionID but their
       // run-state onIdle deliberately does NOT reset status (run-state.ts) — so
@@ -214,6 +299,101 @@ export const layer: Layer.Layer<
       // and the TUI spinner stays spinning after the main agent has finished.
       const isMain = !ctx.assistantMessage.agentID || ctx.assistantMessage.agentID === "main"
       const slog = log.clone().tag("session.id", input.sessionID).tag("messageID", input.assistantMessage.id)
+
+      const isRetryRecoveryEvent = (value: StreamEvent) => {
+        // Do not treat lifecycle events such as start/start-step/text-start as
+        // recovery. Those can happen before any bytes from the model arrive.
+        // A retry footer should disappear only after real assistant progress.
+        switch (value.type) {
+          case "text-delta":
+          case "reasoning-delta":
+            return typeof value.text === "string" && value.text.length > 0
+
+          case "tool-input-delta":
+          case "tool-call":
+          case "tool-result":
+          case "source":
+          case "file":
+            return true
+
+          default:
+            return false
+        }
+      }
+
+      const isRetryWaitingEvent = (value: StreamEvent) => {
+        // These events mean a new stream/attempt has started, but they do not
+        // prove the model has produced useful output. Keep the previous
+        // transport error visible, but downgrade it to the grey busy footer.
+        switch (value.type) {
+          case "start":
+          case "start-step":
+          case "text-start":
+          case "reasoning-start":
+          case "tool-input-start":
+            return true
+          default:
+            return false
+        }
+      }
+
+      const unwrapTransportRetryMessage = (message: string) => {
+        const lastError = message.match(/(?:^|[\s.])Last error:\s*([\s\S]+)$/i)?.[1]
+        if (lastError) return lastError.trim()
+
+        return message
+          .replace(/^Failed after\s+\d+\s+attempts?\.\s*/i, "")
+          .trim()
+      }
+
+      const publishRetryAsBusyMessage = Effect.fn("SessionProcessor.publishRetryAsBusyMessage")(function* () {
+        if (!isMain) return
+
+        const current = yield* status.get(ctx.sessionID)
+        if (current.type !== "retry") return
+        if (current.messageID && current.messageID !== ctx.assistantMessage.id) return
+
+        yield* status.set(ctx.sessionID, {
+          type: "busy",
+          message: unwrapTransportRetryMessage(current.message),
+          messageID: ctx.assistantMessage.id,
+        })
+      })
+
+      const beginRun = Effect.fn("SessionProcessor.beginRun")(function* (opts?: { textNgram?: boolean }) {
+        // `create()` returns one long-lived handle that can execute multiple
+        // process/replay passes for tool-use loops and max-mode replay. Keep
+        // all per-run latches here so a previous abort/halt cannot leak into
+        // the next successful pass.
+        aborted = false
+        halted = false
+        clearPublishedStatusFlags()
+
+        const hadTerminalState =
+          !!ctx.assistantMessage.error || !!ctx.assistantMessage.time.completed
+
+        ctx.assistantMessage.error = undefined
+        ctx.assistantMessage.time.completed = undefined
+        ctx.needsOverflowHandling = false
+        ctx.blocked = false
+        resetAttemptState()
+        ctx.textNgramRepeat = false
+        ctx.textNgramMonitor = opts?.textNgram ? createTextNgramMonitor() : undefined
+
+        // The TUI renders assistantMessage.error as an inline ErrorBlock.
+        // Clearing it only in memory means a recovered/retried run can stream
+        // fresh text while the UI still sees the old terminal error until
+        // cleanup() runs at the very end. Publish the reset before any part
+        // delta is emitted so "streaming" and "terminal error" are mutually
+        // exclusive from the user's point of view.
+        if (hadTerminalState) {
+          yield* session.updateMessage(ctx.assistantMessage)
+        }
+
+        // New run has started. Do not let a stale retry status from a previous
+        // socket failure remain visible while the next answer is streaming.
+        yield* publishBusyStatus()
+      })
 
       const parse = (e: unknown) =>
         MessageV2.fromError(e, {
@@ -324,9 +504,18 @@ export const layer: Layer.Layer<
       }
 
       const handleEvent = Effect.fnUntraced(function* (value: StreamEvent) {
+        // Retry means "network/provider has not recovered yet".
+        // Clear it only when the stream actually proves recovery by emitting
+        // real assistant progress. In particular, "start" is not enough: it can
+        // fire before the network request succeeds.
+        if (isMain && isRetryRecoveryEvent(value)) {
+          yield* publishBusyStatus(undefined, { force: true, recoveredFromRetry: true })
+        } else if (isMain && isRetryWaitingEvent(value)) {
+          yield* publishRetryAsBusyMessage()
+        }
+
         switch (value.type) {
           case "start":
-            if (isMain) yield* status.set(ctx.sessionID, { type: "busy" })
             return
 
           case "reasoning-start":
@@ -675,40 +864,51 @@ export const layer: Layer.Layer<
           })
         }
         ctx.toolcalls = {}
+        // Clear stale error from previous failed attempts if the effect
+        // ultimately succeeded (halt was never called). Without this, the
+        // error set by a transient failure persists on the message even
+        // after a successful retry, causing a phantom ErrorBlock in the TUI.
+        if (!halted) ctx.assistantMessage.error = undefined
         ctx.assistantMessage.time.completed = Date.now()
         yield* session.updateMessage(ctx.assistantMessage)
+        clearPublishedStatusFlags()
       })
 
       const halt = Effect.fn("SessionProcessor.halt")(function* (e: unknown) {
+        halted = true
         slog.error("process", { error: errorMessage(e), stack: e instanceof Error ? e.stack : undefined })
         const error = parse(e)
         if (MessageV2.ContextOverflowError.isInstance(error)) {
           ctx.needsOverflowHandling = true
-          yield* bus.publish(Session.Event.Error, { sessionID: ctx.sessionID, error })
+          yield* bus.publish(Session.Event.Error, { sessionID: ctx.sessionID, messageID: ctx.assistantMessage.id, error })
           return
         }
         ctx.assistantMessage.error = error
         yield* bus.publish(Session.Event.Error, {
           sessionID: ctx.assistantMessage.sessionID,
+          messageID: ctx.assistantMessage.id,
           error: ctx.assistantMessage.error,
         })
-        if (isMain) yield* status.set(ctx.sessionID, { type: "idle" })
+        clearPublishedStatusFlags()
       })
 
       const process = Effect.fn("SessionProcessor.process")(function* (streamInput: LLM.StreamInput) {
         slog.info("process")
-        ctx.needsOverflowHandling = false
+        yield* beginRun({ textNgram: true })
         ctx.shouldBreak = (yield* config.get()).experimental?.continue_loop_on_deny !== true
 
         return yield* Effect.gen(function* () {
           yield* Effect.gen(function* () {
-            ctx.currentText = undefined
-            ctx.reasoningMap = {}
-            ctx.stepPartIds = []
-            ctx.toolcalls = {}
-            ctx.textNgramRepeat = false
-            ctx.textNgramMonitor = createTextNgramMonitor()
-            const stream = llm.stream(streamInput)
+            yield* beginAttempt()
+            const stream = llm.stream({
+              ...streamInput,
+              onRetry: (info) =>
+                publishRetryStatus({
+                  attempt: info.attempt,
+                  message: info.message,
+                  next: info.next,
+                }),
+            })
 
             yield* stream.pipe(
               Stream.tap((event) => handleEvent(event)),
@@ -730,28 +930,13 @@ export const layer: Layer.Layer<
             ),
             Effect.tapError(() =>
               Effect.gen(function* () {
-                for (const partId of ctx.stepPartIds) {
-                  yield* session.removePart({
-                    sessionID: ctx.sessionID,
-                    messageID: ctx.assistantMessage.id,
-                    partID: partId,
-                  })
-                }
-                ctx.stepPartIds = []
+                yield* rollbackAttemptParts()
               }),
             ),
             Effect.retry(
               SessionRetry.policy({
                 parse,
-                set: (info) =>
-                  isMain
-                    ? status.set(ctx.sessionID, {
-                        type: "retry",
-                        attempt: info.attempt,
-                        message: info.message,
-                        next: info.next,
-                      })
-                    : Effect.void,
+                set: (info) => publishRetryStatus(info),
               }),
             ),
             Effect.catch(halt),
@@ -767,7 +952,7 @@ export const layer: Layer.Layer<
 
       const replay = Effect.fn("SessionProcessor.replay")(function* (input: ReplayInput) {
         slog.info("replay", { toolCalls: input.toolCalls.length, finish: input.finishReason })
-        ctx.needsOverflowHandling = false
+        yield* beginRun()
         ctx.shouldBreak = (yield* config.get()).experimental?.continue_loop_on_deny !== true
 
         const ctrl = new AbortController()
@@ -780,9 +965,6 @@ export const layer: Layer.Layer<
 
         return yield* Effect.gen(function* () {
           yield* Effect.gen(function* () {
-            ctx.currentText = undefined
-            ctx.reasoningMap = {}
-
             // Mirror a real model call: start → start-step → reasoning → text →
             // (tool-input-start → tool-call → execute → tool-result)* → finish-step
             yield* handleEvent({ type: "start" } as StreamEvent)
