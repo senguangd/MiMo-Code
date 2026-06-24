@@ -258,6 +258,7 @@ export const Event = {
     z.object({
       sessionID: SessionID.zod.optional(),
       // z.lazy defers access to break circular dep: session → message-v2 → provider → plugin → session
+      messageID: MessageID.zod.optional(),
       error: z.lazy(() => MessageV2.Assistant.shape.error),
     }),
   ),
