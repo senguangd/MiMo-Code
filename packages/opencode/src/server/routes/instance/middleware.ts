@@ -9,6 +9,7 @@ import { Flag } from "@/flag/flag"
 import { Filesystem } from "@/util"
 import { Global } from "@/global"
 import path from "node:path"
+import { isAllowedRoot } from "@/server/allowed-root"
 
 export function InstanceMiddleware(workspaceID?: WorkspaceID): MiddlewareHandler {
   return async (c, next) => {
@@ -33,7 +34,7 @@ export function InstanceMiddleware(workspaceID?: WorkspaceID): MiddlewareHandler
         Flag.MIMOCODE_EXPERIMENTAL_ORCHESTRATOR
           ? Filesystem.resolve(path.join(Global.Path.data, "orchestrator"))
           : undefined
-      if (!Filesystem.contains(cwd, directory) && directory !== orchestrator) {
+      if (!Filesystem.contains(cwd, directory) && !isAllowedRoot(directory) && directory !== orchestrator) {
         return c.json({ error: "Access denied: directory must be within the server's working directory" }, 403)
       }
     }
