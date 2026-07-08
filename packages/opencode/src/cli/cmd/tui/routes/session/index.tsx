@@ -1987,15 +1987,21 @@ function ReasoningHeader(props: {
 function TextPart(props: { last: boolean; part: TextPart; message: AssistantMessage }) {
   const ctx = use()
   const { theme, syntax } = useTheme()
+  const content = createMemo(() => props.part.text)
+  const hasContent = createMemo(() => content().trim().length > 0)
+  const isStreaming = createMemo(() => props.last && !props.message.time.completed)
+  const renderContent = createMemo(() => (isStreaming() ? content() : content().trim()))
+
   return (
-    <Show when={props.part.text.trim()}>
+    <Show when={hasContent()}>
       <box id={"text-" + props.part.id} paddingLeft={3} marginTop={1} flexShrink={0}>
         <Switch>
           <Match when={Flag.MIMOCODE_EXPERIMENTAL_MARKDOWN}>
             <markdown
               syntaxStyle={syntax()}
-              streaming={true}
-              content={props.part.text.trim()}
+              streaming={isStreaming()}
+              internalBlockMode={isStreaming() ? "top-level" : "coalesced"}
+              content={renderContent()}
               conceal={ctx.conceal()}
               fg={theme.markdownText}
               bg={theme.background}
@@ -2005,9 +2011,9 @@ function TextPart(props: { last: boolean; part: TextPart; message: AssistantMess
             <code
               filetype="markdown"
               drawUnstyledText={false}
-              streaming={true}
+              streaming={isStreaming()}
               syntaxStyle={syntax()}
-              content={props.part.text.trim()}
+              content={renderContent()}
               conceal={ctx.conceal()}
               fg={theme.text}
             />
