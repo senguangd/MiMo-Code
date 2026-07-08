@@ -18,6 +18,7 @@ import { useEvent } from "@tui/context/event"
 import { MessageID, PartID } from "@/session/schema"
 import { createStore, produce, unwrap } from "solid-js/store"
 import { useKeybind } from "@tui/context/keybind"
+import { parseInlineGoalCommand } from "./inline-goal"
 import { usePromptHistory, type PromptInfo } from "./history"
 import { assign, expandPlaceholders } from "./part"
 import { usePromptStash } from "./stash"
@@ -1114,6 +1115,7 @@ export function Prompt(props: PromptProps) {
     const currentMode = store.mode
     const variant = local.model.variant.current()
 
+    const inlineGoalCommand = parseInlineGoalCommand(inputText)
     const clientSlash = inputText.startsWith("/")
       ? command.slashes().find((s) => s.display === inputText.trim())
       : undefined
@@ -1147,6 +1149,22 @@ export function Prompt(props: PromptProps) {
           })
     } else if (clientSlash) {
       clientSlash.onSelect?.()
+    } else if (inlineGoalCommand && sync.data.command.some((x) => x.name === inlineGoalCommand.command)) {
+      void sdk.client.session.command({
+        sessionID,
+        command: inlineGoalCommand.command,
+        arguments: inlineGoalCommand.arguments,
+        agent: agent.name,
+        model: `${selectedModel.providerID}/${selectedModel.modelID}`,
+        messageID,
+        variant,
+        parts: nonTextParts
+          .filter((x) => x.type === "file")
+          .map((x) => ({
+            id: PartID.ascending(),
+            ...x,
+          })),
+      })
     } else if (
       inputText.startsWith("/") &&
       iife(() => {
