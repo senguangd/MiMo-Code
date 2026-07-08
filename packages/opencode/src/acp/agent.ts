@@ -44,6 +44,7 @@ import { Installation } from "@/installation"
 import { MessageV2 } from "@/session/message-v2"
 import { Config } from "@/config"
 import { ConfigMCP } from "@/config/mcp"
+import { allowRoot } from "@/server/allowed-root"
 import { z } from "zod"
 import { LoadAPIKeyError } from "ai"
 import type { AssistantMessage, Event, OpencodeClient, SessionMessageResponse, ToolPart } from "@mimo-ai/sdk/v2"
@@ -545,6 +546,7 @@ export class Agent implements ACPAgent {
 
   async newSession(params: NewSessionRequest) {
     const directory = params.cwd
+    allowRoot(directory)
     try {
       const model = await defaultModel(this.config, directory)
 
@@ -581,6 +583,7 @@ export class Agent implements ACPAgent {
   async loadSession(params: LoadSessionRequest) {
     const directory = params.cwd
     const sessionId = params.sessionId
+    allowRoot(directory)
 
     try {
       const model = await defaultModel(this.config, directory)
@@ -651,6 +654,9 @@ export class Agent implements ACPAgent {
 
   async listSessions(params: ListSessionsRequest): Promise<ListSessionsResponse> {
     try {
+      if (params.cwd) {
+        allowRoot(params.cwd)
+      }
       const cursor = params.cursor ? Number(params.cursor) : undefined
       const limit = 100
 
@@ -697,6 +703,7 @@ export class Agent implements ACPAgent {
   async unstable_forkSession(params: ForkSessionRequest): Promise<ForkSessionResponse> {
     const directory = params.cwd
     const mcpServers = params.mcpServers ?? []
+    allowRoot(directory)
 
     try {
       const model = await defaultModel(this.config, directory)
