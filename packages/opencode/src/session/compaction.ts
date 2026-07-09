@@ -21,6 +21,36 @@ import { fn } from "@/util/fn"
 
 const log = Log.create({ service: "session.compaction" })
 
+function overflowFallbackSummary(input: {
+  messages: MessageV2.WithParts[]
+  summarized: MessageV2.WithParts[]
+  tailStartID?: MessageID
+  replay?: { info: MessageV2.User; parts: MessageV2.Part[] }
+}) {
+  const userTurns = input.messages.filter(
+    (msg) => msg.info.role === "user" && !msg.parts.some((part) => part.type === "compaction"),
+  ).length
+  const assistantTurns = input.messages.filter((msg) => msg.info.role === "assistant").length
+
+  return [
+    "## Compaction fallback",
+    "",
+    "The previous conversation was too large for the configured compaction model to summarize safely.",
+    "MiMoCode preserved continuity by installing this deterministic fallback summary instead of stopping the session.",
+    "",
+    "## What was preserved",
+    "",
+    `- Session database still contains the full original conversation history (${input.messages.length} messages: ${userTurns} user turns, ${assistantTurns} assistant turns).`,
+    `- The compaction attempt covered ${input.summarized.length} older messages before falling back.`,
+    input.tailStartID
+      ? `- Recent turns starting at user message ${input.tailStartID} are marked to be kept verbatim by the existing preserved-tail mechanism.`
+      : "- No separate preserved-tail boundary was selected; continue from the latest live context after this fallback marker.",
+    input.replay
+      ? `- The interrupted user turn ${input.replay.info.id} will be replayed after this fallback so the task can continue.`
+      : "- If important older details are missing, recover them from project files, memory, task/checkpoint files, or ask the user for the specific missing detail.",
+  ].join("\n")
+}
+
 export const Event = {
   Compacted: BusEvent.define(
     "session.compacted",
@@ -367,7 +397,7 @@ export const layer: Layer.Layer<
         sessionID: input.sessionID,
         model,
       })
-      const result = yield* processor.process({
+      let result = yield* processor.process({
         user: userMessage,
         agent,
         sessionID: input.sessionID,
@@ -384,14 +414,36 @@ export const layer: Layer.Layer<
       })
 
       if (result === "overflow") {
-        processor.message.error = new MessageV2.ContextOverflowError({
-          message: replay
-            ? "Conversation history too large to compact - exceeds model context limit"
-            : "Session too large to compact - context exceeds model limit even after stripping media",
-        }).toObject()
-        processor.message.finish = "error"
+        const now = Date.now()
+        yield* session.updatePart({
+          id: PartID.ascending(),
+          messageID: processor.message.id,
+          sessionID: input.sessionID,
+          type: "text",
+          text: overflowFallbackSummary({
+            messages: input.messages,
+            summarized: selected.head,
+            tailStartID: selected.tail_start_id,
+            replay,
+          }),
+          time: { start: now, end: now },
+        } satisfies MessageV2.TextPart)
+        processor.message.finish = "stop"
         yield* session.updateMessage(processor.message)
-        return "stop"
+
+        // Treat deterministic fallback as a successful compaction boundary:
+        // do not delete DB history; just let the existing tail/replay/autocontinue
+        // path continue from a smaller model-visible context.
+        result = "continue"
+
+        log.warn("compaction overflowed; installed deterministic fallback summary", {
+          sessionID: input.sessionID,
+          agentID: input.agentID ?? "main",
+          messages: input.messages.length,
+          summarized: selected.head.length,
+          tailStartID: selected.tail_start_id,
+          replay: replay?.info.id,
+        })
       }
 
       if (result === "text-repeat") return "stop"
