@@ -14,7 +14,7 @@ import {
 import { useKeybind } from "@tui/context/keybind"
 import { useLanguage } from "@tui/context/language"
 import { useTuiConfig } from "@tui/context/tui-config"
-import { OPENCODE_BASE_MODE, commandForKeybind, createOpencodeBindingLookup, useBindings } from "../keymap"
+import { OPENCODE_BASE_MODE, commandForKeybind, createOpencodeBindingLookup, formatKey, useBindings } from "../keymap"
 
 const CATEGORY_KEYS: Record<string, string> = {
   session: "tui.command.category.session",
@@ -46,6 +46,7 @@ function init() {
   const root = getOwner()
   const [registrations, setRegistrations] = createSignal<Accessor<CommandOption[]>[]>([])
   const [suspendCount, setSuspendCount] = createSignal(0)
+  const [reservedKeys, setReservedKeys] = createSignal(new Map<string, number>())
   const dialog = useDialog()
   const keybind = useKeybind()
   const lang = useLanguage()
@@ -92,6 +93,24 @@ function init() {
       })),
   )
   const suspended = () => suspendCount() > 0
+  const normalizeKey = (key: string) => key.trim().toLowerCase()
+  const reservedKeySet = createMemo(() => new Set(reservedKeys().keys()))
+  const updateReservedKeys = (keys: readonly string[], delta: 1 | -1) => {
+    setReservedKeys((current) => {
+      const next = new Map(current)
+
+      for (const raw of keys) {
+        const key = normalizeKey(raw)
+        const count = (next.get(key) ?? 0) + delta
+
+        if (count <= 0) next.delete(key)
+        else next.set(key, count)
+      }
+
+      return next
+    })
+  }
+
   const bindingLookup = createMemo(() => createOpencodeBindingLookup(tuiConfig))
   const commandEntries = createMemo(() =>
     entries().map((option) => ({
@@ -128,7 +147,9 @@ function init() {
             if (!option.keybind) return []
             // input.submit is handled by registerManagedTextareaLayer and textarea onSubmit.
             if (option.keybind === "input_submit") return []
-            return bindingLookup().get(commandForKeybind(option.keybind))
+            return bindingLookup()
+              .get(commandForKeybind(option.keybind))
+              .filter((binding) => !reservedKeySet().has(normalizeKey(formatKey(binding.key))))
           }),
   }))
 
@@ -166,6 +187,16 @@ function init() {
     },
     keybinds(enabled: boolean) {
       setSuspendCount((count) => count + (enabled ? -1 : 1))
+    },
+    reserveKeys(keys: readonly string[]) {
+      updateReservedKeys(keys, 1)
+
+      let released = false
+      return () => {
+        if (released) return
+        released = true
+        updateReservedKeys(keys, -1)
+      }
     },
     suspended,
     show() {
