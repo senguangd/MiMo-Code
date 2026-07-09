@@ -259,6 +259,22 @@ export function Autocomplete(props: {
     }
   }
 
+  function replaceTrigger(text: string) {
+    const input = props.input()
+    const end = input.logicalCursor
+    input.cursorOffset = store.index
+    const start = input.logicalCursor
+
+    input.deleteRange(start.row, start.col, end.row, end.col)
+    if (text) input.insertText(text)
+
+    // onContentChange is async; client slash commands such as /clear may
+    // navigate immediately, so keep the prompt store in sync before onSelect.
+    props.setPrompt((draft) => {
+      draft.input = input.plainText
+    })
+  }
+
   const [files] = createResource(
     () => search(),
     async (query) => {
@@ -407,7 +423,13 @@ export function Autocomplete(props: {
   )
 
   const commands = createMemo((): AutocompleteOption[] => {
-    const results: AutocompleteOption[] = [...command.slashes()]
+    const results: AutocompleteOption[] = command.slashes().map((item) => ({
+      ...item,
+      onSelect: () => {
+        replaceTrigger("")
+        item.onSelect?.()
+      },
+    }))
 
     const isCompose = local.agent.current()?.name === "compose"
     const skills = skillMap()
@@ -425,18 +447,7 @@ export function Autocomplete(props: {
         onSelect: () => {
           const input = props.input()
           const needsSpace = charAfterCursor(props.value, input.cursorOffset) !== " "
-          const append = "/" + serverCommand.name + (needsSpace ? " " : "")
-
-          // clearTriggerRange() already deleted the token and set cursor to store.index,
-          // so start === end here (no-op delete). Kept for robustness if called from other paths.
-          const currentCursorOffset = input.cursorOffset
-          input.cursorOffset = store.index
-          const startCursor = input.logicalCursor
-          input.cursorOffset = currentCursorOffset
-          const endCursor = input.logicalCursor
-
-          input.deleteRange(startCursor.row, startCursor.col, endCursor.row, endCursor.col)
-          input.insertText(append)
+          replaceTrigger("/" + serverCommand.name + (needsSpace ? " " : ""))
         },
       })
     }
@@ -626,16 +637,10 @@ export function Autocomplete(props: {
     })
   }
 
+  // Dismissal only hides the menu. Accepting an item owns any intentional input
+  // replacement, so Escape is safe while slash-command selections still consume
+  // or replace the active trigger text.
   function hide() {
-    const text = props.input().plainText
-    if (store.visible === "/" && !text.endsWith(" ") && text.startsWith("/")) {
-      const cursor = props.input().logicalCursor
-      props.input().deleteRange(0, 0, cursor.row, cursor.col)
-      // Sync the prompt store immediately since onContentChange is async
-      props.setPrompt((draft) => {
-        draft.input = props.input().plainText
-      })
-    }
     setStore("visible", false)
   }
 
