@@ -448,16 +448,16 @@ export function Prompt(props: PromptProps) {
       },
     ),
   )
-  // While a ghost suggestion is showing, suspend global command keybinds so Tab
-  // reaches the textarea's onKeyDown (where we accept it) instead of being
-  // consumed by the agent-cycle keybind. Global keyboard handlers run before
-  // renderable handlers, so without this the suggestion can never be accepted.
-  // The cleanup resumes keybinds on any dismissal (typing, accept, submit,
-  // session change, status leaving idle).
+  // Ghost suggestions are inline input affordances, not modal UI. Reserve only
+  // the keys owned by the prompt itself so Tab/Escape reach onKeyDown, while
+  // app-level shortcuts such as Ctrl+P, F-keys, and leader sequences keep
+  // working.
   createEffect(() => {
     if (!ghost()) return
-    command.keybinds(false)
-    onCleanup(() => command.keybinds(true))
+
+    const releaseReservedKeys = command.reserveKeys(["tab", "escape"])
+
+    onCleanup(releaseReservedKeys)
   })
 
   const usage = createMemo(() => {
