@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test"
 import path from "path"
 import { Effect } from "effect"
 import { Agent } from "../../src/agent/agent"
+import type { Provider } from "../../src/provider"
 import { Instance } from "../../src/project/instance"
 import { SystemPrompt } from "../../src/session/system"
 import { provideInstance, tmpdir } from "../fixture/fixture"
@@ -11,6 +12,22 @@ function load<A>(dir: string, fn: (svc: Agent.Interface) => Effect.Effect<A>) {
 }
 
 describe("session.system", () => {
+  test("uses the dedicated prompt for grcbank/grcb-router-flash", () => {
+    const grcbank = SystemPrompt.provider({
+      providerID: "grcbank",
+      api: { id: "grcb-router-flash" },
+    } as Provider.Model)
+    const fallback = SystemPrompt.provider({
+      providerID: "other",
+      api: { id: "grcb-router-flash" },
+    } as Provider.Model)
+
+    expect(grcbank).toHaveLength(1)
+    expect(grcbank[0]).toContain("smallest complete change")
+    expect(grcbank[0]).not.toContain("Claude Code")
+    expect(grcbank[0]).not.toBe(fallback[0])
+  })
+
   test("skills output is sorted by name and stable across calls", async () => {
     await using tmp = await tmpdir({
       git: true,
