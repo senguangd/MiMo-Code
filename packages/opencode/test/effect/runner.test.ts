@@ -190,7 +190,7 @@ describe("Runner", () => {
     }),
   )
 
-  test("cancel does not deadlock when replacement work starts before interrupted run exits", async () => {
+  test("interrupt acknowledges before interrupted work exits and allows replacement work", async () => {
     function defer() {
       let resolve!: () => void
       const promise = new Promise<void>((done) => {
@@ -220,15 +220,18 @@ describe("Runner", () => {
       const a = Effect.runPromiseExit(runner.ensureRunning(first))
       await Bun.sleep(10)
 
-      const stop = Effect.runPromise(runner.cancel)
+      const stop = Effect.runPromise(runner.interrupt)
       await Promise.race([hit.promise, fail(250, "cancel did not interrupt running work")])
+      await Promise.race([stop, fail(250, "interrupt waited for interrupted work cleanup")])
+
+      const repeated = Effect.runPromise(runner.interrupt)
+      await Promise.race([repeated, fail(250, "repeated interrupt waited for interrupted work cleanup")])
+      expect(runner.busy).toBe(false)
 
       const b = Effect.runPromise(runner.ensureRunning(Effect.promise(() => done.promise).pipe(Effect.as("second"))))
       expect(runner.busy).toBe(true)
 
       hold.resolve()
-      await Promise.race([stop, fail(250, "cancel deadlocked while replacement run was active")])
-
       expect(runner.busy).toBe(true)
       done.resolve()
       expect(await b).toBe("second")
@@ -391,24 +394,41 @@ describe("Runner", () => {
   )
 
   it.live(
-    "cancel during shell_then_run cancels both",
+    "interrupt during shell_then_run acknowledges before shell cleanup and cancels queued run",
     Effect.gen(function* () {
       const s = yield* Scope.Scope
       const runner = Runner.make<string>(s)
+      const cleanup = yield* Deferred.make<void>()
+      const interrupted = yield* Deferred.make<void>()
 
-      const sh = yield* runner.startShell(Effect.never.pipe(Effect.as("aborted"))).pipe(Effect.forkChild)
-      yield* Effect.sleep("10 millis")
+      return yield* Effect.gen(function* () {
+        const sh = yield* runner
+          .startShell(
+            Effect.never.pipe(
+              Effect.onInterrupt(() => Deferred.succeed(interrupted, undefined).pipe(Effect.asVoid)),
+              Effect.ensuring(Deferred.await(cleanup)),
+              Effect.as("aborted"),
+            ),
+          )
+          .pipe(Effect.forkChild)
+        yield* Effect.sleep("10 millis")
 
-      const run = yield* runner.ensureRunning(Effect.succeed("y")).pipe(Effect.forkChild)
-      yield* Effect.sleep("10 millis")
-      expect(runner.state._tag).toBe("ShellThenRun")
+        const run = yield* runner.ensureRunning(Effect.succeed("y")).pipe(Effect.forkChild)
+        yield* Effect.sleep("10 millis")
+        expect(runner.state._tag).toBe("ShellThenRun")
 
-      yield* runner.cancel
-      expect(runner.busy).toBe(false)
+        const stop = yield* runner.interrupt.pipe(Effect.forkChild)
+        const stopExit = yield* Fiber.await(stop).pipe(Effect.timeout("250 millis"))
+        expect(Exit.isSuccess(stopExit)).toBe(true)
+        expect(yield* Deferred.isDone(interrupted)).toBe(true)
+        expect(runner.busy).toBe(false)
 
-      yield* Fiber.await(sh)
-      const exit = yield* Fiber.await(run)
-      expect(Exit.isFailure(exit)).toBe(true)
+        const exit = yield* Fiber.await(run)
+        expect(Exit.isFailure(exit)).toBe(true)
+
+        yield* Deferred.succeed(cleanup, undefined)
+        yield* Fiber.await(sh)
+      }).pipe(Effect.ensuring(Deferred.succeed(cleanup, undefined).pipe(Effect.ignore)))
     }),
   )
 
