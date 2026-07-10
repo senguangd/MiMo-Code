@@ -4,6 +4,7 @@ import { Instance } from "../project/instance"
 
 import PROMPT_ANTHROPIC from "./prompt/anthropic.txt"
 import PROMPT_DEFAULT from "./prompt/default.txt"
+import PROMPT_GRCBANK from "./prompt/grcbank.txt"
 import PROMPT_BEAST from "./prompt/beast.txt"
 import PROMPT_GEMINI from "./prompt/gemini.txt"
 import PROMPT_GPT from "./prompt/gpt.txt"
@@ -21,6 +22,7 @@ import { Permission } from "@/permission"
 import { Skill } from "@/skill"
 
 export function provider(model: Provider.Model) {
+  if (model.providerID === "grcbank" && model.api.id === "grcb-router-flash") return [PROMPT_GRCBANK]
   if (model.api.id.includes("gpt-4") || model.api.id.includes("o1") || model.api.id.includes("o3"))
     return [PROMPT_BEAST]
   if (model.api.id.includes("gpt")) {
