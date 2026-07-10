@@ -91,11 +91,11 @@ export const layer = Layer.effect(
       const key = runnerKey(sessionID, "main")
       const data = yield* InstanceState.get(state)
       const existing = data.runners.get(key)
-      if (!existing || !existing.busy) {
+      if (!existing) {
         yield* status.set(sessionID, { type: "idle" })
         return
       }
-      yield* existing.cancel
+      yield* existing.interrupt
     })
 
     const cancelActor = Effect.fn("SessionRunState.cancelActor")(function* (

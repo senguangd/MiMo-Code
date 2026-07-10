@@ -1,11 +1,12 @@
 import { afterEach, describe, expect, test } from "bun:test"
-import { Effect } from "effect"
+import { Deferred, Effect, Exit, Fiber } from "effect"
 import { Hono } from "hono"
 import { ErrorMiddleware } from "../../src/server/middleware"
 import { Server } from "../../src/server/server"
 import { Instance } from "../../src/project/instance"
 import { Session } from "../../src/session"
 import { SessionRunState } from "../../src/session/run-state"
+import { SessionStatus } from "../../src/session/status"
 import { AppRuntime } from "../../src/effect/app-runtime"
 import { Log } from "../../src/util"
 import { tmpdir } from "../fixture/fixture"
@@ -142,5 +143,66 @@ describe("POST /session/:sessionID/message busy-runner behavior", () => {
     expect(result.firstStatus).toBe(409)
     expect(result.abortStatus).toBe(200)
     expect(result.secondStatus).not.toBe(409)
+  })
+
+  test("POST /:sessionID/abort acknowledges before interrupted cleanup completes", async () => {
+    await using tmp = await tmpdir({})
+
+    const result = await Instance.provide({
+      directory: tmp.path,
+      fn: async () =>
+        AppRuntime.runPromise(
+          Effect.gen(function* () {
+            const sessions = yield* Session.Service
+            const sess = yield* sessions.create({ title: "abort-cleanup test" })
+            const state = yield* SessionRunState.Service
+            const status = yield* SessionStatus.Service
+            const cleanup = yield* Deferred.make<void>()
+            const interrupted = yield* Deferred.make<void>()
+
+            return yield* Effect.gen(function* () {
+              const shell = yield* state
+                .startShell(
+                  sess.id,
+                  Effect.succeed({ info: {}, parts: [] } as never),
+                  Effect.never.pipe(
+                    Effect.onInterrupt(() => Deferred.succeed(interrupted, undefined).pipe(Effect.asVoid)),
+                    Effect.ensuring(Deferred.await(cleanup)),
+                  ) as never,
+                )
+                .pipe(Effect.forkChild)
+              yield* Effect.sleep("50 millis")
+
+              const app = Server.Default().app
+              const dirQuery = `?directory=${encodeURIComponent(tmp.path)}`
+              const abort = yield* Effect.promise(async () =>
+                app.request(`/session/${sess.id}/abort${dirQuery}`, { method: "POST" }),
+              ).pipe(Effect.forkChild)
+              const abortExit = yield* Fiber.await(abort).pipe(Effect.timeout("1 second"))
+              const current = yield* status.get(sess.id)
+              const interruptionDelivered = yield* Deferred.isDone(interrupted)
+
+              const repeated = yield* Effect.promise(async () =>
+                app.request(`/session/${sess.id}/abort${dirQuery}`, { method: "POST" }),
+              )
+
+              yield* Deferred.succeed(cleanup, undefined)
+              yield* Fiber.await(shell)
+
+              return {
+                abortStatus: abortExit && Exit.isSuccess(abortExit) ? abortExit.value.status : undefined,
+                repeatedStatus: repeated.status,
+                sessionStatus: current.type,
+                interruptionDelivered,
+              }
+            }).pipe(Effect.ensuring(Deferred.succeed(cleanup, undefined).pipe(Effect.ignore)))
+          }),
+        ),
+    })
+
+    expect(result.abortStatus).toBe(200)
+    expect(result.repeatedStatus).toBe(200)
+    expect(result.sessionStatus).toBe("idle")
+    expect(result.interruptionDelivered).toBe(true)
   })
 })
