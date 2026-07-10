@@ -161,7 +161,7 @@ describe("installation", () => {
       const layer = testLayer(
         () => jsonResponse({}),
         (cmd, args) => {
-          if (cmd === "curl" && args.includes("https://mimocode.cnbj1.mi-fds.com/mimocode/mimocode/releases/latest"))
+          if (cmd === "curl" && args.includes("https://cli.adp.grcbtest/releases/latest"))
             return "v0.1.1\n"
           return ""
         },
