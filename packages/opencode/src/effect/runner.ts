@@ -5,6 +5,9 @@ export interface Runner<A, E = never> {
   readonly busy: boolean
   readonly ensureRunning: (work: Effect.Effect<A, E>) => Effect.Effect<A, E>
   readonly startShell: (work: Effect.Effect<A, E>) => Effect.Effect<A, E>
+  /** Releases the runner after delivering interruption; cleanup remains scope-owned. */
+  readonly interrupt: Effect.Effect<void>
+  /** Interrupts the runner and waits for cleanup to finish. */
   readonly cancel: Effect.Effect<void>
 }
 
@@ -100,7 +103,15 @@ export const make = <A, E = never>(
       }),
     ).pipe(Effect.flatten)
 
-  const stopShell = (shell: ShellHandle<A, E>) => Fiber.interrupt(shell.fiber)
+  const stop = (fiber: Fiber.Fiber<A, E>, wait: boolean) =>
+    wait
+      ? Fiber.interrupt(fiber)
+      : Fiber.interrupt(fiber).pipe(
+          Effect.forkIn(scope, { startImmediately: true }),
+          Effect.asVoid,
+        )
+
+  const stopShell = (shell: ShellHandle<A, E>, wait: boolean) => stop(shell.fiber, wait)
 
   const ensureRunning = (work: Effect.Effect<A, E>) =>
     SynchronizedRef.modifyEffect(
@@ -163,38 +174,42 @@ export const make = <A, E = never>(
       }),
     ).pipe(Effect.flatten)
 
-  const cancel = SynchronizedRef.modify(ref, (st) => {
-    switch (st._tag) {
-      case "Idle":
-        return [Effect.void, st] as const
-      case "Running":
-        return [
-          Effect.gen(function* () {
-            yield* Fiber.interrupt(st.run.fiber)
-            yield* Deferred.await(st.run.done).pipe(Effect.exit, Effect.asVoid)
-            yield* idleIfCurrent()
-          }),
-          { _tag: "Idle" } as const,
-        ] as const
-      case "Shell":
-        return [
-          Effect.gen(function* () {
-            yield* stopShell(st.shell)
-            yield* idleIfCurrent()
-          }),
-          { _tag: "Idle" } as const,
-        ] as const
-      case "ShellThenRun":
-        return [
-          Effect.gen(function* () {
-            yield* Deferred.fail(st.run.done, new Cancelled()).pipe(Effect.asVoid)
-            yield* stopShell(st.shell)
-            yield* idleIfCurrent()
-          }),
-          { _tag: "Idle" } as const,
-        ] as const
-    }
-  }).pipe(Effect.flatten)
+  const cancel = (wait: boolean) => {
+    const result = SynchronizedRef.modify(ref, (st) => {
+      switch (st._tag) {
+        case "Idle":
+          return [Effect.void, st] as const
+        case "Running":
+          return [
+            Effect.gen(function* () {
+              yield* stop(st.run.fiber, wait)
+              if (wait) yield* Deferred.await(st.run.done).pipe(Effect.exit, Effect.asVoid)
+              yield* idleIfCurrent()
+            }),
+            { _tag: "Idle" } as const,
+          ] as const
+        case "Shell":
+          return [
+            Effect.gen(function* () {
+              yield* stopShell(st.shell, wait)
+              yield* idleIfCurrent()
+            }),
+            { _tag: "Idle" } as const,
+          ] as const
+        case "ShellThenRun":
+          return [
+            Effect.gen(function* () {
+              yield* Deferred.fail(st.run.done, new Cancelled()).pipe(Effect.asVoid)
+              yield* stopShell(st.shell, wait)
+              yield* idleIfCurrent()
+            }),
+            { _tag: "Idle" } as const,
+          ] as const
+      }
+    }).pipe(Effect.flatten)
+    if (wait) return result
+    return result.pipe(Effect.uninterruptible)
+  }
 
   return {
     get state() {
@@ -205,6 +220,7 @@ export const make = <A, E = never>(
     },
     ensureRunning,
     startShell,
-    cancel,
+    interrupt: cancel(false),
+    cancel: cancel(true),
   }
 }
