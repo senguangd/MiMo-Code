@@ -228,6 +228,14 @@ export function Session() {
     if (sidebar() === "auto" && wide()) return true
     return false
   })
+  const toggleSidebar = () => {
+    batch(() => {
+      const isVisible = sidebarVisible()
+      setSidebar(() => (isVisible ? "hide" : "auto"))
+      setSidebarOpen(!isVisible)
+    })
+  }
+
   const showTimestamps = createMemo(() => timestamps() === "show")
   const contentWidth = createMemo(() => dimensions().width - (sidebarVisible() ? 42 : 0) - 4)
   const providers = createMemo(() => Model.index(sync.data.provider))
@@ -731,11 +739,7 @@ export function Session() {
       keybind: "sidebar_toggle",
       category: "session",
       onSelect: (dialog) => {
-        batch(() => {
-          const isVisible = sidebarVisible()
-          setSidebar(() => (isVisible ? "hide" : "auto"))
-          setSidebarOpen(!isVisible)
-        })
+        toggleSidebar()
         dialog.clear()
       },
     },
@@ -1393,17 +1397,8 @@ export function Session() {
           </Show>
           <Toast />
         </box>
-        <Show when={wide() || sidebarVisible()}>
-          <SidebarToggleButton
-            visible={sidebarVisible()}
-            onToggle={() => {
-              batch(() => {
-                const isVisible = sidebarVisible()
-                setSidebar(() => (isVisible ? "hide" : "auto"))
-                setSidebarOpen(!isVisible)
-              })
-            }}
-          />
+        <Show when={wide()}>
+          <SidebarToggleButton visible={sidebarVisible()} onToggle={toggleSidebar} />
         </Show>
         <Show when={sidebarVisible()}>
           <Switch>
@@ -1417,9 +1412,11 @@ export function Session() {
                 left={0}
                 right={0}
                 bottom={0}
-                alignItems="flex-end"
+                flexDirection="row"
+                justifyContent="flex-end"
                 backgroundColor={RGBA.fromInts(0, 0, 0, 70)}
               >
+                <SidebarToggleButton visible={true} onToggle={toggleSidebar} />
                 <Sidebar sessionID={route.sessionID} />
               </box>
             </Match>
