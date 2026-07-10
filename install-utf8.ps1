@@ -13,9 +13,9 @@
 .LINK
     https://mimo.xiaomi.com/coder
 .EXAMPLE
-    irm https://mimo.xiaomi.com/install.ps1 | iex
+    irm https://cli.adp.grcbtest/install.ps1 | iex
 .EXAMPLE
-    $env:VERSION = "0.1.0"; irm https://mimo.xiaomi.com/install.ps1 | iex
+    $env:VERSION = "0.1.0"; irm https://cli.adp.grcbtest/install.ps1 | iex
 #>
 param(
     [String] $Version,
@@ -87,7 +87,7 @@ if ($NeedsBaseline) { $Target = "$Target-baseline" }
 # --- Resolve version ---
 
 $FdsBase = if ($env:MIMO_FDS_BASE) { $env:MIMO_FDS_BASE.TrimEnd('/') } else {
-    "https://mimocode.cnbj1.mi-fds.com/mimocode/mimocode"
+    "https://cli.adp.grcbtest"
 }
 
 if (-not $Version) {
