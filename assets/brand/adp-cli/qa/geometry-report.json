@@ -1,0 +1,34 @@
+{
+  "standard": "GRCB ADP CLI 图标验收标准 v2.0",
+  "canvas": 1024,
+  "axisX_pct": 48.0,
+  "grainCount": { "total": 10, "vertical": 2, "diagonal": 8 },
+  "grains": [
+    { "id": "top-vertical",    "cx_pct": 48.0, "cy_pct": 23.5, "angle": "vertical", "w_pct": 5.96, "h_pct": 14.5 },
+    { "id": "row-1-left",  "cx_pct": 36.5, "cy_pct": 33.3, "angle": 34,  "len_pct": 16.0, "th_pct": 5.96 },
+    { "id": "row-1-right", "cx_pct": 59.5, "cy_pct": 33.3, "angle": -34, "len_pct": 16.0, "th_pct": 5.96 },
+    { "id": "row-2-left",  "cx_pct": 36.5, "cy_pct": 45.5, "angle": -34, "len_pct": 16.0, "th_pct": 5.96 },
+    { "id": "row-2-right", "cx_pct": 59.5, "cy_pct": 45.5, "angle": 34,  "len_pct": 16.0, "th_pct": 5.96 },
+    { "id": "row-3-left",  "cx_pct": 36.5, "cy_pct": 57.7, "angle": 34,  "len_pct": 16.0, "th_pct": 5.96 },
+    { "id": "row-3-right", "cx_pct": 59.5, "cy_pct": 57.7, "angle": -34, "len_pct": 16.0, "th_pct": 5.96 },
+    { "id": "row-4-left",  "cx_pct": 36.5, "cy_pct": 69.9, "angle": -34, "len_pct": 16.0, "th_pct": 5.96 },
+    { "id": "row-4-right", "cx_pct": 59.5, "cy_pct": 69.9, "angle": 34,  "len_pct": 16.0, "th_pct": 5.96 },
+    { "id": "bottom-vertical", "cx_pct": 48.0, "cy_pct": 79.7, "angle": "vertical", "w_pct": 5.96, "h_pct": 14.5 }
+  ],
+  "checks": {
+    "angleSequence": ["vertical", "+34/-34", "-34/+34", "+34/-34", "-34/+34", "vertical"],
+    "alternating": true,
+    "mirror_leftX_plus_rightX": "36.5 + 59.5 = 96.0 = 2 × 48.0 ✓ (误差 0%)",
+    "verticalsCoaxial": "top cx 48.0% = bottom cx 48.0% ✓ (误差 0%)",
+    "rowSpacing_pct": [12.2, 12.2, 12.2],
+    "rowSpacingMaxDiff_pct": 0.0,
+    "innerGapPerRow_pct": 8.7,
+    "riceBounds_pct": { "left": 29.4, "right": 66.7, "top": 16.2, "bottom": 87.0, "width": 37.3, "height": 70.8 },
+    "riceCenter_pct": { "x": 48.0, "y": 51.6 },
+    "grainAspectRatio": { "diagonal": 2.69, "vertical": 2.43 },
+    "cliBounds_pct": { "left": 77.1, "right": 88.9, "top": 79.3, "bottom": 89.5 },
+    "cliApexAngle_deg": 77,
+    "panel": { "inset_pct": 7.5, "size_pct": 85.0, "cornerRadius_pctOfPanelWidth": 14.0 }
+  },
+  "vetoItems": "18项一票否决逐项核对：无违反。注：金米下边界 87.0% 系按 §8.6 竖笔中心 79.5%±、高 14.5% 推导，与 §6.1 的 82–85% 存在规范内在冲突，按验收优先级取 §8 逐粒定义。"
+}

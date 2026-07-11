@@ -1,0 +1,24 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
+
+  <defs>
+    <rect id="grain-diagonal" x="-82" y="-30.5" width="164" height="61" rx="30.5"></rect>
+    <rect id="grain-vertical" x="-30.5" y="-74.25" width="61" height="148.5" rx="30.5"></rect>
+  </defs>
+  <rect id="background" width="1024" height="1024" fill="#07627B"></rect>
+  <g id="gold-rice" fill="#F5C428">
+    <g id="top-unit">
+      <use id="top-vertical" href="#grain-vertical" transform="translate(491.5 240.6)"></use>
+      <use id="row-1-left" href="#grain-diagonal" transform="translate(373.8 341) rotate(34)"></use>
+      <use id="row-1-right" href="#grain-diagonal" transform="translate(609.3 341) rotate(-34)"></use>
+      <use id="row-2-left" href="#grain-diagonal" transform="translate(373.8 466) rotate(-34)"></use>
+      <use id="row-2-right" href="#grain-diagonal" transform="translate(609.3 466) rotate(34)"></use>
+    </g>
+    <g id="bottom-unit">
+      <use id="row-3-left" href="#grain-diagonal" transform="translate(373.8 591) rotate(34)"></use>
+      <use id="row-3-right" href="#grain-diagonal" transform="translate(609.3 591) rotate(-34)"></use>
+      <use id="row-4-left" href="#grain-diagonal" transform="translate(373.8 716) rotate(-34)"></use>
+      <use id="row-4-right" href="#grain-diagonal" transform="translate(609.3 716) rotate(34)"></use>
+      <use id="bottom-vertical" href="#grain-vertical" transform="translate(491.5 816.4)"></use>
+    </g>
+  </g>
+</svg>

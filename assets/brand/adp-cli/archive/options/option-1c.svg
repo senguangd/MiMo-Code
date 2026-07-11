@@ -1,0 +1,32 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
+  <defs>
+    <linearGradient id="goldGrad" x1="0" y1="0" x2="0.25" y2="1">
+      <stop offset="0" stop-color="#FFD95C"></stop>
+      <stop offset="0.55" stop-color="#F5BE1B"></stop>
+      <stop offset="1" stop-color="#E19E0A"></stop>
+    </linearGradient>
+    <g id="grain-d"><rect x="-82" y="-30.5" width="164" height="61" rx="30.5"></rect></g>
+    <g id="grain-v"><rect x="-30.5" y="-74.25" width="61" height="148.5" rx="30.5"></rect></g>
+  </defs>
+  <rect id="glass-panel" x="76.8" y="76.8" width="870.4" height="870.4" rx="150" fill="#FFFFFF"></rect>
+  <rect id="tile-edge" x="78.3" y="78.3" width="867.4" height="867.4" rx="148.5" fill="none" stroke="#0E4F63" stroke-opacity="0.08" stroke-width="3"></rect>
+  <g id="gold-rice" fill="url(#goldGrad)">
+    <g id="top-unit">
+      <use id="top-vertical" href="#grain-v" transform="translate(491.5 240.6)"></use>
+      <use id="row-1-left" href="#grain-d" transform="translate(373.8 341) rotate(34)"></use>
+      <use id="row-1-right" href="#grain-d" transform="translate(609.3 341) rotate(-34)"></use>
+      <use id="row-2-left" href="#grain-d" transform="translate(373.8 466) rotate(-34)"></use>
+      <use id="row-2-right" href="#grain-d" transform="translate(609.3 466) rotate(34)"></use>
+    </g>
+    <g id="bottom-unit">
+      <use id="row-3-left" href="#grain-d" transform="translate(373.8 591) rotate(34)"></use>
+      <use id="row-3-right" href="#grain-d" transform="translate(609.3 591) rotate(-34)"></use>
+      <use id="row-4-left" href="#grain-d" transform="translate(373.8 716) rotate(-34)"></use>
+      <use id="row-4-right" href="#grain-d" transform="translate(609.3 716) rotate(34)"></use>
+      <use id="bottom-vertical" href="#grain-v" transform="translate(491.5 816.4)"></use>
+    </g>
+  </g>
+  <g id="cli-prompt" fill="none" stroke="#0E4F63" stroke-linecap="round" stroke-linejoin="round">
+    <path id="greater-than" d="M732 686 L842 760 L732 834" stroke-width="61"></path>
+    <path id="underscore" d="M806 868 L864 868" stroke-width="50"></path>
+  </g></svg>
