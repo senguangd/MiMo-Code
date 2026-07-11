@@ -1,6 +1,7 @@
 #!/usr/bin/env bun
 
 import { $ } from "bun"
+import { dlopen, ptr } from "bun:ffi"
 import fs from "fs"
 import path from "path"
 import { fileURLToPath } from "url"
@@ -18,6 +19,34 @@ import { Script } from "@mimo-ai/script"
 import pkg from "../package.json"
 
 const BINARY_PREFIX = "mimocode"
+
+function removeStaleBunIconGroup(executable: string) {
+  const kernel = dlopen("kernel32.dll", {
+    BeginUpdateResourceW: { args: ["ptr", "i32"], returns: "ptr" },
+    UpdateResourceW: { args: ["ptr", "usize", "ptr", "u32", "ptr", "u32"], returns: "i32" },
+    EndUpdateResourceW: { args: ["ptr", "i32"], returns: "i32" },
+    GetLastError: { args: [], returns: "u32" },
+  })
+  const file = Buffer.from(executable + "\0", "utf16le")
+  const name = Buffer.from("IDI_MYICON\0", "utf16le")
+  const fail = (message: string, error = kernel.symbols.GetLastError()) => {
+    kernel.close()
+    throw new Error(`${message}: Windows error ${error}`)
+  }
+  const handle = kernel.symbols.BeginUpdateResourceW(ptr(file), 0)
+
+  if (!handle) fail(`Failed to open ${executable} resources`)
+
+  if (kernel.symbols.UpdateResourceW(handle, 14, ptr(name), 0x0409, null, 0) === 0) {
+    const error = kernel.symbols.GetLastError()
+    kernel.symbols.EndUpdateResourceW(handle, 1)
+    fail("Failed to remove Bun's stale icon group", error)
+  }
+
+  if (kernel.symbols.EndUpdateResourceW(handle, 0) === 0) fail(`Failed to save ${executable} resources`)
+
+  kernel.close()
+}
 
 // Load migrations from migration directories
 const migrationDirs = (
@@ -244,7 +273,13 @@ for (const item of targets) {
       target: name.replace(BINARY_PREFIX, "bun") as any,
       outfile: `dist/${name}/bin/mimo`,
       execArgv: [`--user-agent=mimocode/${Script.version}`, "--use-system-ca", "--"],
-      windows: {},
+      ...(item.os === "win32"
+        ? {
+            windows: {
+              icon: path.resolve(dir, "../../assets/brand/adp-cli/platform/windows/icon.ico"),
+            },
+          }
+        : {}),
     },
     files: embeddedFileMap ? { "opencode-web-ui.gen.ts": embeddedFileMap } : {},
     entrypoints: ["./src/index.ts", parserWorker, workerPath, ...(embeddedFileMap ? ["opencode-web-ui.gen.ts"] : [])],
@@ -257,6 +292,15 @@ for (const item of targets) {
       OPENCODE_LIBC: item.os === "linux" ? `'${item.abi ?? "glibc"}'` : "",
     },
   })
+
+  // Bun 1.3.14 adds the supplied multi-size ICO as group 0 but leaves the
+  // runtime's single-frame IDI_MYICON group in place. Windows prefers that
+  // stale group and scales the 256px frame instead of selecting optimized
+  // sizes. Remove only the stale group; Bun's six new RT_ICON resources and
+  // group 0 remain authoritative.
+  if (item.os === "win32") {
+    removeStaleBunIconGroup(path.resolve(dir, `dist/${name}/bin/mimo.exe`))
+  }
 
   // Smoke test: only run if binary is for current platform
   if (item.os === process.platform && item.arch === process.arch && !item.abi) {
