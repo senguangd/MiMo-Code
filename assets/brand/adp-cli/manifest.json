@@ -1,0 +1,28 @@
+{
+  "product": "adp-cli",
+  "canvas": 1024,
+  "provenance": {
+    "archive": "Logo vector file request.zip",
+    "sha256": "e3a298775f469ea9c87dff68b9dbb6c0a5a1f1dd83501c7666a41e5b843a0ec0",
+    "designVersion": "2.1"
+  },
+  "masters": {
+    "large": "source/icon-large.svg",
+    "small": "source/icon-small.svg",
+    "transparent": "source/mark-transparent.svg",
+    "flat": "source/mark-flat.svg"
+  },
+  "renditions": {
+    "1024": "large",
+    "512": "large",
+    "256": "large",
+    "128": "large",
+    "64": "small",
+    "48": "small",
+    "32": "small",
+    "24": "small",
+    "20": "small",
+    "16": "supplied-raster"
+  },
+  "windowsIco": [256, 64, 48, 32, 24, 16]
+}
