@@ -29,6 +29,13 @@ export const Info = z
       // network/provider is still failing. Only a busy status emitted after real
       // stream progress may clear a retry for the same message.
       recoveredFromRetry: z.boolean().optional(),
+      context: z
+        .object({
+          input: z.number(),
+          output: z.number(),
+          limit: z.number(),
+        })
+        .optional(),
     }),
   ])
   .meta({
@@ -82,6 +89,9 @@ export const layer = Layer.effect(
     const set = Effect.fn("SessionStatus.set")(function* (sessionID: SessionID, status: Info) {
       const data = yield* InstanceState.get(state)
       const current = data.get(sessionID)
+      if (status.type === "busy" && current?.type === "busy" && !status.context && current.context) {
+        status = { ...status, context: current.context }
+      }
 
       // Retry is sticky for its owning message. Generic busy updates from
       // run-state/onBusy, beginRun, lifecycle events, or reconnect bookkeeping

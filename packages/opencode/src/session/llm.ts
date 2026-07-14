@@ -3,7 +3,7 @@ import { Provider } from "@/provider"
 import { Log } from "@/util"
 import { Clock, Context, Duration, Effect, Layer, Record, Schedule, Ref, Cause } from "effect"
 import * as Stream from "effect/Stream"
-import { streamText, wrapLanguageModel, type ModelMessage, type Tool, tool, jsonSchema } from "ai"
+import { APICallError, streamText, wrapLanguageModel, type ModelMessage, type Tool, tool, jsonSchema } from "ai"
 import { mergeDeep, pipe } from "remeda"
 import { GitLabWorkflowLanguageModel } from "gitlab-ai-provider"
 import { ProviderTransform } from "@/provider"
@@ -18,6 +18,8 @@ import { PermissionID } from "@/permission/schema"
 import { Bus } from "@/bus"
 import { Wildcard, ToolCompat } from "@/util"
 import { asSchema } from "@ai-sdk/provider-utils"
+import { convertToOpenAICompatibleChatMessages, prepareTools } from "@ai-sdk/openai-compatible/internal"
+import type { LanguageModelV3CallOptions } from "@ai-sdk/provider"
 import { SessionID } from "@/session/schema"
 import * as Session from "@/session/session"
 import { migrateProjectMemory } from "./checkpoint-paths"
@@ -36,6 +38,80 @@ import { isRetryableTransientError } from "./retry"
 const log = Log.create({ service: "llm" })
 export const OUTPUT_TOKEN_MAX = ProviderTransform.OUTPUT_TOKEN_MAX
 type Result = Awaited<ReturnType<typeof streamText>>
+
+export type ContextUsage = {
+  input: number
+  output: number
+  limit: number
+}
+
+const unsupportedTokenCounters = new Set<string>()
+
+function tokenCounterURL(baseURL: string) {
+  const url = new URL(baseURL)
+  const root = url.pathname.replace(/\/+$/, "").replace(/\/v1$/, "")
+  url.pathname = `${root}/utils/token_counter`
+  url.search = "call_endpoint=true"
+  return url
+}
+
+async function countInputTokens(input: {
+  provider: Provider.Info
+  model: Provider.Model
+  params: LanguageModelV3CallOptions
+  requestHeaders?: Record<string, string>
+}) {
+  if (!input.model.api.npm.includes("openai-compatible")) return
+  const baseURL = input.provider.options["baseURL"] ?? input.model.api.url
+  if (typeof baseURL !== "string" || !baseURL) return
+
+  const url = tokenCounterURL(baseURL)
+  const key = `${url}:${input.model.api.id}`
+  if (unsupportedTokenCounters.has(key)) return
+
+  const headers = new Headers({ "content-type": "application/json" })
+  const configuredHeaders = input.provider.options["headers"]
+  if (configuredHeaders && typeof configuredHeaders === "object" && !Array.isArray(configuredHeaders)) {
+    for (const [name, value] of Object.entries(configuredHeaders)) {
+      if (typeof value === "string") headers.set(name, value)
+    }
+  }
+  for (const [name, value] of Object.entries(input.model.headers)) headers.set(name, value)
+  for (const [name, value] of Object.entries(input.requestHeaders ?? {})) headers.set(name, value)
+  const apiKey = input.provider.options["apiKey"] ?? input.provider.key
+  if (typeof apiKey === "string" && !headers.has("authorization")) headers.set("authorization", `Bearer ${apiKey}`)
+
+  const { tools } = prepareTools({ tools: input.params.tools, toolChoice: input.params.toolChoice })
+
+  let response: Response
+  try {
+    const request = typeof input.provider.options["fetch"] === "function" ? input.provider.options["fetch"] : fetch
+    response = await request(url, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({
+        model: input.model.api.id,
+        messages: convertToOpenAICompatibleChatMessages(input.params.prompt),
+        ...(tools?.length ? { tools } : {}),
+      }),
+      signal: input.params.abortSignal,
+    })
+  } catch {
+    return
+  }
+
+  if (!response.ok) {
+    if (response.status >= 400 && response.status < 500) unsupportedTokenCounters.add(key)
+    return
+  }
+
+  const result = (await response.json()) as { total_tokens?: unknown; error?: unknown }
+  if (result.error === true || typeof result.total_tokens !== "number") {
+    unsupportedTokenCounters.add(key)
+    return
+  }
+  return { tokens: result.total_tokens, url: url.toString() }
+}
 
 /**
  * Match transient errors that the PERSISTENT_RETRY layer should retry.
@@ -201,6 +277,7 @@ export type StreamInput = {
     next: number
     delay: number
   }) => Effect.Effect<void>
+  onContextUsage?: (usage: ContextUsage) => Promise<void>
 }
 
 export type StreamRequest = StreamInput & {
@@ -659,6 +736,46 @@ const live: Layer.Layer<
                   args.params.prompt = ProviderTransform.message(args.params.prompt, input.model, options)
                 }
                 return args.params
+              },
+            },
+            {
+              specificationVersion: "v3" as const,
+              async wrapStream({ doStream, params: call }) {
+                const counted = await countInputTokens({
+                  provider: item,
+                  model: input.model,
+                  params: call,
+                  requestHeaders: headers,
+                })
+                if (!counted) return doStream()
+
+                const context = {
+                  input: counted.tokens,
+                  output: call.maxOutputTokens ?? ProviderTransform.maxOutputTokens(input.model),
+                  limit: input.model.limit.context,
+                }
+                await input.onContextUsage?.(context)
+                if (context.limit === 0) return doStream()
+
+                const inputLimit = Math.min(
+                  input.model.limit.input ?? Number.POSITIVE_INFINITY,
+                  Math.max(0, context.limit - context.output),
+                )
+                if (context.input > inputLimit) {
+                  const message = `Input requires ${context.input} tokens, but only ${inputLimit} are available after reserving ${context.output} output tokens.`
+                  throw new APICallError({
+                    message,
+                    url: counted.url,
+                    requestBodyValues: { model: input.model.api.id },
+                    statusCode: 400,
+                    responseHeaders: { "content-type": "application/json" },
+                    responseBody: JSON.stringify({
+                      error: { code: "context_length_exceeded", message, param: "input_tokens" },
+                    }),
+                    isRetryable: false,
+                  })
+                }
+                return doStream()
               },
             },
           ],
