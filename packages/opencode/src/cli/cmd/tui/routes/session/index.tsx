@@ -1,5 +1,4 @@
 import {
-  batch,
   createContext,
   createEffect,
   createMemo,
@@ -189,8 +188,6 @@ export function Session() {
   })
 
   const dimensions = useTerminalDimensions()
-  const [sidebar, setSidebar] = kv.signal<"auto" | "hide">("sidebar", "auto")
-  const [sidebarOpen, setSidebarOpen] = createSignal(false)
   const [conceal, setConceal] = createSignal(true)
   const thinking = useThinkingMode()
   const thinkingMode = thinking.mode
@@ -222,19 +219,11 @@ export function Session() {
   const fromWorkflowRunID = createMemo(() => route.fromWorkflowRunID)
 
   const wide = createMemo(() => dimensions().width > 120)
-  const sidebarVisible = createMemo(() => {
-    if (currentAgentID() !== "main") return false
-    if (sidebarOpen()) return true
-    if (sidebar() === "auto" && wide()) return true
-    return false
-  })
-  const toggleSidebar = () => {
-    batch(() => {
-      const isVisible = sidebarVisible()
-      setSidebar(() => (isVisible ? "hide" : "auto"))
-      setSidebarOpen(!isVisible)
-    })
-  }
+  const [sidebarOpen, setSidebarOpen] = createSignal(wide())
+  // A breakpoint transition resets any manual override: wide opens, narrow closes.
+  createEffect(on(wide, (isWide) => setSidebarOpen(isWide), { defer: true }))
+  const sidebarVisible = createMemo(() => currentAgentID() === "main" && sidebarOpen())
+  const toggleSidebar = () => setSidebarOpen(!sidebarVisible())
 
   const showTimestamps = createMemo(() => timestamps() === "show")
   const contentWidth = createMemo(() => dimensions().width - (sidebarVisible() ? 42 : 0) - 4)
