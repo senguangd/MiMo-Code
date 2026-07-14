@@ -3425,6 +3425,22 @@ NOTE: At any point in time through this workflow you should feel free to ask the
                   ),
                 )
 
+              // Overflow is control flow, not an empty model step. Handle it
+              // before generic output classification.
+              if (!isBoundedComputation && result === "overflow") {
+                yield* compaction
+                  .create({
+                    sessionID,
+                    agent: lastUser.agent,
+                    model: { providerID: model.providerID, modelID: model.id },
+                    auto: true,
+                    overflow: true,
+                    agentID: lastUser.agentID,
+                  })
+                  .pipe(Effect.ignore)
+                return "continue" as const
+              }
+
               if (
                 result === "continue" &&
                 (yield* autoContinueOutputLength({ lastUser, assistant: handle.message }))
@@ -3650,6 +3666,55 @@ NOTE: At any point in time through this workflow you should feel free to ask the
                   .pipe(Effect.ignore),
               ),
             )
+
+            // Overflow is control flow, not an empty model step. Handle it
+            // before generic output classification so recovery cannot be
+            // swallowed by the empty/no-op guard.
+            if (!isBoundedComputation && result === "overflow") {
+              yield* contextStatus("Recovering from context overflow...")
+              if (lastUser.agentID && lastUser.agentID !== "main") {
+                yield* contextStatus("Compacting subagent context after overflow...")
+                yield* compaction
+                  .create({
+                    sessionID,
+                    agent: lastUser.agent,
+                    model: { providerID: model.providerID, modelID: model.id },
+                    auto: true,
+                    overflow: true,
+                    agentID: lastUser.agentID,
+                  })
+                  .pipe(Effect.ignore)
+                return "continue" as const
+              }
+
+              // Main agents prefer a lossless checkpoint rebuild and fall back
+              // to the existing compaction path when no boundary is available.
+              yield* contextStatus("Preparing context rebuild...")
+              const inserted2 = yield* rebuildFromCheckpoint({
+                sessionID,
+                msgs,
+                agentID: lastUser.agentID,
+                agent: lastUser.agent,
+                model: { providerID: model.providerID, id: model.id },
+              })
+              if (inserted2) {
+                yield* contextStatus("Rebuilding context from checkpoint...")
+                return "continue" as const
+              }
+
+              yield* contextStatus("No checkpoint available; compacting context after overflow...")
+              yield* compaction
+                .create({
+                  sessionID,
+                  agent: lastUser.agent,
+                  model: { providerID: model.providerID, modelID: model.id },
+                  auto: true,
+                  overflow: true,
+                  agentID: lastUser.agentID,
+                })
+                .pipe(Effect.ignore)
+              return "continue" as const
+            }
 
             if (
               result === "continue" &&
