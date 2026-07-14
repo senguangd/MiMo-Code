@@ -65,10 +65,22 @@ function View(props: { api: TuiPluginApi; session_id: string }) {
   const tpsLabel = createMemo(() => formatTPS(tps()))
 
   const state = createMemo(() => {
+    const live = (props.api.state.session.status(props.session_id) as
+      | { type: string; context?: { input: number; output: number; limit: number } }
+      | undefined)?.context
+    if (live) {
+      return {
+        tokens: live.input,
+        reserved: live.output,
+        percent: live.limit ? Math.round(((live.input + live.output) / live.limit) * 100) : null,
+      }
+    }
+
     const last = msg().findLast((item): item is AssistantMessage => item.role === "assistant" && item.tokens.output > 0)
     if (!last) {
       return {
         tokens: 0,
+        reserved: null,
         percent: null,
       }
     }
@@ -78,6 +90,7 @@ function View(props: { api: TuiPluginApi; session_id: string }) {
     const model = props.api.state.provider.find((item) => item.id === last.providerID)?.models[last.modelID]
     return {
       tokens,
+      reserved: null,
       percent: model?.limit.context ? Math.round((tokens / model.limit.context) * 100) : null,
     }
   })
@@ -87,8 +100,15 @@ function View(props: { api: TuiPluginApi; session_id: string }) {
       <text fg={theme().text}>
         <b>Context</b>
       </text>
-      <text fg={theme().textMuted}>{state().tokens.toLocaleString()} tokens</text>
-      <text fg={theme().textMuted}>{state().percent ?? 0}% used</text>
+      <text fg={theme().textMuted}>
+        {state().tokens.toLocaleString()} {state().reserved === null ? "tokens (last request)" : "input tokens"}
+      </text>
+      <Show when={state().reserved !== null}>
+        <text fg={theme().textMuted}>{state().reserved!.toLocaleString()} output reserved</text>
+      </Show>
+      <text fg={theme().textMuted}>
+        {state().percent ?? 0}% {state().reserved === null ? "used (last request)" : "budget used"}
+      </text>
       <Show when={tpsLabel()}>{(label) => <text fg={theme().textMuted}>{label()}</text>}</Show>
       <text fg={theme().textMuted}>{money.format(cost())} spent</text>
     </box>

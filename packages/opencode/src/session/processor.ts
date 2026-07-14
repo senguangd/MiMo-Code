@@ -210,7 +210,7 @@ export const layer: Layer.Layer<
       let halted = false
       let retryStatusActive = false
       let busyStatusActive = false
-
+      let contextUsage: LLM.ContextUsage | undefined
 
       const clearPublishedStatusFlags = () => {
         retryStatusActive = false
@@ -245,6 +245,7 @@ export const layer: Layer.Layer<
           ...(message ? { message } : {}),
           messageID: ctx.assistantMessage.id,
           ...(opts?.recoveredFromRetry ? { recoveredFromRetry: true } : {}),
+          ...(contextUsage ? { context: contextUsage } : {}),
         })
       })
 
@@ -378,6 +379,7 @@ export const layer: Layer.Layer<
         ctx.blocked = false
         resetAttemptState()
         ctx.textNgramRepeat = false
+        contextUsage = undefined
         ctx.textNgramMonitor = opts?.textNgram ? createTextNgramMonitor() : undefined
 
         // The TUI renders assistantMessage.error as an inline ErrorBlock.
@@ -880,7 +882,6 @@ export const layer: Layer.Layer<
         const error = parse(e)
         if (MessageV2.ContextOverflowError.isInstance(error)) {
           ctx.needsOverflowHandling = true
-          yield* bus.publish(Session.Event.Error, { sessionID: ctx.sessionID, messageID: ctx.assistantMessage.id, error })
           return
         }
         ctx.assistantMessage.error = error
@@ -908,6 +909,10 @@ export const layer: Layer.Layer<
                   message: info.message,
                   next: info.next,
                 }),
+              onContextUsage: async (usage) => {
+                contextUsage = usage
+                await Effect.runPromise(publishBusyStatus(undefined, { force: true }))
+              },
             })
 
             yield* stream.pipe(
