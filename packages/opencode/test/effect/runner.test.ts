@@ -219,10 +219,22 @@ describe("Runner", () => {
 
       const a = Effect.runPromiseExit(runner.ensureRunning(first))
       await Bun.sleep(10)
+      const queued = Effect.runPromiseExit(runner.ensureRunning(Effect.succeed("ignored")))
+      await Bun.sleep(10)
 
       const stop = Effect.runPromise(runner.interrupt)
       await Promise.race([hit.promise, fail(250, "cancel did not interrupt running work")])
       await Promise.race([stop, fail(250, "interrupt waited for interrupted work cleanup")])
+      const queuedExit = await Promise.race([
+        queued,
+        fail(250, "queued caller waited for background cleanup"),
+      ])
+      expect(Exit.isFailure(queuedExit)).toBe(true)
+      const primaryPending = await Promise.race([
+        a.then(() => false),
+        Bun.sleep(50).then(() => true),
+      ])
+      expect(primaryPending).toBe(true)
 
       const repeated = Effect.runPromise(runner.interrupt)
       await Promise.race([repeated, fail(250, "repeated interrupt waited for interrupted work cleanup")])
@@ -232,13 +244,12 @@ describe("Runner", () => {
       expect(runner.busy).toBe(true)
 
       hold.resolve()
+      const primaryExit = await a
+      expect(Exit.isFailure(primaryExit)).toBe(true)
       expect(runner.busy).toBe(true)
       done.resolve()
       expect(await b).toBe("second")
       expect(runner.busy).toBe(false)
-
-      const exit = await a
-      expect(Exit.isFailure(exit)).toBe(true)
     } finally {
       hold.resolve()
       done.resolve()

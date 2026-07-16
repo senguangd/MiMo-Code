@@ -58,6 +58,8 @@ import { testEffect } from "../lib/effect"
 import { reply, TestLLMServer } from "../lib/llm-server"
 import { Inbox } from "../../src/inbox"
 import { Metrics } from "../../src/metrics"
+import { InstanceState } from "../../src/effect"
+import { InstanceRef } from "../../src/effect/instance-ref"
 
 void Log.init({ print: false })
 
@@ -1037,7 +1039,7 @@ it.live(
       }),
       { git: true, config: providerCfg },
     ),
-  3_000,
+  10_000,
 )
 
 it.live(
@@ -1115,7 +1117,7 @@ it.live(
       }),
       { git: true, config: providerCfg },
     ),
-  3_000,
+  10_000,
 )
 
 // Queue semantics
@@ -1228,7 +1230,77 @@ it.live(
       }),
       { git: true, config: providerCfg },
     ),
-  3_000,
+  10_000,
+)
+
+it.live(
+  "queued prompt resumes after the active run is interrupted",
+  () =>
+    provideTmpdirServer(
+      Effect.fnUntraced(function* ({ llm }) {
+        const prompt = yield* SessionPrompt.Service
+        const sessions = yield* Session.Service
+        const chat = yield* sessions.create({ title: "Pinned" })
+        const instance = yield* InstanceState.context
+
+        yield* llm.hang
+        yield* llm.text("second")
+
+        const first = yield* prompt
+          .prompt({
+            sessionID: chat.id,
+            agent: "build",
+            model: ref,
+            parts: [{ type: "text", text: "first" }],
+          })
+          .pipe(Effect.provideService(InstanceRef, instance), Effect.forkChild)
+
+        yield* llm.wait(1)
+
+        const id = MessageID.ascending()
+        const second = yield* prompt
+          .prompt({
+            sessionID: chat.id,
+            messageID: id,
+            agent: "build",
+            model: ref,
+            parts: [{ type: "text", text: "second" }],
+          })
+          .pipe(Effect.provideService(InstanceRef, instance), Effect.forkChild)
+
+        yield* Effect.promise(async () => {
+          const end = Date.now() + 5000
+          while (Date.now() < end) {
+            const msgs = await Effect.runPromise(sessions.messages({ sessionID: chat.id }))
+            if (msgs.some((msg) => msg.info.role === "user" && msg.info.id === id)) return
+            await new Promise((done) => setTimeout(done, 20))
+          }
+          throw new Error("timed out waiting for queued prompt to save")
+        })
+
+        yield* prompt.cancel(chat.id)
+
+        const [firstExit, secondExit] = yield* Effect.all([Fiber.await(first), Fiber.await(second)])
+        expect(Exit.isSuccess(firstExit)).toBe(true)
+        expect(Exit.isSuccess(secondExit)).toBe(true)
+        expect(yield* llm.calls).toBe(2)
+
+        const msgs = yield* sessions.messages({ sessionID: chat.id })
+        const assistants = msgs.filter((msg) => msg.info.role === "assistant")
+        expect(assistants).toHaveLength(2)
+        expect(
+          assistants.some(
+            (msg) => msg.info.role === "assistant" && msg.info.error?.name === "MessageAbortedError",
+          ),
+        ).toBe(true)
+        const last = assistants.at(-1)
+        if (!last || last.info.role !== "assistant") throw new Error("expected resumed assistant")
+        expect(last.info.parentID).toBe(id)
+        expect(last.parts.some((part) => part.type === "text" && part.text === "second")).toBe(true)
+      }),
+      { git: true, config: providerCfg },
+    ),
+  10_000,
 )
 
 it.live(

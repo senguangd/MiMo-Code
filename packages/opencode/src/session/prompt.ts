@@ -2090,7 +2090,13 @@ NOTE: At any point in time through this workflow you should feel free to ask the
         }
 
         if (input.noReply === true) return message
-        return yield* loop({ sessionID: input.sessionID, agentID: input.agentID ?? "main", task_id: input.task_id })
+        const next = { sessionID: input.sessionID, agentID: input.agentID ?? "main", task_id: input.task_id }
+        const result = yield* loop(next)
+        // A prompt submitted while the runner is busy initially joins that in-flight run.
+        // If its result predates this user message, the accepted message has not been
+        // consumed yet; the runner is now free, so start one fresh drain pass.
+        if (result.info.role === "assistant" && message.info.id < result.info.id) return result
+        return yield* loop(next)
       },
     )
 

@@ -16,6 +16,7 @@ export class Cancelled extends Schema.TaggedErrorClass<Cancelled>()("RunnerCance
 interface RunHandle<A, E> {
   id: number
   done: Deferred.Deferred<A, E | Cancelled>
+  released: Deferred.Deferred<void>
   fiber: Fiber.Fiber<A, E>
 }
 
@@ -83,11 +84,12 @@ export const make = <A, E = never>(
   const startRun = (work: Effect.Effect<A, E>, done: Deferred.Deferred<A, E | Cancelled>) =>
     Effect.gen(function* () {
       const id = next()
+      const released = yield* Deferred.make<void>()
       const fiber = yield* work.pipe(
         Effect.onExit((exit) => finishRun(id, done, exit)),
         Effect.forkIn(scope),
       )
-      return { id, done, fiber } satisfies RunHandle<A, E>
+      return { id, done, released, fiber } satisfies RunHandle<A, E>
     })
 
   const finishShell = (id: number) =>
@@ -119,6 +121,15 @@ export const make = <A, E = never>(
       Effect.fnUntraced(function* (st) {
         switch (st._tag) {
           case "Running":
+            if (opts?.onReentryWarn)
+              yield* opts.onReentryWarn({ label: opts.label ?? "(unlabeled)", existingRunId: st.run.id })
+            return [
+              Effect.raceFirst(
+                Deferred.await(st.run.done),
+                Deferred.await(st.run.released).pipe(Effect.flatMap(() => Effect.fail(new Cancelled()))),
+              ),
+              st,
+            ] as const
           case "ShellThenRun":
             if (opts?.onReentryWarn)
               yield* opts.onReentryWarn({ label: opts.label ?? "(unlabeled)", existingRunId: st.run.id })
@@ -184,6 +195,7 @@ export const make = <A, E = never>(
             Effect.gen(function* () {
               yield* stop(st.run.fiber, wait)
               if (wait) yield* Deferred.await(st.run.done).pipe(Effect.exit, Effect.asVoid)
+              else yield* Deferred.succeed(st.run.released, undefined).pipe(Effect.asVoid)
               yield* idleIfCurrent()
             }),
             { _tag: "Idle" } as const,
