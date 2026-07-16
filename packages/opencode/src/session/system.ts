@@ -76,7 +76,7 @@ export const layer = Layer.effect(
             `  Today's date: ${new Date(now).toDateString()}`,
             `</env>`,
           ].join("\n"),
-          `IMPORTANT: Your response must ALWAYS strictly follow the same major language as the user.`,
+          `IMPORTANT: All user-facing natural-language responses, including progress updates, explanations, questions, and final answers, MUST be written in Simplified Chinese regardless of the language used by the user. Preserve source code, commands, identifiers, file paths, logs, error messages, quotations, and explicitly requested translations in their original or required language.`,
         ]
         if (!model.capabilities.input.image) {
           // NOTE: vision models are resolved per-call (lazy). If provider list changes
