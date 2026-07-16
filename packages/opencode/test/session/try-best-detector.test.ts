@@ -56,6 +56,10 @@ function edit(file: string, diff: string) {
   return tool({ tool: "edit", args: { file_path: file }, metadata: { diff } })
 }
 
+function failedEdit(file: string) {
+  return tool({ tool: "edit", args: { file_path: file }, status: "error" })
+}
+
 describe("try-best normalization", () => {
   test("normalizes diff structure and ignores context", () => {
     expect(normalizeDiff("@@ -1,3 +1,3 @@\n keep\n-old   value\n+new value\n context")).toBe("- old value + new value")
@@ -115,13 +119,26 @@ describe("TryBestMonitor", () => {
     expect(monitor.consume(failed("bun test b"))?.reason).toBe("action_streak")
   })
 
-  test("updates options on a cached session monitor", () => {
-    const cached = monitor("session", "agent", { action_streak: 4 })
-    expect(cached.consume(edit("a", "-one old\n+one new"))).toBeUndefined()
-    expect(cached.consume(edit("b", "-two old\n+two new"))).toBeUndefined()
-    const configured = monitor("session", "agent", { action_streak: 3 })
+  test("updates options on a cached turn monitor", () => {
+    const cached = monitor("session", "agent", "turn", { action_streak: 4 })
+    expect(cached.consume(failedEdit("a"))).toBeUndefined()
+    expect(cached.consume(failedEdit("b"))).toBeUndefined()
+    const configured = monitor("session", "agent", "turn", { action_streak: 3 })
     expect(configured).toBe(cached)
-    expect(configured.consume(edit("c", "-three old\n+three new"))?.reason).toBe("action_streak")
+    expect(configured.consume(failedEdit("c"))?.reason).toBe("action_streak")
+  })
+
+  test("starts a fresh monitor for a new user turn", () => {
+    const failed = () => tool({ tool: "bash", args: { command: "bun test" }, status: "error" })
+    const first = monitor("session", "agent", "turn-1")
+    expect(first.consume(failed())).toBeUndefined()
+    expect(first.consume(failed())).toBeUndefined()
+
+    const second = monitor("session", "agent", "turn-2")
+    expect(second).not.toBe(first)
+    expect(second.consume(failed())).toBeUndefined()
+    expect(second.consume(failed())).toBeUndefined()
+    expect(second.consume(failed())?.reason).toBe("bash_retry")
   })
 
   test("treats a completed bash tool with nonzero exit metadata as failed", () => {
@@ -142,22 +159,30 @@ describe("TryBestMonitor", () => {
     expect(monitor.consume(failed())).toBeUndefined()
   })
 
-  test("detects four edits even when their diffs differ", () => {
+  test("treats distinct successful edits as observable progress", () => {
     const monitor = new TryBestMonitor()
     expect(monitor.consume(edit("a", "-one old\n+one new"))).toBeUndefined()
     expect(monitor.consume(edit("b", "-two old\n+two new"))).toBeUndefined()
     expect(monitor.consume(edit("c", "-three old\n+three new"))).toBeUndefined()
-    expect(monitor.consume(edit("d", "-four old\n+four new"))?.reason).toBe("action_streak")
+    expect(monitor.consume(edit("d", "-four old\n+four new"))).toBeUndefined()
   })
 
-  test("ignores read/search actions while counting edit structure", () => {
+  test("detects four consecutive failed edits", () => {
     const monitor = new TryBestMonitor()
-    expect(monitor.consume(edit("a", "-one old\n+one new"))).toBeUndefined()
+    expect(monitor.consume(failedEdit("a"))).toBeUndefined()
+    expect(monitor.consume(failedEdit("b"))).toBeUndefined()
+    expect(monitor.consume(failedEdit("c"))).toBeUndefined()
+    expect(monitor.consume(failedEdit("d"))?.reason).toBe("action_streak")
+  })
+
+  test("ignores read/search actions while counting failed edits", () => {
+    const monitor = new TryBestMonitor()
+    expect(monitor.consume(failedEdit("a"))).toBeUndefined()
     expect(monitor.consume(tool({ tool: "read", args: { file_path: "a" } }))).toBeUndefined()
-    expect(monitor.consume(edit("b", "-two old\n+two new"))).toBeUndefined()
+    expect(monitor.consume(failedEdit("b"))).toBeUndefined()
     expect(monitor.consume(tool({ tool: "grep", args: { pattern: "x" } }))).toBeUndefined()
-    expect(monitor.consume(edit("c", "-three old\n+three new"))).toBeUndefined()
-    expect(monitor.consume(edit("d", "-four old\n+four new"))?.reason).toBe("action_streak")
+    expect(monitor.consume(failedEdit("c"))).toBeUndefined()
+    expect(monitor.consume(failedEdit("d"))?.reason).toBe("action_streak")
   })
 
   test("changed verify result counts as progress", () => {

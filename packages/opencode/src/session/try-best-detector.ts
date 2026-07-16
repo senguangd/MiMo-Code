@@ -192,7 +192,7 @@ export class TryBestMonitor {
         },
       ]
     })[0]
-    return incident ?? this.trackAction({ kind: "edit", progress: false }, part.tool)
+    return incident ?? this.trackAction({ kind: "edit", progress: true }, part.tool)
   }
 
   private bash(part: MessageV2.ToolPart): TryBestIncident | undefined {
@@ -242,17 +242,24 @@ export class TryBestMonitor {
   }
 }
 
-const monitors = new Map<string, TryBestMonitor>()
+// A turn can span several assistant messages, but evidence must never leak
+// into the next user turn.
+const monitors = new Map<string, { turnID: string; monitor: TryBestMonitor }>()
 
-export function monitor(sessionID: string, agentID?: string, options?: TryBestOptions) {
+export function monitor(
+  sessionID: string,
+  agentID: string | undefined,
+  turnID: string,
+  options?: TryBestOptions,
+) {
   const key = `${sessionID}:${agentID ?? "main"}`
   const hit = monitors.get(key)
-  if (hit) {
-    hit.configure(options)
-    return hit
+  if (hit?.turnID === turnID) {
+    hit.monitor.configure(options)
+    return hit.monitor
   }
   const next = new TryBestMonitor(options)
-  monitors.set(key, next)
+  monitors.set(key, { turnID, monitor: next })
   return next
 }
 

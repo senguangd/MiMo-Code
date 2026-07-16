@@ -417,7 +417,12 @@ export const layer: Layer.Layer<
 
       const tryBestConfig = (yield* config.get()).experimental?.try_best
       const tryBest = Flag.MIMOCODE_ENABLE_TRY_BEST_HANDOFF
-        ? tryBestMonitor(input.sessionID, input.assistantMessage.agentID, tryBestConfig)
+        ? tryBestMonitor(
+            input.sessionID,
+            input.assistantMessage.agentID,
+            input.assistantMessage.parentID,
+            tryBestConfig,
+          )
         : undefined
 
       const detectTryBest = Effect.fn("SessionProcessor.detectTryBest")(function* (part: MessageV2.ToolPart) {
