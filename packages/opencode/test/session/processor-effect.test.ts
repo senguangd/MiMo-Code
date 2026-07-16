@@ -886,11 +886,11 @@ it.live.skip("session.processor pauses after three repeated failed bash commands
         const firstHandle = yield* processors.create({ assistantMessage: first, sessionID: chat.id, model: mdl })
         expect(yield* firstHandle.replay(call("call_first"))).toBe("continue")
 
-        const second = yield* assistant(chat.id, first.id, path.resolve(dir))
+        const second = yield* assistant(chat.id, parent.id, path.resolve(dir))
         const secondHandle = yield* processors.create({ assistantMessage: second, sessionID: chat.id, model: mdl })
         expect(yield* secondHandle.replay(call("call_second"))).toBe("continue")
 
-        const third = yield* assistant(chat.id, second.id, path.resolve(dir))
+        const third = yield* assistant(chat.id, parent.id, path.resolve(dir))
         const thirdHandle = yield* processors.create({ assistantMessage: third, sessionID: chat.id, model: mdl })
         expect(yield* thirdHandle.replay(call("call_third"))).toBe("stop")
         expect(
@@ -930,11 +930,11 @@ it.live.skip("session.processor preserves try-best blocking when denied tools ma
         const firstHandle = yield* processors.create({ assistantMessage: first, sessionID: chat.id, model: mdl })
         expect(yield* firstHandle.replay(call("call_first"))).toBe("continue")
 
-        const second = yield* assistant(chat.id, first.id, path.resolve(dir))
+        const second = yield* assistant(chat.id, parent.id, path.resolve(dir))
         const secondHandle = yield* processors.create({ assistantMessage: second, sessionID: chat.id, model: mdl })
         expect(yield* secondHandle.replay(call("call_second"))).toBe("continue")
 
-        const third = yield* assistant(chat.id, second.id, path.resolve(dir))
+        const third = yield* assistant(chat.id, parent.id, path.resolve(dir))
         const thirdHandle = yield* processors.create({ assistantMessage: third, sessionID: chat.id, model: mdl })
         expect(yield* thirdHandle.replay(call("call_third"))).toBe("stop")
       }),
@@ -945,5 +945,92 @@ it.live.skip("session.processor preserves try-best blocking when denied tools ma
         experimental: { continue_loop_on_deny: true },
       }),
     },
+  ),
+)
+
+it.live("session.processor keeps a turn running across distinct successful edits", () =>
+  provideTmpdirServer(
+    ({ dir }) =>
+      Effect.gen(function* () {
+        const { processors, session, provider } = yield* boot()
+        const chat = yield* session.create({})
+        const parent = yield* user(chat.id, "apply the planned changes")
+        const mdl = yield* provider.getModel(ref.providerID, ref.modelID)
+        const runs = yield* Effect.forEach(
+          ["a.ts", "b.ts", "c.ts", "d.ts"],
+          (file) =>
+            Effect.gen(function* () {
+              const msg = yield* assistant(chat.id, parent.id, path.resolve(dir))
+              const handle = yield* processors.create({ assistantMessage: msg, sessionID: chat.id, model: mdl })
+              const result = yield* handle.replay({
+                reasoning: "apply edit",
+                toolCalls: [{ toolCallId: `call_${file}`, toolName: "edit", input: { file_path: file } }],
+                finishReason: "tool-calls",
+                tools: {
+                  edit: {
+                    execute: async () => ({
+                      title: file,
+                      metadata: { diff: `-${file} old\n+${file} new` },
+                      output: "Edit applied successfully.",
+                    }),
+                  },
+                },
+                messages: [],
+              })
+              return { msg, result }
+            }),
+          { concurrency: 1 },
+        )
+
+        expect(runs.map((run) => run.result)).toEqual(["continue", "continue", "continue", "continue"])
+        expect(
+          MessageV2.parts(runs.at(-1)!.msg.id).some(
+            (part) => part.type === "text" && part.synthetic && part.metadata?.origin?.kind === "try_best",
+          ),
+        ).toBe(false)
+      }),
+    { git: true, config: (url) => providerCfg(url) },
+  ),
+)
+
+it.live("session.processor does not carry try-best evidence into a new user turn", () =>
+  provideTmpdirServer(
+    ({ dir }) =>
+      Effect.gen(function* () {
+        const { processors, session, provider } = yield* boot()
+        const chat = yield* session.create({})
+        const mdl = yield* provider.getModel(ref.providerID, ref.modelID)
+        const tools = {
+          bash: {
+            execute: async () => ({
+              title: "Run tests",
+              metadata: { exit: 1 },
+              output: "1 test failed",
+            }),
+          },
+        }
+        const call = (id: string) => ({
+          reasoning: "run tests",
+          toolCalls: [{ toolCallId: id, toolName: "bash", input: { command: "bun test" } }],
+          finishReason: "tool-calls",
+          tools,
+          messages: [],
+        })
+
+        const firstTurn = yield* user(chat.id, "fix the first issue")
+        const first = yield* assistant(chat.id, firstTurn.id, path.resolve(dir))
+        const firstHandle = yield* processors.create({ assistantMessage: first, sessionID: chat.id, model: mdl })
+        expect(yield* firstHandle.replay(call("call_first"))).toBe("continue")
+
+        const second = yield* assistant(chat.id, firstTurn.id, path.resolve(dir))
+        const secondHandle = yield* processors.create({ assistantMessage: second, sessionID: chat.id, model: mdl })
+        expect(yield* secondHandle.replay(call("call_second"))).toBe("continue")
+
+        const secondTurn = yield* user(chat.id, "now fix a different issue")
+        const third = yield* assistant(chat.id, secondTurn.id, path.resolve(dir))
+        const thirdHandle = yield* processors.create({ assistantMessage: third, sessionID: chat.id, model: mdl })
+        expect(yield* thirdHandle.replay(call("call_third"))).toBe("continue")
+      }),
+    { git: true, config: (url) => providerCfg(url) },
   ),
 )
