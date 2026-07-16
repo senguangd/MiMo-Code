@@ -31,7 +31,7 @@ const node = CrossSpawnSpawner.defaultLayer
 const it = testEffect(Layer.mergeAll(ToolRegistry.defaultLayer, node))
 
 describe("tool.skill", () => {
-  it.live("execute returns skill content block with files", () =>
+  it.live("description excludes the catalog and execute returns skill content block with files", () =>
     provideTmpdirInstance(
       (dir) =>
         Effect.gen(function* () {
@@ -71,6 +71,11 @@ Use this skill.
             agent,
           })).find((tool) => tool.id === SkillTool.id)
           if (!tool) throw new Error("Skill tool not found")
+
+          expect(tool.description).toContain("skills listed in the system prompt")
+          expect(tool.description).not.toContain("tool-skill")
+          expect(tool.description).not.toContain("## Available Skills")
+          expect(tool.description).not.toContain("<available_skills>")
 
           const requests: Array<Omit<Permission.Request, "id" | "sessionID" | "tool">> = []
           const ctx: Tool.Context = {
