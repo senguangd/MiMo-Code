@@ -99,6 +99,36 @@ Notes on text:
   tf.auto_size = MSO_AUTO_SIZE.NONE
   ```
 
+### CJK / East-Asian text (Chinese, Japanese, Korean)
+
+`run.font.name` only sets the **Latin** typeface (`a:latin`). CJK glyphs are
+taken from the separate **East-Asian slot** (`a:ea`), which python-pptx does
+not expose. If you leave it unset, PowerPoint falls back to a default and
+Chinese / Japanese / Korean text often renders as tofu boxes (□□□) or an
+inconsistent substitute — even when `run.font.name` looks correct. For any run
+containing CJK text, set all three slots (`a:latin`, `a:ea`, `a:cs`) via XML:
+
+```python
+from pptx.oxml.ns import qn
+
+def set_cjk_font(run, font_name):
+    """Set Latin (a:latin), East-Asian (a:ea) and complex-script (a:cs) typefaces."""
+    run.font.name = font_name                      # a:latin
+    rPr = run._r.get_or_add_rPr()
+    for tag in ("a:ea", "a:cs"):
+        el = rPr.find(qn(tag))
+        if el is None:
+            el = rPr.makeelement(qn(tag), {})
+            rPr.append(el)
+        el.set("typeface", font_name)
+
+set_cjk_font(p.runs[0], "Noto Sans CJK SC")        # a CJK-capable font present on the render machine
+```
+
+Choose a font that actually ships CJK glyphs (a Noto Sans CJK / Source Han
+variant, or the platform's system CJK font). A Latin-only face such as Calibri
+will not carry CJK no matter which slot you set.
+
 ### Bulleted list
 
 ```python
