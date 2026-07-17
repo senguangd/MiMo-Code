@@ -42,6 +42,7 @@ import { Agent as AgentModule } from "../agent/agent"
 import { AppRuntime } from "@/effect/app-runtime"
 import { Installation } from "@/installation"
 import { MessageV2 } from "@/session/message-v2"
+import { requestInputTokens } from "@/session/overflow"
 import { Config } from "@/config"
 import { ConfigMCP } from "@/config/mcp"
 import { allowRoot } from "@/server/allowed-root"
@@ -109,7 +110,7 @@ async function sendUsageUpdate(
     return
   }
 
-  const used = msg.tokens.input + (msg.tokens.cache?.read ?? 0)
+  const used = requestInputTokens(msg.tokens)
   const totalCost = assistantMessages.reduce((sum, m) => sum + m.info.cost, 0)
 
   await connection

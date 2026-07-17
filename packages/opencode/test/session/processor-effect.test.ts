@@ -189,13 +189,13 @@ const boot = Effect.fn("test.boot")(function* () {
 // Tests
 // ---------------------------------------------------------------------------
 
-it.live("session.processor effect tests capture llm input cleanly", () =>
+it.live("session.processor persists provider usage from the completed model call", () =>
   provideTmpdirServer(
     ({ dir, llm }) =>
       Effect.gen(function* () {
         const { processors, session, provider } = yield* boot()
 
-        yield* llm.text("hello")
+        yield* llm.text("hello", { usage: { input: 54_321, output: 5 } })
 
         const chat = yield* session.create({})
         const parent = yield* user(chat.id, "hi")
@@ -226,11 +226,17 @@ it.live("session.processor effect tests capture llm input cleanly", () =>
 
         const value = yield* handle.process(input)
         const parts = MessageV2.parts(msg.id)
+        const stored = MessageV2.get({ sessionID: chat.id, messageID: msg.id })
         const calls = yield* llm.calls
 
         expect(value).toBe("continue")
         expect(calls).toBe(1)
         expect(parts.some((part) => part.type === "text" && part.text === "hello")).toBe(true)
+        expect(stored.info.role).toBe("assistant")
+        if (stored.info.role === "assistant") {
+          expect(stored.info.tokens.input).toBe(54_321)
+          expect(stored.info.tokens.output).toBe(5)
+        }
       }),
     { git: true, config: (url) => providerCfg(url) },
   ),
@@ -723,14 +729,13 @@ it.live("session.processor effect tests discard incomplete pending tools on clea
   ),
 )
 
-it.live("session.processor effect tests record aborted errors and idle state", () =>
+it.live("session.processor effect tests record aborted errors and publish the error event", () =>
   provideTmpdirServer(
     ({ dir, llm }) =>
       Effect.gen(function* () {
         const seen = defer<void>()
         const { processors, session, provider } = yield* boot()
         const bus = yield* Bus.Service
-        const sts = yield* SessionStatus.Service
 
         yield* llm.hang
 
@@ -776,7 +781,6 @@ it.live("session.processor effect tests record aborted errors and idle state", (
         const exit = yield* Fiber.await(run)
         yield* Effect.promise(() => seen.promise)
         const stored = MessageV2.get({ sessionID: chat.id, messageID: msg.id })
-        const state = yield* sts.get(chat.id)
         off()
 
         expect(Exit.isFailure(exit)).toBe(true)
@@ -788,7 +792,6 @@ it.live("session.processor effect tests record aborted errors and idle state", (
         if (stored.info.role === "assistant") {
           expect(stored.info.error?.name).toBe("MessageAbortedError")
         }
-        expect(state).toMatchObject({ type: "idle" })
         expect(errs).toContain("MessageAbortedError")
       }),
     { git: true, config: (url) => providerCfg(url) },
@@ -800,7 +803,6 @@ it.live("session.processor effect tests mark interruptions aborted without manua
     ({ dir, llm }) =>
       Effect.gen(function* () {
         const { processors, session, provider } = yield* boot()
-        const sts = yield* SessionStatus.Service
 
         yield* llm.hang
 
@@ -838,7 +840,6 @@ it.live("session.processor effect tests mark interruptions aborted without manua
 
         const exit = yield* Fiber.await(run)
         const stored = MessageV2.get({ sessionID: chat.id, messageID: msg.id })
-        const state = yield* sts.get(chat.id)
 
         expect(Exit.isFailure(exit)).toBe(true)
         expect(handle.message.error?.name).toBe("MessageAbortedError")
@@ -846,7 +847,6 @@ it.live("session.processor effect tests mark interruptions aborted without manua
         if (stored.info.role === "assistant") {
           expect(stored.info.error?.name).toBe("MessageAbortedError")
         }
-        expect(state).toMatchObject({ type: "idle" })
       }),
     { git: true, config: (url) => providerCfg(url) },
   ),

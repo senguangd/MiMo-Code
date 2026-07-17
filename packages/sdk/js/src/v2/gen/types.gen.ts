@@ -1038,7 +1038,6 @@ export type AssistantMessage = {
   cost: number
   tokens: {
     total?: number
-    context?: number
     input: number
     output: number
     reasoning: number

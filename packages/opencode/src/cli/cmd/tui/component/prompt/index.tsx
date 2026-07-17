@@ -462,32 +462,28 @@ export function Prompt(props: PromptProps) {
     onCleanup(releaseReservedKeys)
   })
 
-  const usage = createMemo(() => {
+  const usage = createMemo<{ context?: string; cost?: string } | undefined>(() => {
     if (!props.sessionID) return
     const msg = sync.data.message[props.sessionID]?.["main"] ?? []
-    const live = (status() as { context?: { input: number; output: number; limit: number; inputLimit: number } }).context
     const context = resolveContextUsage({
       messages: msg,
       parts: (messageID) => sync.data.part[messageID] ?? [],
-      live,
       contextLimit: (providerID, modelID) =>
         sync.data.provider.find((item) => item.id === providerID)?.models[modelID]?.limit.context,
     })
     const cost = msg.reduce((sum, item) => sum + (item.role === "assistant" ? item.cost : 0), 0)
-    const effectiveLimit =
-      context?.kind === "live" ? context.inputLimit : context?.kind === "last" ? context.limit : undefined
     const label =
       context?.kind === "invalidated"
         ? t("tui.prompt.context.recalculating")
         : context
           ? [
-              Locale.number(context.input),
-              effectiveLimit ? `(${Math.round((context.input / effectiveLimit) * 100)}%)` : undefined,
+              Locale.number(context.tokens),
+              context.limit ? `(${Math.round((context.tokens / context.limit) * 100)}%)` : undefined,
             ]
               .filter(Boolean)
               .join(" ")
           : undefined
-    if (!label && cost <= 0) return
+    if (!label && cost <= 0) return undefined
     return {
       context: label,
       cost: cost > 0 ? money.format(cost) : undefined,

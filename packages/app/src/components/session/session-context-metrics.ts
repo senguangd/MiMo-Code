@@ -35,7 +35,14 @@ type Metrics = {
 }
 
 const contextTokenTotal = (msg: AssistantMessage) => {
-  return msg.tokens.context ?? msg.tokens.input + msg.tokens.cache.read + msg.tokens.cache.write
+  return (
+    msg.tokens.total ||
+    msg.tokens.input +
+      msg.tokens.cache.read +
+      msg.tokens.cache.write +
+      msg.tokens.output +
+      msg.tokens.reasoning
+  )
 }
 
 const lastAssistantWithTokens = (messages: Message[]) => {
@@ -45,6 +52,7 @@ const lastAssistantWithTokens = (messages: Message[]) => {
     if (contextTokenTotal(msg) <= 0) continue
     return msg
   }
+  return undefined
 }
 
 const build = (messages: Message[] = [], providers: Provider[] = []): Metrics => {

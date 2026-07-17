@@ -221,7 +221,6 @@ export const layer: Layer.Layer<
       let halted = false
       let retryStatusActive = false
       let busyStatusActive = false
-      let contextUsage: LLM.ContextUsage | undefined
 
       const clearPublishedStatusFlags = () => {
         retryStatusActive = false
@@ -251,13 +250,15 @@ export const layer: Layer.Layer<
         retryStatusActive = false
         busyStatusActive = true
 
-        yield* status.set(ctx.sessionID, {
-          type: "busy",
-          ...(message ? { message } : {}),
-          messageID: ctx.assistantMessage.id,
-          ...(opts?.recoveredFromRetry ? { recoveredFromRetry: true } : {}),
-          ...(contextUsage ? { context: contextUsage } : {}),
-        })
+        yield* status.set(
+          ctx.sessionID,
+          {
+            type: "busy",
+            ...(message ? { message } : {}),
+            messageID: ctx.assistantMessage.id,
+            ...(opts?.recoveredFromRetry ? { recoveredFromRetry: true } : {}),
+          },
+        )
       })
 
       const publishRetryStatus = Effect.fn("SessionProcessor.publishRetryStatus")(function* (info: {
@@ -386,12 +387,10 @@ export const layer: Layer.Layer<
 
         ctx.assistantMessage.error = undefined
         ctx.assistantMessage.time.completed = undefined
-        ctx.assistantMessage.tokens.context = undefined
         ctx.needsOverflowHandling = false
         ctx.blocked = false
         resetAttemptState()
         ctx.textNgramRepeat = false
-        contextUsage = undefined
         ctx.textNgramMonitor = opts?.textNgram ? createTextNgramMonitor() : undefined
 
         // The TUI renders assistantMessage.error as an inline ErrorBlock.
@@ -754,11 +753,7 @@ export const layer: Layer.Layer<
             })
             ctx.assistantMessage.finish = value.finishReason
             ctx.assistantMessage.cost += usage.cost
-            const context = ctx.assistantMessage.tokens.context
-            ctx.assistantMessage.tokens = {
-              ...usage.tokens,
-              ...(context === undefined ? {} : { context }),
-            }
+            ctx.assistantMessage.tokens = usage.tokens
             yield* session.updatePart({
               id: PartID.ascending(),
               reason: value.finishReason,
@@ -815,7 +810,7 @@ export const layer: Layer.Layer<
               .pipe(Effect.ignore, Effect.forkIn(scope))
             if (
               !ctx.assistantMessage.summary &&
-              isOverflow({ cfg: yield* config.get(), tokens: usage.tokens, model: ctx.model })
+              isOverflow({ cfg: yield* config.get(), tokens: ctx.assistantMessage.tokens, model: ctx.model })
             ) {
               ctx.needsOverflowHandling = true
             }
@@ -978,13 +973,6 @@ export const layer: Layer.Layer<
                   message: info.message,
                   next: info.next,
                 }),
-              onContextUsage: async (usage) => {
-                // Summary agents measure internal work, not the main session context.
-                if (ctx.assistantMessage.summary) return
-                contextUsage = usage
-                ctx.assistantMessage.tokens.context = usage.input
-                await Effect.runPromise(publishBusyStatus(undefined, { force: true }))
-              },
             })
 
             yield* stream.pipe(

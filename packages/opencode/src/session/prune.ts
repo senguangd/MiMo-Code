@@ -7,7 +7,7 @@ import { Log } from "../util"
 import { Config } from "@/config"
 import { NotFoundError } from "@/storage"
 import { Effect, Layer, Context } from "effect"
-import { pressureLevel, usable } from "./overflow"
+import { contextTokens, pressureLevel, usable } from "./overflow"
 import { SessionCheckpoint } from "./checkpoint"
 import { ActorRegistry } from "@/actor/registry"
 import type { ActorPromptOps } from "@/tool/actor"
@@ -262,13 +262,7 @@ export const layer: Layer.Layer<
       )
       if (thresholds.length === 0) return
 
-      const current =
-        input.tokens.total ||
-        input.tokens.input +
-          input.tokens.output +
-          (input.tokens.reasoning ?? 0) +
-          input.tokens.cache.read +
-          input.tokens.cache.write
+      const current = contextTokens(input.tokens)
       const state =
         progress.get(input.sessionID) ??
         ({ baseline: 0, last: 0, crossed: new Set<number>(), pendingBaseline: false } satisfies CheckpointProgress)

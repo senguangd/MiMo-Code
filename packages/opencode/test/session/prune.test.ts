@@ -480,6 +480,36 @@ describe("SessionPrune checkpoint epochs", () => {
     expect(value.state.starts).toBe(1)
   })
 
+  test("legacy estimated context cannot suppress a provider-usage checkpoint", async () => {
+    const value = harness()
+    await Effect.runPromise(
+      provideTmpdirInstance(
+        () =>
+          Effect.gen(function* () {
+            const service = yield* SessionPrune.Service
+            const session = yield* SessionNs.Service
+            const info = yield* session.create({})
+            const model = createModel({ context: 128_000, output: 32_000 })
+            yield* service.fireCheckpoints({
+              sessionID: info.id,
+              model,
+              tokens: {
+                total: 80_000,
+                context: 10_000,
+                input: 78_000,
+                output: 2_000,
+                reasoning: 0,
+                cache: { read: 0, write: 0 },
+              } as any,
+              promptOps: {} as any,
+            })
+          }),
+        { config: { checkpoint: { thresholds: ["20K"] } } },
+      ).pipe(Effect.scoped, Effect.provide(value.layer)),
+    )
+    expect(value.state.starts).toBe(1)
+  })
+
   test("a reduced context establishes a baseline before checkpointing again", async () => {
     const value = harness()
     await Effect.runPromise(

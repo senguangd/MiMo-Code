@@ -1,28 +1,14 @@
 import type { Message, Part } from "@mimo-ai/sdk/v2"
 
-export type ContextUsage =
-  | { kind: "live"; input: number; reserved: number; limit: number; inputLimit: number }
-  | { kind: "last"; input: number; reserved: null; limit?: number }
-  | { kind: "invalidated" }
+export type ContextUsage = { kind: "current"; tokens: number; limit?: number } | { kind: "invalidated" }
 
 type Input = {
   messages: readonly Message[]
   parts: (messageID: string) => readonly Part[]
-  live?: { input: number; output: number; limit: number; inputLimit: number }
   contextLimit: (providerID: string, modelID: string) => number | undefined
 }
 
 export function resolveContextUsage(input: Input): ContextUsage | undefined {
-  if (input.live) {
-    return {
-      kind: "live",
-      input: input.live.input,
-      reserved: input.live.output,
-      limit: input.live.limit,
-      inputLimit: input.live.inputLimit,
-    }
-  }
-
   for (let i = input.messages.length - 1; i >= 0; i--) {
     const message = input.messages[i]
     if (message.role === "user") {
@@ -36,14 +22,19 @@ export function resolveContextUsage(input: Input): ContextUsage | undefined {
     if (message.time.completed === undefined) continue
 
     const tokens =
-      message.tokens.context ?? message.tokens.input + message.tokens.cache.read + message.tokens.cache.write
+      message.tokens.total ||
+      message.tokens.input +
+        message.tokens.cache.read +
+        message.tokens.cache.write +
+        message.tokens.output +
+        message.tokens.reasoning
     if (tokens <= 0) continue
 
     return {
-      kind: "last",
-      input: tokens,
-      reserved: null,
+      kind: "current",
+      tokens,
       limit: input.contextLimit(message.providerID, message.modelID),
     }
   }
+  return undefined
 }

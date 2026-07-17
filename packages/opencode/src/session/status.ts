@@ -29,14 +29,6 @@ export const Info = z
       // network/provider is still failing. Only a busy status emitted after real
       // stream progress may clear a retry for the same message.
       recoveredFromRetry: z.boolean().optional(),
-      context: z
-        .object({
-          input: z.number(),
-          output: z.number(),
-          limit: z.number(),
-          inputLimit: z.number(),
-        })
-        .optional(),
     }),
   ])
   .meta({
@@ -64,7 +56,7 @@ export const Event = {
 export interface Interface {
   readonly get: (sessionID: SessionID) => Effect.Effect<Info>
   readonly list: () => Effect.Effect<Map<SessionID, Info>>
-  readonly set: (sessionID: SessionID, status: Info, options?: { preserveContext?: boolean }) => Effect.Effect<void>
+  readonly set: (sessionID: SessionID, status: Info) => Effect.Effect<void>
 }
 
 export class Service extends Context.Service<Service, Interface>()("@opencode/SessionStatus") {}
@@ -87,23 +79,9 @@ export const layer = Layer.effect(
       return new Map(yield* InstanceState.get(state))
     })
 
-    const set = Effect.fn("SessionStatus.set")(function* (
-      sessionID: SessionID,
-      status: Info,
-      options?: { preserveContext?: boolean },
-    ) {
+    const set = Effect.fn("SessionStatus.set")(function* (sessionID: SessionID, status: Info) {
       const data = yield* InstanceState.get(state)
       const current = data.get(sessionID)
-      if (
-        options?.preserveContext !== false &&
-        status.type === "busy" &&
-        current?.type === "busy" &&
-        !status.context &&
-        current.context
-      ) {
-        status = { ...status, context: current.context }
-      }
-
       // Retry is sticky for its owning message. Generic busy updates from
       // run-state/onBusy, beginRun, lifecycle events, or reconnect bookkeeping
       // must not erase the visible retry footer. Otherwise users see the red

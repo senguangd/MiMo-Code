@@ -5,11 +5,15 @@ import type { MessageV2 } from "./message-v2"
 
 const DEFAULT_REBUILD_HEADROOM = 20_000
 
-function tokenCount(tokens: MessageV2.Assistant["tokens"]) {
-  return (
-    tokens.total ||
-    tokens.input + tokens.output + (tokens.reasoning ?? 0) + tokens.cache.read + tokens.cache.write
-  )
+export function requestInputTokens(tokens: MessageV2.Assistant["tokens"]) {
+  return tokens.input + tokens.cache.read + tokens.cache.write
+}
+
+// A completed turn becomes the next turn's history: provider prompt usage plus
+// the generated output/reasoning. Prefer the provider-reported total when it is
+// available, and reconstruct the same quantity for providers that omit it.
+export function contextTokens(tokens: MessageV2.Assistant["tokens"]) {
+  return tokens.total || requestInputTokens(tokens) + tokens.output + (tokens.reasoning ?? 0)
 }
 
 export function contextBudget(input: {
@@ -50,7 +54,7 @@ export function isOverflow(input: {
 }) {
   if (input.cfg.compaction?.auto === false) return false
   if (input.model.limit.context === 0) return false
-  return tokenCount(input.tokens) >= usable(input)
+  return contextTokens(input.tokens) >= usable(input)
 }
 
 export function pressureLevel(input: {
@@ -64,7 +68,7 @@ export function pressureLevel(input: {
   const limit = usable(input)
   if (limit === 0) return 0
 
-  const ratio = tokenCount(input.tokens) / limit
+  const ratio = contextTokens(input.tokens) / limit
   if (ratio < 0.50) return 0
   if (ratio < 0.70) return 1
   if (ratio < 0.85) return 2

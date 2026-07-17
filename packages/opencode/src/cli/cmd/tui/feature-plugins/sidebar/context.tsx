@@ -8,14 +8,6 @@ const id = "internal:sidebar-context"
 const REFRESH_MS = 1000
 type Reading = Exclude<ContextUsage, { kind: "invalidated" }>
 
-function inputLimit(usage: Reading) {
-  return usage.kind === "live" ? usage.inputLimit : usage.limit
-}
-
-function liveInputLimit(usage: Reading) {
-  return usage.kind === "live" ? usage.inputLimit : null
-}
-
 const money = new Intl.NumberFormat("en-US", {
   style: "currency",
   currency: "USD",
@@ -74,18 +66,14 @@ function View(props: { api: TuiPluginApi; session_id: string }) {
 
   const tpsLabel = createMemo(() => formatTPS(tps()))
 
-  const state = createMemo(() => {
-    const live = (props.api.state.session.status(props.session_id) as
-      | { type: string; context?: { input: number; output: number; limit: number; inputLimit: number } }
-      | undefined)?.context
-    return resolveContextUsage({
+  const state = createMemo(() =>
+    resolveContextUsage({
       messages: msg(),
       parts: (messageID) => props.api.state.part(messageID),
-      live,
       contextLimit: (providerID, modelID) =>
         props.api.state.provider.find((item) => item.id === providerID)?.models[modelID]?.limit.context,
-    })
-  })
+    }),
+  )
   const reading = createMemo<Reading | undefined>(() => {
     const value = state()
     return value?.kind === "invalidated" ? undefined : value
@@ -103,22 +91,11 @@ function View(props: { api: TuiPluginApi; session_id: string }) {
       >
         {(usage) => (
           <>
-            <text fg={theme().textMuted}>
-              {usage().input.toLocaleString()} {usage().kind === "live" ? "input tokens" : "tokens (last request)"}
-            </text>
-            <Show when={usage().kind === "live" ? usage().reserved : null}>
-              {(reserved) => <text fg={theme().textMuted}>{reserved().toLocaleString()} output reserved</text>}
-            </Show>
-            <Show when={inputLimit(usage())}>
+            <text fg={theme().textMuted}>{usage().tokens.toLocaleString()} tokens</text>
+            <Show when={usage().limit}>
               {(limit) => (
-                <text fg={theme().textMuted}>
-                  {Math.round((usage().input / limit()) * 100)}%{" "}
-                  {usage().kind === "live" ? "effective input used" : "used (last request)"}
-                </text>
+                <text fg={theme().textMuted}>{Math.round((usage().tokens / limit()) * 100)}% used</text>
               )}
-            </Show>
-            <Show when={liveInputLimit(usage())}>
-              {(limit) => <text fg={theme().textMuted}>{limit().toLocaleString()} effective input limit</text>}
             </Show>
           </>
         )}

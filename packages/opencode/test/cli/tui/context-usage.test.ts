@@ -19,11 +19,11 @@ function assistant(
   id: string,
   input: number,
   options: Partial<AssistantMessage> & {
+    total?: number
     cacheRead?: number
     cacheWrite?: number
     output?: number
     reasoning?: number
-    context?: number
   } = {},
 ): AssistantMessage {
   return {
@@ -39,7 +39,7 @@ function assistant(
     summary: options.summary,
     cost: 0,
     tokens: {
-      context: options.context,
+      total: options.total,
       input,
       output: options.output ?? 0,
       reasoning: options.reasoning ?? 0,
@@ -65,48 +65,37 @@ function part(messageID: string, type: "checkpoint" | "compaction"): Part {
   return { id: `p-${messageID}`, sessionID, messageID, type, auto: false }
 }
 
-function resolve(
-  messages: Message[],
-  parts: Record<string, Part[]> = {},
-  live?: { input: number; output: number; limit: number; inputLimit: number },
-) {
+function resolve(messages: Message[], parts: Record<string, Part[]> = {}) {
   return resolveContextUsage({
     messages,
     parts: (messageID) => parts[messageID] ?? [],
-    live,
     contextLimit: (providerID, modelID) => (providerID === "test" && modelID === "main" ? 100_000 : 200_000),
   })
 }
 
 describe("TUI context usage", () => {
-  test("uses exact live request input and reserved output", () => {
-    expect(
-      resolve([user("u1")], {}, { input: 12_000, output: 8_000, limit: 100_000, inputLimit: 92_000 }),
-    ).toEqual({
-      kind: "live",
-      input: 12_000,
-      reserved: 8_000,
-      limit: 100_000,
-      inputLimit: 92_000,
-    })
-  })
-
-  test("last request counts input and cache but excludes output and reasoning", () => {
+  test("completed response includes prompt, output, reasoning, and cache in current context", () => {
     expect(
       resolve([
         user("u1"),
         assistant("a2", 40_000, { cacheRead: 5_000, cacheWrite: 2_000, output: 9_000, reasoning: 4_000 }),
       ]),
-    ).toEqual({ kind: "last", input: 47_000, reserved: null, limit: 100_000 })
+    ).toEqual({ kind: "current", tokens: 60_000, limit: 100_000 })
   })
 
-  test("uses persisted exact request context after streaming ends", () => {
+  test("prefers provider-reported total", () => {
     expect(
       resolve([
         user("u1"),
-        assistant("a2", 40_000, { context: 52_000, cacheRead: 5_000, output: 9_000, reasoning: 4_000 }),
+        assistant("a2", 58_893, { total: 63_450, output: 4_490, reasoning: 67 }),
       ]),
-    ).toEqual({ kind: "last", input: 52_000, reserved: null, limit: 100_000 })
+    ).toEqual({ kind: "current", tokens: 63_450, limit: 100_000 })
+  })
+
+  test("ignores a legacy estimated context field", () => {
+    const message = assistant("a2", 40_000, { cacheRead: 5_000, output: 9_000, reasoning: 4_000 })
+    ;(message.tokens as unknown as { context: number }).context = 52_000
+    expect(resolve([user("u1"), message])).toEqual({ kind: "current", tokens: 58_000, limit: 100_000 })
   })
 
   test("compaction summary invalidates the pre-compaction request instead of exposing its usage", () => {
@@ -125,7 +114,7 @@ describe("TUI context usage", () => {
     }
   })
 
-  test("a normal request after the boundary restores an exact reading", () => {
+  test("a normal request after the boundary restores a provider reading", () => {
     expect(
       resolve(
         [
@@ -138,14 +127,13 @@ describe("TUI context usage", () => {
         ],
         { u3: [part("u3", "compaction")] },
       ),
-    ).toEqual({ kind: "last", input: 21_000, reserved: null, limit: 100_000 })
+    ).toEqual({ kind: "current", tokens: 21_000, limit: 100_000 })
   })
 
   test("uses the model limit of the last valid main request", () => {
     expect(resolve([user("u1"), assistant("a2", 25_000, { modelID: "other" })])).toEqual({
-      kind: "last",
-      input: 25_000,
-      reserved: null,
+      kind: "current",
+      tokens: 25_000,
       limit: 200_000,
     })
   })

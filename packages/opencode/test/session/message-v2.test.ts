@@ -129,6 +129,18 @@ function basePart(messageID: string, id: string) {
   }
 }
 
+describe("session.message-v2.Assistant", () => {
+  test("accepts legacy tokens.context data and strips the obsolete field", () => {
+    const legacy = assistantInfo("msg_legacy_assistant", "msg_legacy_user")
+    Object.assign(legacy.tokens, { context: 14_259 })
+
+    const parsed = MessageV2.Assistant.parse(legacy)
+
+    expect(parsed.tokens.input).toBe(0)
+    expect("context" in parsed.tokens).toBe(false)
+  })
+})
+
 describe("session.message-v2.toModelMessage", () => {
   test("filters out messages with no parts", async () => {
     const input: MessageV2.WithParts[] = [

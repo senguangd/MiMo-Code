@@ -56,6 +56,20 @@ describe("context budget", () => {
     ).toBe(120_000)
   })
 
+  test("legacy estimated context cannot override provider-reported usage", () => {
+    const mdl = model({ context: 100_000, output: 20_000 })
+    const tokens = {
+      total: 95_000,
+      context: 12_000,
+      input: 90_000,
+      output: 3_000,
+      reasoning: 2_000,
+      cache: { read: 0, write: 0 },
+    } as any
+
+    expect(isOverflow({ cfg, model: mdl, tokens })).toBe(true)
+  })
+
   test("overflow fallback includes reasoning when provider total is unavailable", () => {
     const mdl = model({ context: 100_000, output: 20_000 })
     expect(
