@@ -660,7 +660,7 @@ it.live("session.processor effect tests compact on structured context overflow",
   ),
 )
 
-it.live("session.processor effect tests mark pending tools as aborted on cleanup", () =>
+it.live("session.processor effect tests discard incomplete pending tools on cleanup", () =>
   provideTmpdirServer(
     ({ dir, llm }) =>
       Effect.gen(function* () {
@@ -717,12 +717,7 @@ it.live("session.processor effect tests mark pending tools as aborted on cleanup
           expect(Cause.hasInterruptsOnly(exit.cause)).toBe(true)
         }
         expect(yield* llm.calls).toBe(1)
-        expect(call?.state.status).toBe("error")
-        if (call?.state.status === "error") {
-          expect(call.state.error).toBe("Tool execution aborted")
-          expect(call.state.metadata?.interrupted).toBe(true)
-          expect(call.state.time.end).toBeDefined()
-        }
+        expect(call).toBeUndefined()
       }),
     { git: true, config: (url) => providerCfg(url) },
   ),

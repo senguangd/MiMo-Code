@@ -2070,27 +2070,62 @@ NOTE: At any point in time through this workflow you should feel free to ask the
       const ORPHAN_AGE_MS = 3_600_000
       for (const m of msgs) {
         if (m.info.role !== "assistant") continue
-        if (m.info.time?.completed) continue
-        const created = m.info.time?.created ?? 0
+        const info = m.info
+        if (info.time.completed) continue
+        const created = info.time.created
         if (!immediate && now - created < ORPHAN_AGE_MS) continue
-        m.info.time = { ...m.info.time, completed: now }
-        m.info.error =
-          m.info.error ??
-          new MessageV2.AbortedError({
-            message: "Abandoned: previous request interrupted before completion",
-          }).toObject()
-        yield* sessions.updateMessage(m.info).pipe(
+        const recovered = yield* Effect.gen(function* () {
+          for (const part of m.parts) {
+            if (part.type === "text") {
+              if (part.text.length === 0) {
+                yield* sessions.removePart({ sessionID, messageID: info.id, partID: part.id })
+              } else if (part.time && !part.time.end) {
+                yield* sessions.updatePart({ ...part, time: { ...part.time, end: now } })
+              }
+              continue
+            }
+            if (part.type === "reasoning") {
+              if (part.text.length === 0) {
+                yield* sessions.removePart({ sessionID, messageID: info.id, partID: part.id })
+              } else if (!part.time.end) {
+                yield* sessions.updatePart({ ...part, time: { ...part.time, end: now } })
+              }
+              continue
+            }
+            if (part.type !== "tool") continue
+
+            const settled = MessageV2.settleInterruptedToolPart(part, "Tool execution interrupted", now)
+            if (!settled) {
+              yield* sessions.removePart({ sessionID, messageID: info.id, partID: part.id })
+            } else if (settled !== part) {
+              yield* sessions.updatePart(settled)
+            }
+          }
+
+          info.time = { ...info.time, completed: now }
+          info.error =
+            info.error ??
+            new MessageV2.AbortedError({
+              message: "Abandoned: previous request interrupted before completion",
+            }).toObject()
+          yield* sessions.updateMessage(info)
+          return true
+        }).pipe(
           Effect.catchCause((cause) =>
-            elog.warn("orphan-update-failed", {
-              sessionID,
-              messageID: m.info.id,
-              cause,
-            }),
+            elog
+              .warn("orphan-recovery-failed", {
+                sessionID,
+                messageID: info.id,
+                cause,
+              })
+              .pipe(Effect.as(false)),
           ),
         )
+        if (!recovered) continue
+
         yield* elog.info("orphan-assistant-cleared", {
           sessionID,
-          messageID: m.info.id,
+          messageID: info.id,
         })
       }
     })

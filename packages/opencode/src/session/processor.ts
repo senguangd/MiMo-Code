@@ -23,7 +23,6 @@ import { errorMessage } from "@/util/error"
 import { isRecoverableError } from "@/tool/recoverable"
 import { getToolResultAttachments, getToolResultMetadata } from "@/tool/result-error"
 import { Log } from "@/util"
-import { isRecord } from "@/util/record"
 import { createTextNgramMonitor, type TextNgramMonitor } from "./prompt/text-ngram-detection"
 import { Flag } from "@/flag/flag"
 import { monitor as tryBestMonitor, type TryBestIncident } from "./try-best-detector"
@@ -919,19 +918,16 @@ export const layer: Layer.Layer<
         for (const toolCallID of Object.keys(ctx.toolcalls)) {
           const match = yield* readToolCall(toolCallID)
           if (!match) continue
-          const part = match.part
-          const end = Date.now()
-          const metadata = "metadata" in part.state && isRecord(part.state.metadata) ? part.state.metadata : {}
-          yield* session.updatePart({
-            ...part,
-            state: {
-              ...part.state,
-              status: "error",
-              error: "Tool execution aborted",
-              metadata: { ...metadata, interrupted: true },
-              time: { start: "time" in part.state ? part.state.time.start : end, end },
-            },
-          })
+          const part = MessageV2.settleInterruptedToolPart(match.part, "Tool execution aborted")
+          if (part) {
+            yield* session.updatePart(part)
+          } else {
+            yield* session.removePart({
+              sessionID: match.part.sessionID,
+              messageID: match.part.messageID,
+              partID: match.part.id,
+            })
+          }
         }
         ctx.toolcalls = {}
         // Clear stale error from previous failed attempts if the effect

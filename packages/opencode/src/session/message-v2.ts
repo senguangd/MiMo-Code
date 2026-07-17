@@ -373,6 +373,31 @@ export const ToolPart = PartBase.extend({
 })
 export type ToolPart = z.infer<typeof ToolPart>
 
+/**
+ * Reconcile a tool part after its owning stream is interrupted.
+ *
+ * A pending part contains only speculative, possibly truncated input and must
+ * be discarded. A running part may already have produced side effects, so it
+ * is retained as a terminal error and must never be replayed implicitly.
+ */
+export function settleInterruptedToolPart(part: ToolPart, error: string, now = Date.now()): ToolPart | undefined {
+  if (part.state.status === "pending" && !part.metadata?.providerExecuted) return undefined
+  if (part.state.status !== "pending" && part.state.status !== "running") return part
+
+  const start = part.state.status === "running" ? part.state.time.start : now
+  const metadata = part.state.status === "running" ? part.state.metadata : undefined
+  return {
+    ...part,
+    state: {
+      status: "error",
+      input: part.state.input,
+      error,
+      metadata: { ...metadata, interrupted: true },
+      time: { start, end: now },
+    },
+  }
+}
+
 const Base = z.object({
   id: MessageID.zod,
   sessionID: SessionID.zod,
@@ -773,7 +798,7 @@ export const toModelMessagesEffect = Effect.fnUntraced(function* (
         msg.info.error &&
         !(
           AbortedError.isInstance(msg.info.error) &&
-          msg.parts.some((part) => part.type !== "step-start" && part.type !== "reasoning")
+          msg.parts.some((part) => part.type === "tool" || (part.type === "text" && part.text.length > 0))
         )
       ) {
         continue

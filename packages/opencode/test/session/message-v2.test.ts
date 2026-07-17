@@ -1042,7 +1042,7 @@ describe("session.message-v2.toModelMessage", () => {
     expect(await MessageV2.toModelMessages(input, model)).toStrictEqual([])
   })
 
-  test("includes aborted assistant messages only when they have non-step-start/reasoning content", async () => {
+  test("includes aborted assistant messages only when they have substantive model-visible content", async () => {
     const assistantID1 = "m-assistant-1"
     const assistantID2 = "m-assistant-2"
 
@@ -1077,6 +1077,11 @@ describe("session.message-v2.toModelMessage", () => {
             type: "reasoning",
             text: "thinking",
             time: { start: 0 },
+          },
+          {
+            ...basePart(assistantID2, "b3"),
+            type: "text",
+            text: "",
           },
         ] as MessageV2.Part[],
       },
@@ -1236,6 +1241,85 @@ describe("session.message-v2.toModelMessage", () => {
         ],
       },
     ])
+  })
+})
+
+describe("session.message-v2.settleInterruptedToolPart", () => {
+  const base = {
+    id: PartID.make("part"),
+    messageID: MessageID.make("message"),
+    sessionID,
+    type: "tool" as const,
+    tool: "bash",
+    callID: "call",
+  }
+
+  test("discards a pending tool whose input was never committed", () => {
+    const part = {
+      ...base,
+      state: { status: "pending" as const, input: {}, raw: '{"command":' },
+    } satisfies MessageV2.ToolPart
+
+    expect(MessageV2.settleInterruptedToolPart(part, "interrupted", 20)).toBeUndefined()
+  })
+
+  test("terminalizes provider-executed pending tools instead of replaying them", () => {
+    const part = {
+      ...base,
+      metadata: { providerExecuted: true },
+      state: { status: "pending" as const, input: {}, raw: "" },
+    } satisfies MessageV2.ToolPart
+
+    expect(MessageV2.settleInterruptedToolPart(part, "interrupted", 20)).toEqual({
+      ...base,
+      metadata: { providerExecuted: true },
+      state: {
+        status: "error",
+        input: {},
+        error: "interrupted",
+        metadata: { interrupted: true },
+        time: { start: 20, end: 20 },
+      },
+    })
+  })
+
+  test("terminalizes a running tool without losing execution evidence", () => {
+    const part = {
+      ...base,
+      state: {
+        status: "running" as const,
+        input: { command: "echo test" },
+        metadata: { output: "partial" },
+        time: { start: 10 },
+      },
+    } satisfies MessageV2.ToolPart
+
+    expect(MessageV2.settleInterruptedToolPart(part, "interrupted", 20)).toEqual({
+      ...base,
+      state: {
+        status: "error",
+        input: { command: "echo test" },
+        error: "interrupted",
+        metadata: { output: "partial", interrupted: true },
+        time: { start: 10, end: 20 },
+      },
+    })
+  })
+
+  test("leaves terminal tool parts unchanged", () => {
+    const part = {
+      ...base,
+      state: {
+        status: "completed" as const,
+        input: { command: "echo test" },
+        output: "done",
+        title: "bash",
+        metadata: {},
+        time: { start: 10, end: 20 },
+      },
+    } satisfies MessageV2.ToolPart
+
+    expect(MessageV2.settleInterruptedToolPart(part, "interrupted", 30)).toBe(part)
   })
 })
 
