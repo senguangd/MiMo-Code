@@ -28,7 +28,9 @@ function View(props: { api: TuiPluginApi; session_id: string }) {
 
   const [tick, setTick] = createSignal(Date.now())
 
-  const lastAssistant = createMemo(() => msg().findLast((item): item is AssistantMessage => item.role === "assistant"))
+  const lastAssistant = createMemo(() =>
+    msg().findLast((item): item is AssistantMessage => item.role === "assistant"),
+  )
 
   const isStreaming = createMemo(() => {
     const m = lastAssistant()
@@ -73,11 +75,9 @@ function View(props: { api: TuiPluginApi; session_id: string }) {
   const tpsLabel = createMemo(() => formatTPS(tps()))
 
   const state = createMemo(() => {
-    const live = (
-      props.api.state.session.status(props.session_id) as
-        | { type: string; context?: { input: number; output: number; limit: number; inputLimit: number } }
-        | undefined
-    )?.context
+    const live = (props.api.state.session.status(props.session_id) as
+      | { type: string; context?: { input: number; output: number; limit: number; inputLimit: number } }
+      | undefined)?.context
     return resolveContextUsage({
       messages: msg(),
       parts: (messageID) => props.api.state.part(messageID),

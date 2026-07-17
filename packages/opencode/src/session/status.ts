@@ -113,7 +113,10 @@ export const layer = Layer.effect(
         const currentOwner = current.messageID
         const nextOwner = status.messageID
 
-        const sameOwner = currentOwner ? !nextOwner || nextOwner === currentOwner : !nextOwner
+        const sameOwner =
+          currentOwner
+            ? !nextOwner || nextOwner === currentOwner
+            : !nextOwner
 
         // Allow two intentional retry -> busy transitions:
         // 1. recoveredFromRetry: true  => real stream progress, clear footer
