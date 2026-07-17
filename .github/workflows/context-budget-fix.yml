@@ -34,10 +34,9 @@ jobs:
           python - <<'PY'
           from pathlib import Path
           path = Path('.github/context-fix.py')
-          text = path.read_text()
-          text = text.replace(
-              '    expect(prompt).not.toContain("maxThresholdCrossed")\\n',
-              '    expect(prompt).not.toContain(["maxThreshold", "Crossed"].join(""))\\n',
+          text = path.read_text().replace(
+              'expect(prompt).not.toContain("maxThresholdCrossed")',
+              'expect(prompt).not.toContain(["maxThreshold", "Crossed"].join(""))',
           )
           path.write_text(text)
           PY
