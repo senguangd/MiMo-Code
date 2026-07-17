@@ -6,6 +6,7 @@ import type { SessionID, MessageID } from "../session/schema"
 import * as Truncate from "./truncate"
 import { RecoverableError } from "./recoverable"
 import { Agent } from "@/agent/agent"
+import type { ToolCapability } from "@mimo-ai/plugin/tool"
 
 export interface Metadata {
   [key: string]: any
@@ -38,6 +39,8 @@ export interface ExecuteResult<M extends Metadata = Metadata> {
 export interface Def<Parameters extends z.ZodType = z.ZodType, M extends Metadata = Metadata> {
   id: string
   description: string
+  capabilities?: readonly ToolCapability[]
+  internal?: boolean
   parameters: Parameters
   execute(args: z.infer<Parameters>, ctx: Context): Effect.Effect<ExecuteResult<M>>
   formatValidationError?(error: z.ZodError): string

@@ -123,6 +123,7 @@ use the mcp_everything tool to add the number 3 and 4
 | `environment` | 对象   |      | 运行服务器时设置的环境变量。                                      |
 | `enabled`     | 布尔值 |      | 启动时启用或禁用该 MCP 服务器。                                   |
 | `timeout`     | 数字   |      | 从 MCP 服务器获取工具的超时时间（毫秒）。默认为 5000（即 5 秒）。 |
+| `toolCapabilities` | 对象 |      | 按 MCP 服务器返回的原始工具名显式声明语义能力。                   |
 
 ---
 
@@ -160,6 +161,30 @@ use the mcp_everything tool to add the number 3 and 4
 | `headers` | 对象   |      | 随请求发送的请求头。                                              |
 | `oauth`   | 对象   |      | OAuth 身份验证配置。详见下方 [OAuth](#oauth) 部分。               |
 | `timeout` | 数字   |      | 从 MCP 服务器获取工具的超时时间（毫秒）。默认为 5000（即 5 秒）。 |
+| `toolCapabilities` | 对象 |   | 按 MCP 服务器返回的原始工具名显式声明语义能力。                   |
+
+---
+
+### 工具能力
+
+只有当某个 MCP 工具确实应被工作流识别为网页搜索、网页获取或代码/文档搜索时，才显式声明其语义能力。键必须使用该 MCP 服务器返回的原始工具名：
+
+```jsonc title="opencode.jsonc"
+{
+  "mcp": {
+    "one-search": {
+      "type": "local",
+      "command": ["one-search-mcp"],
+      "toolCapabilities": {
+        "one_search": ["web-search"],
+        "one_scrape": ["web-fetch"]
+      }
+    }
+  }
+}
+```
+
+支持的值为 `web-search`、`web-fetch` 和 `code-search`。MiMo Code 不会根据工具名称猜测能力，也不会重命名或为 MCP 工具创建别名；模型必须调用最终生成的精确工具 ID，并遵循其 schema。
 
 ---
 

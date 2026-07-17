@@ -27,10 +27,14 @@ type AskInput = {
   metadata: { [key: string]: any }
 }
 
+export const TOOL_CAPABILITIES = ["web-search", "web-fetch", "code-search"] as const
+export type ToolCapability = (typeof TOOL_CAPABILITIES)[number]
 export type ToolResult = string | { output: string; metadata?: { [key: string]: any } }
 
 export function tool<Args extends z.ZodRawShape>(input: {
   description: string
+  /** Semantic capabilities supplied by this tool. Tool names are never inferred. */
+  capabilities?: readonly ToolCapability[]
   args: Args
   execute(args: z.infer<z.ZodObject<Args>>, context: ToolContext): Promise<ToolResult>
 }) {

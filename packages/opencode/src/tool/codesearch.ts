@@ -12,6 +12,7 @@ export const CodeSearchTool = Tool.define(
 
     return {
       description: DESCRIPTION,
+      capabilities: ["code-search"] as const,
       parameters: z.object({
         query: z
           .string()

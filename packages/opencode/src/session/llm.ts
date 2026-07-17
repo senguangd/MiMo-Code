@@ -3,7 +3,17 @@ import { Provider } from "@/provider"
 import { Log } from "@/util"
 import { Clock, Context, Duration, Effect, Layer, Record, Schedule, Ref, Cause } from "effect"
 import * as Stream from "effect/Stream"
-import { APICallError, streamText, wrapLanguageModel, type ModelMessage, type Tool, tool, jsonSchema } from "ai"
+import {
+  APICallError,
+  InvalidToolInputError,
+  NoSuchToolError,
+  streamText,
+  wrapLanguageModel,
+  type ModelMessage,
+  type Tool,
+  tool,
+  jsonSchema,
+} from "ai"
 import { mergeDeep, pipe } from "remeda"
 import { GitLabWorkflowLanguageModel } from "gitlab-ai-provider"
 import { ProviderTransform } from "@/provider"
@@ -35,6 +45,7 @@ import { ActorRegistry } from "@/actor/registry"
 import { Memory } from "@/memory"
 import { isRetryableTransientError } from "./retry"
 import { contextBudget } from "./overflow"
+import * as ToolCapabilities from "@/tool/capability"
 
 const log = Log.create({ service: "llm" })
 export const OUTPUT_TOKEN_MAX = ProviderTransform.OUTPUT_TOKEN_MAX
@@ -269,6 +280,7 @@ export type StreamInput = {
   messages: ModelMessage[]
   small?: boolean
   tools: Record<string, Tool>
+  usableToolIDs?: readonly string[]
   retries?: number
   toolChoice?: "auto" | "required" | "none"
   agentID?: string
@@ -418,6 +430,11 @@ const live: Layer.Layer<
 
       // TODO: move this to a proper hook
       const isOpenaiOauth = item.id === "openai" && info?.type === "oauth"
+      const tools = resolveTools(input)
+      const capabilitySnapshot = ToolCapabilities.snapshot({
+        tools,
+        usableToolIDs: input.usableToolIDs,
+      })
 
       const system =
         input.prebuiltSystem ??
@@ -465,10 +482,15 @@ const live: Layer.Layer<
       const requestMessages = input.dropAssistantPrefill
         ? ProviderTransform.dropTrailingAssistantPrefill(input.messages)
         : input.messages
+      const contract =
+        Object.keys(input.tools).length === 0 && input.usableToolIDs === undefined
+          ? undefined
+          : ToolCapabilities.render(capabilitySnapshot)
+      const contractedMessages = contract ? appendToolContract(requestMessages, contract) : requestMessages
       const messages = isOpenaiOauth
-        ? requestMessages
+        ? contractedMessages
         : isWorkflow
-          ? requestMessages
+          ? contractedMessages
           : [
               ...system.map(
                 (x): ModelMessage => ({
@@ -476,7 +498,7 @@ const live: Layer.Layer<
                   content: x,
                 }),
               ),
-              ...requestMessages,
+              ...contractedMessages,
             ]
 
       const params = yield* plugin.trigger(
@@ -512,8 +534,6 @@ const live: Layer.Layer<
           headers: {},
         },
       )
-
-      const tools = resolveTools(input)
 
       // LiteLLM and some Anthropic proxies require the tools parameter to be present
       // when message history contains tool calls, even if no tools are being used.
@@ -673,7 +693,7 @@ const live: Layer.Layer<
           })
         },
         async experimental_repairToolCall(failed) {
-          const registered = Object.keys(tools).filter((x) => x !== "invalid")
+          const registered = Object.keys(tools).filter((id) => !ToolCapabilities.isInternal(tools[id]!))
           const repaired = await ToolCompat.repairToolCall({
             toolName: failed.toolCall.toolName,
             input: failed.toolCall.input,
@@ -691,11 +711,21 @@ const live: Layer.Layer<
               input: repaired.input,
             }
           }
+          const unavailable = NoSuchToolError.isInstance(failed.error)
+          const alternatives = unavailable
+            ? ToolCapabilities.alternatives(failed.toolCall.toolName, capabilitySnapshot)
+            : []
           return {
             ...failed.toolCall,
             input: JSON.stringify({
+              kind: unavailable ? "tool_unavailable" : "invalid_arguments",
               tool: failed.toolCall.toolName,
-              error: failed.error.message,
+              error: unavailable
+                ? "No tool with that ID is runtime-usable in the current request."
+                : InvalidToolInputError.isInstance(failed.error)
+                  ? failed.error.message
+                  : String(failed.error),
+              ...(alternatives.length ? { alternatives } : {}),
             }),
             toolName: "invalid",
           }
@@ -704,7 +734,7 @@ const live: Layer.Layer<
         topP: params.topP,
         topK: params.topK,
         providerOptions: ProviderTransform.providerOptions(input.model, params.options),
-        activeTools: Object.keys(tools).filter((x) => x !== "invalid"),
+        activeTools: Object.keys(tools).filter((id) => !ToolCapabilities.isInternal(tools[id]!)),
         tools: ProviderTransform.tools(tools, input.model),
         toolChoice: input.toolChoice,
         maxOutputTokens: params.maxOutputTokens,
@@ -933,12 +963,27 @@ export const defaultLayer = Layer.suspend(() =>
   ),
 )
 
+function appendToolContract(messages: ModelMessage[], contract: string): ModelMessage[] {
+  const reminder = `<system-reminder>\n${contract}\n</system-reminder>`
+  const index = messages.length - 1
+  const message = messages[index]
+  if (message?.role !== "user") return [...messages, { role: "user", content: reminder }]
+  const content =
+    typeof message.content === "string"
+      ? `${message.content}\n\n${reminder}`
+      : [...message.content, { type: "text" as const, text: reminder }]
+  return messages.with(index, { ...message, content })
+}
+
 function resolveTools(input: Pick<StreamInput, "tools" | "agent" | "permission" | "user">) {
   const disabled = Permission.disabled(
     Object.keys(input.tools),
     Agent.runtimePermission(input.agent, input.permission),
   )
-  return Record.filter(input.tools, (_, k) => input.user.tools?.[k] !== false && !disabled.has(k))
+  return Record.filter(
+    input.tools,
+    (tool, key) => ToolCapabilities.isInternal(tool) || (input.user.tools?.[key] !== false && !disabled.has(key)),
+  )
 }
 
 // Check if messages contain any tool-call content

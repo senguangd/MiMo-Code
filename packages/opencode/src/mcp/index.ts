@@ -30,6 +30,7 @@ import { EffectBridge } from "@/effect"
 import { InstanceState } from "@/effect"
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
 import * as CrossSpawnSpawner from "@/effect/cross-spawn-spawner"
+import * as ToolCapabilities from "@/tool/capability"
 
 const log = Log.create({ service: "mcp" })
 const DEFAULT_TIMEOUT = 30_000
@@ -664,7 +665,10 @@ export const layer = Layer.effect(
 
             const timeout = entry?.timeout ?? defaultTimeout
             for (const mcpTool of listed) {
-              result[sanitize(clientName) + "_" + sanitize(mcpTool.name)] = convertMcpTool(mcpTool, client, timeout)
+              const id = sanitize(clientName) + "_" + sanitize(mcpTool.name)
+              result[id] = ToolCapabilities.annotate(convertMcpTool(mcpTool, client, timeout), {
+                capabilities: entry?.toolCapabilities?.[mcpTool.name],
+              })
             }
           }),
         { concurrency: "unbounded" },

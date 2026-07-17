@@ -168,7 +168,12 @@ export const Flag = {
   MIMOCODE_EXPERIMENTAL_ICON_DISCOVERY: MIMOCODE_EXPERIMENTAL || truthy("MIMOCODE_EXPERIMENTAL_ICON_DISCOVERY"),
   MIMOCODE_EXPERIMENTAL_DISABLE_COPY_ON_SELECT:
     copy === undefined ? process.platform === "win32" : truthy("MIMOCODE_EXPERIMENTAL_DISABLE_COPY_ON_SELECT"),
-  MIMOCODE_ENABLE_EXA: truthy("MIMOCODE_ENABLE_EXA") || MIMOCODE_EXPERIMENTAL || truthy("MIMOCODE_EXPERIMENTAL_EXA"),
+  MIMOCODE_ENABLE_EXA:
+    truthy("MIMOCODE_ENABLE_EXA") ||
+    truthy("OPENCODE_ENABLE_EXA") ||
+    MIMOCODE_EXPERIMENTAL ||
+    truthy("MIMOCODE_EXPERIMENTAL_EXA") ||
+    truthy("OPENCODE_EXPERIMENTAL_EXA"),
   MIMOCODE_EXPERIMENTAL_BASH_DEFAULT_TIMEOUT_MS: number("MIMOCODE_EXPERIMENTAL_BASH_DEFAULT_TIMEOUT_MS"),
   // Token-efficient post-cleanse: strip ANSI / fold \r progress bars / redact
   // secrets / elide super-long lines from bash tool output before it is

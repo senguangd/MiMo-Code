@@ -16,6 +16,7 @@ import type { Agent } from "../../src/agent/agent"
 import { MessageV2 } from "../../src/session/message-v2"
 import { SessionID, MessageID } from "../../src/session/schema"
 import { AppRuntime } from "../../src/effect/app-runtime"
+import * as ToolCapabilities from "../../src/tool/capability"
 
 async function getModel(providerID: ProviderID, modelID: ModelID) {
   return AppRuntime.runPromise(
@@ -280,6 +281,45 @@ async function loadFixture(providerID: string, modelID: string) {
   return { provider, model }
 }
 
+function createToolCallStream(toolName: string, input: unknown) {
+  const payload =
+    [
+      `data: ${JSON.stringify({
+        id: "chatcmpl-tool",
+        object: "chat.completion.chunk",
+        choices: [
+          {
+            index: 0,
+            delta: {
+              role: "assistant",
+              tool_calls: [
+                {
+                  index: 0,
+                  id: "call-tool-contract",
+                  type: "function",
+                  function: { name: toolName, arguments: JSON.stringify(input) },
+                },
+              ],
+            },
+          },
+        ],
+      })}`,
+      `data: ${JSON.stringify({
+        id: "chatcmpl-tool",
+        object: "chat.completion.chunk",
+        choices: [{ index: 0, delta: {}, finish_reason: "tool_calls" }],
+      })}`,
+      "data: [DONE]",
+    ].join("\n\n") + "\n\n"
+
+  return new ReadableStream<Uint8Array>({
+    start(controller) {
+      controller.enqueue(new TextEncoder().encode(payload))
+      controller.close()
+    },
+  })
+}
+
 function createEventStream(chunks: unknown[], includeDone = false) {
   const lines = chunks.map((chunk) => `data: ${typeof chunk === "string" ? chunk : JSON.stringify(chunk)}`)
   if (includeDone) {
@@ -497,6 +537,7 @@ describe("session.llm.stream", () => {
     const fixture = await loadFixture(providerID, modelID)
     const model = fixture.model
 
+    const counter = waitTokenCount()
     const request = waitRequest(
       "/chat/completions",
       new Response(createChatStream("Hello"), {
@@ -564,11 +605,122 @@ describe("session.llm.stream", () => {
           },
         })
 
+        await counter
         const capture = await request
         const tools = capture.body.tools as Array<{ function?: { name?: string } }> | undefined
         expect(tools?.some((item) => item.function?.name === "question")).toBe(true)
       },
     })
+  })
+
+  test("uses the runtime tool contract and classifies an unavailable tool without semantic aliasing", async () => {
+    const server = state.server
+    if (!server) throw new Error("Server not initialized")
+
+    const providerID = "alibaba"
+    const modelID = "qwen-plus"
+    const fixture = await loadFixture(providerID, modelID)
+    const counter = waitTokenCount()
+    const request = waitRequest(
+      "/chat/completions",
+      new Response(createToolCallStream("websearch", { query: "latest release" }), {
+        status: 200,
+        headers: { "Content-Type": "text/event-stream" },
+      }),
+    )
+    let invalidInput: unknown
+
+    await using tmp = await tmpdir({
+      init: async (dir) => {
+        await Bun.write(
+          path.join(dir, "mimocode.json"),
+          JSON.stringify({
+            $schema: "https://opencode.ai/config.json",
+            enabled_providers: [providerID],
+            provider: {
+              [providerID]: {
+                options: { apiKey: "test-key", baseURL: `${server.url.origin}/v1` },
+              },
+            },
+          }),
+        )
+      },
+    })
+
+    await Instance.provide({
+      directory: tmp.path,
+      fn: async () => {
+        const resolved = await getModel(ProviderID.make(providerID), ModelID.make(fixture.model.id))
+        const sessionID = SessionID.make("session-tool-contract")
+        const agent = {
+          name: "test",
+          mode: "primary",
+          options: {},
+          permission: [{ permission: "*", pattern: "*", action: "allow" }],
+        } satisfies Agent.Info
+        const user = {
+          id: MessageID.make("user-tool-contract"),
+          sessionID,
+          role: "user",
+          time: { created: Date.now() },
+          agent: agent.name,
+          model: { providerID: ProviderID.make(providerID), modelID: resolved.id },
+        } satisfies MessageV2.User
+        const duckduckgo = ToolCapabilities.annotate(
+          tool({
+            description: "Search the web with DuckDuckGo",
+            inputSchema: z.object({ query: z.string() }),
+            execute: async () => ({ output: "unused" }),
+          }),
+          { capabilities: ["web-search"] },
+        )
+        const invalid = ToolCapabilities.annotate(
+          tool({
+            description: "Do not use",
+            inputSchema: z.object({
+              kind: z.enum(["tool_unavailable", "invalid_arguments"]),
+              tool: z.string(),
+              error: z.string(),
+              alternatives: z.array(z.string()).optional(),
+            }),
+            execute: async (input) => {
+              invalidInput = input
+              return { output: "captured" }
+            },
+          }),
+          { internal: true },
+        )
+
+        await drain({
+          user,
+          sessionID,
+          model: resolved,
+          agent,
+          system: ["For this task, call websearch."],
+          messages: [{ role: "user", content: "Find the latest release" }],
+          tools: { duckduckgo_search: duckduckgo, invalid },
+        })
+      },
+    })
+
+    await counter
+    const capture = await request
+    const messages = capture.body.messages as Array<{ role?: string; content?: unknown }>
+    const serializedMessages = JSON.stringify(messages)
+    const sentTools = capture.body.tools as Array<{ function?: { name?: string } }> | undefined
+
+    expect(serializedMessages).toContain("sole authority for tool use")
+    expect(JSON.stringify(messages.filter((message) => message.role === "system"))).not.toContain("<tool-contract>")
+    expect(JSON.stringify(messages.filter((message) => message.role === "user"))).toContain("<tool-contract>")
+    expect(serializedMessages).toContain("Web search is available via: `duckduckgo_search`.")
+    expect(sentTools?.map((item) => item.function?.name)).toEqual(["duckduckgo_search"])
+    expect(invalidInput).toEqual({
+      kind: "tool_unavailable",
+      tool: "websearch",
+      error: "No tool with that ID is runtime-usable in the current request.",
+      alternatives: ["duckduckgo_search"],
+    })
+    expect(JSON.stringify(invalidInput)).not.toContain("Available tools:")
   })
 
   test("sends responses API payload for OpenAI models", async () => {
@@ -1161,7 +1313,6 @@ describe("session.llm.stream", () => {
                 input: { filePath: "/root" },
               },
               {
-                cache_control: { type: "ephemeral" },
                 type: "tool_use",
                 id: "toolu_01APxrADs7VozN8uWzw9WwHr",
                 name: "glob",
@@ -1192,6 +1343,11 @@ describe("session.llm.stream", () => {
                 type: "tool_result",
                 tool_use_id: "toolu_01APxrADs7VozN8uWzw9WwHr",
                 content: "No files found",
+              },
+              {
+                cache_control: { type: "ephemeral" },
+                type: "text",
+                text: expect.stringContaining("<tool-contract>"),
               },
             ],
           },

@@ -39,6 +39,7 @@ import { SystemPrompt } from "../../src/session/system"
 import { Shell } from "../../src/shell/shell"
 import { Snapshot } from "../../src/snapshot"
 import { ToolRegistry } from "../../src/tool"
+import * as ToolCapabilities from "../../src/tool/capability"
 import { Truncate } from "../../src/tool"
 import { ActorRegistry } from "../../src/actor/registry"
 import { ActorWaiter } from "../../src/actor/waiter"
@@ -313,6 +314,25 @@ const mcpIt = testEffect(
         inputSchema: jsonSchema({ type: "object", properties: {}, additionalProperties: false }),
         execute: async () => mcpSuccessResult,
       }),
+    })),
+  ),
+)
+const capabilityIt = testEffect(
+  makeHttp(
+    mcpLayer(() => ({
+      duckduckgo_search: ToolCapabilities.annotate(
+        dynamicTool({
+          description: "Search the web with DuckDuckGo",
+          inputSchema: jsonSchema({
+            type: "object",
+            properties: { query: { type: "string" } },
+            required: ["query"],
+            additionalProperties: false,
+          }),
+          execute: async () => ({ content: [{ type: "text" as const, text: "unused" }] }),
+        }),
+        { capabilities: ["web-search"] },
+      ),
     })),
   ),
 )
@@ -602,6 +622,53 @@ it.live("static loop consumes queued replies across turns", () =>
 
       expect(yield* llm.hits).toHaveLength(2)
       expect(yield* llm.pending).toBe(0)
+    }),
+    { git: true, config: providerCfg },
+  ),
+)
+
+capabilityIt.live("runtime tool contract is authoritative from registry through recovery", () =>
+  provideTmpdirServer(
+    Effect.fnUntraced(function* ({ llm }) {
+      const prompt = yield* SessionPrompt.Service
+      const sessions = yield* Session.Service
+      const session = yield* sessions.create({
+        title: "Tool capability contract",
+        permission: [{ permission: "*", pattern: "*", action: "allow" }],
+      })
+
+      yield* prompt.prompt({
+        sessionID: session.id,
+        agent: "build",
+        noReply: true,
+        parts: [{ type: "text", text: "Find the latest release" }],
+      })
+      yield* llm.tool("websearch", { query: "latest release" })
+      yield* llm.text("Recovered with the available tool contract")
+
+      const result = yield* prompt.loop({ sessionID: session.id })
+      expect(result.parts.some((part) => part.type === "text" && part.text.includes("Recovered"))).toBe(true)
+
+      const inputs = yield* llm.inputs
+      expect(inputs).toHaveLength(2)
+      const first = inputs[0]
+      const toolNames = (first.tools as Array<{ function?: { name?: string } }> | undefined)
+        ?.map((item) => item.function?.name)
+        .filter((name): name is string => name !== undefined)
+      expect(toolNames).toContain("duckduckgo_search")
+      expect(toolNames).not.toContain("websearch")
+      expect(toolNames).not.toContain("invalid")
+      expect(JSON.stringify(first.messages)).toContain("Web search is available via: `duckduckgo_search`.")
+
+      const invalid = (yield* MessageV2.filterCompactedEffect(session.id))
+        .flatMap((message) => message.parts)
+        .find(
+          (part): part is CompletedToolPart =>
+            part.type === "tool" && part.tool === "invalid" && part.state.status === "completed",
+        )
+      expect(invalid?.state.output).toContain("Tool unavailable: websearch")
+      expect(invalid?.state.output).toContain("duckduckgo_search")
+      expect(invalid?.state.output).not.toContain("The arguments provided to the tool are invalid")
     }),
     { git: true, config: providerCfg },
   ),

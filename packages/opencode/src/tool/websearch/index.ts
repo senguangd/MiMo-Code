@@ -4,8 +4,8 @@ import { HttpClient } from "effect/unstable/http"
 import * as Tool from "../tool"
 import * as McpExa from "../mcp-exa"
 import * as MimoWebsearch from "./mimo"
-import { Auth } from "@/auth"
 import { Provider } from "@/provider"
+import type { Backend } from "./backend"
 import DESCRIPTION from "./websearch.txt"
 
 const WEBFETCH_FALLBACK =
@@ -36,12 +36,12 @@ export const WebSearchTool = Tool.define(
   "websearch",
   Effect.gen(function* () {
     const http = yield* HttpClient.HttpClient
-    const auth = yield* Auth.Service
 
     return {
       get description() {
         return DESCRIPTION.replace("{{year}}", new Date().getFullYear().toString())
       },
+      capabilities: ["web-search"] as const,
       parameters: Parameters,
       execute: (params: z.infer<typeof Parameters>, ctx: Tool.Context) =>
         Effect.gen(function* () {
@@ -60,18 +60,19 @@ export const WebSearchTool = Tool.define(
           })
 
           const model = (ctx.extra as { model?: Provider.Model })?.model
+          const backend = (ctx.extra as { webSearchBackend?: Backend })?.webSearchBackend
+          if (!backend) return yield* Effect.die(new Error("websearch backend was not bound by the tool registry"))
           const timeout = params.timeout === undefined ? undefined : Math.min(params.timeout * 1000, MAX_TIMEOUT)
 
           const result =
-            model?.providerID === "xiaomi"
+            backend.kind === "xiaomi-native"
               ? yield* Effect.catchCause(
                   Effect.gen(function* () {
-                    const info = yield* auth.get("xiaomi")
-                    if (!info || info.type !== "api") return undefined
+                    if (!model) return undefined
                     return yield* MimoWebsearch.call(
                       http,
                       model.api.url,
-                      info.key,
+                      backend.apiKey,
                       params.query,
                       "mimo-v2.5",
                       timeout ?? "30 seconds",

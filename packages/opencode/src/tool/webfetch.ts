@@ -28,6 +28,7 @@ export const WebFetchTool = Tool.define(
 
     return {
       description: DESCRIPTION,
+      capabilities: ["web-fetch"] as const,
       parameters,
       execute: (params: z.infer<typeof parameters>, ctx: Tool.Context) =>
         Effect.gen(function* () {

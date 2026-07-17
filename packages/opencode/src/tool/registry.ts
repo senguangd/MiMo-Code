@@ -70,6 +70,7 @@ import { resolveInvocationStyle } from "./invocation-style"
 import { BuiltinWorkflow } from "@/workflow/builtin"
 import { ToolScriptTool, renderToolScriptDeclarations } from "./tool-script"
 import { toolScriptRegistry } from "./tool-script-ref"
+import * as WebSearchBackend from "./websearch/backend"
 
 const log = Log.create({ service: "tool.registry" })
 
@@ -131,6 +132,7 @@ export const layer = Layer.effect(
     const agents = yield* Agent.Service
     const skill = yield* Skill.Service
     const truncate = yield* Truncate.Service
+    const auth = yield* Auth.Service
 
     const invalid = yield* InvalidTool
     const actor = yield* ActorTool
@@ -169,6 +171,7 @@ export const layer = Layer.effect(
             id,
             parameters: z.object(def.args),
             description: def.description,
+            capabilities: def.capabilities,
             execute: (args, toolCtx) =>
               Effect.gen(function* () {
                 const pluginCtx: PluginToolContext = {
@@ -334,15 +337,19 @@ export const layer = Layer.effect(
     })
 
     const tools: Interface["tools"] = Effect.fn("ToolRegistry.tools")(function* (input) {
+      const xiaomiAuth =
+        input.providerID === "xiaomi"
+          ? yield* auth.get("xiaomi").pipe(Effect.orElseSucceed(() => undefined))
+          : undefined
+      const webSearchBackend = WebSearchBackend.resolve({
+        providerID: input.providerID,
+        xiaomiApiKey: xiaomiAuth?.type === "api" ? xiaomiAuth.key : undefined,
+        exaEnabled: Flag.MIMOCODE_ENABLE_EXA,
+      })
+
       let filtered = (yield* all()).filter((tool) => {
-        if (tool.id === CodeSearchTool.id || tool.id === WebSearchTool.id) {
-          if (tool.id === WebSearchTool.id) {
-            return (
-              input.providerID === ProviderID.opencode ||
-              input.providerID === "xiaomi" ||
-              Flag.MIMOCODE_ENABLE_EXA
-            )
-          }
+        if (tool.id === WebSearchTool.id) return webSearchBackend !== undefined
+        if (tool.id === CodeSearchTool.id) {
           return input.providerID === ProviderID.opencode || Flag.MIMOCODE_ENABLE_EXA
         }
 
@@ -377,15 +384,28 @@ export const layer = Layer.effect(
             parameters: tool.parameters,
           }
           yield* plugin.trigger("tool.definition", { toolID: tool.id }, output)
+          const bound: Tool.Def =
+            tool.id === WebSearchTool.id && webSearchBackend
+              ? {
+                  ...tool,
+                  execute: (args, ctx) =>
+                    tool.execute(args, {
+                      ...ctx,
+                      extra: { ...ctx.extra, webSearchBackend },
+                    }),
+                }
+              : tool
           const style = resolveStyle(tool.id)
-          const useShell = style === "shell" && tool.shell !== undefined
-          if (style === "shell" && !tool.shell) {
+          const useShell = style === "shell" && bound.shell !== undefined
+          if (style === "shell" && !bound.shell) {
             warnShellFallbackOnce(tool.id)
           }
-          const effective: Tool.Def = useShell ? shellWrap(tool) : tool
-          const description = useShell ? tool.shell!.description : output.description
+          const effective: Tool.Def = useShell ? shellWrap(bound) : bound
+          const description = useShell ? bound.shell!.description : output.description
           return {
             id: tool.id,
+            capabilities: bound.capabilities,
+            internal: bound.internal,
             description: [
               description,
               tool.id === ActorTool.id ? yield* describeTask(input.agent) : undefined,

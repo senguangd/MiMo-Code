@@ -2,6 +2,10 @@ import { Schema } from "effect"
 import { isRecord } from "@/util/record"
 import { zod } from "@/util/effect-zod"
 import { withStatics } from "@/util/schema"
+import { TOOL_CAPABILITIES } from "@mimo-ai/plugin/tool"
+
+const ToolCapability = Schema.Literals(TOOL_CAPABILITIES)
+const ToolCapabilities = Schema.Record(Schema.String, Schema.mutable(Schema.Array(ToolCapability)))
 
 export class Local extends Schema.Class<Local>("McpLocalConfig")({
   type: Schema.Literal("local").annotate({ description: "Type of MCP server connection" }),
@@ -16,6 +20,9 @@ export class Local extends Schema.Class<Local>("McpLocalConfig")({
   }),
   timeout: Schema.optional(Schema.Number).annotate({
     description: "Timeout in ms for MCP server requests. Defaults to 5000 (5 seconds) if not specified.",
+  }),
+  toolCapabilities: Schema.optional(ToolCapabilities).annotate({
+    description: "Explicit semantic capabilities by MCP tool name. Names are never inferred.",
   }),
 }) {
   static readonly zod = zod(this)
@@ -50,6 +57,9 @@ export class Remote extends Schema.Class<Remote>("McpRemoteConfig")({
   }),
   timeout: Schema.optional(Schema.Number).annotate({
     description: "Timeout in ms for MCP server requests. Defaults to 5000 (5 seconds) if not specified.",
+  }),
+  toolCapabilities: Schema.optional(ToolCapabilities).annotate({
+    description: "Explicit semantic capabilities by MCP tool name. Names are never inferred.",
   }),
 }) {
   static readonly zod = zod(this)

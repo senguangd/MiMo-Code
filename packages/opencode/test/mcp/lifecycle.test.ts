@@ -172,6 +172,7 @@ beforeEach(() => {
 const { MCP } = await import("../../src/mcp/index")
 const { Instance } = await import("../../src/project/instance")
 const { tmpdir } = await import("../fixture/fixture")
+const ToolCapabilities = await import("../../src/tool/capability")
 
 // --- Helper ---
 
@@ -699,6 +700,40 @@ test(
         // Tool name dots should be replaced with underscores
         expect(keys.some((k) => k.endsWith("tool_b"))).toBe(true)
         expect(keys.length).toBe(2)
+      }),
+  ),
+)
+
+test(
+  "tools() attaches only explicitly configured semantic capabilities",
+  withInstance(
+    {
+      "search-server": {
+        type: "local",
+        command: ["echo", "test"],
+        toolCapabilities: {
+          one_search: ["web-search"],
+        },
+      },
+    },
+    (mcp) =>
+      Effect.gen(function* () {
+        lastCreatedClientName = "search-server"
+        const serverState = getOrCreateClientState("search-server")
+        serverState.tools = [
+          { name: "one_search", description: "Search the web", inputSchema: { type: "object", properties: {} } },
+          { name: "search_files", description: "Search local files", inputSchema: { type: "object", properties: {} } },
+        ]
+
+        yield* mcp.add("search-server", {
+          type: "local",
+          command: ["echo", "test"],
+          toolCapabilities: { one_search: ["web-search"] },
+        })
+
+        const tools = yield* mcp.tools()
+        expect(ToolCapabilities.metadata(tools["search-server_one_search"]!).capabilities).toEqual(["web-search"])
+        expect(ToolCapabilities.metadata(tools["search-server_search_files"]!).capabilities).toBeUndefined()
       }),
   ),
 )

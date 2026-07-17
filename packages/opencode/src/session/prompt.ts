@@ -113,6 +113,7 @@ import { ActorRegistry } from "@/actor/registry"
 import { Metrics } from "@/metrics"
 import { resolveInvocationStyle, type ToolStyleConfig } from "../tool/invocation-style"
 import { ToolResultError } from "../tool/result-error"
+import * as ToolCapabilities from "@/tool/capability"
 import { shouldAutoDream, shouldAutoDistill, DREAM_TASK, DISTILL_TASK, AUTO_DREAM_TITLE, AUTO_DISTILL_TITLE } from "./auto-dream"
 
 // @ts-ignore
@@ -908,6 +909,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
     }) {
       using _ = log.time("resolveTools")
       const tools: Record<string, AITool> = {}
+      const usableToolIDs = new Set<string>()
       const run = yield* runner()
       const promptOps = yield* ops()
 
@@ -1010,7 +1012,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
         agent: input.agent,
       })) {
         const schema = ProviderTransform.schema(input.model, z.toJSONSchema(item.parameters))
-        tools[item.id] = tool({
+        const aiTool = tool({
           description: item.description,
           inputSchema: jsonSchema(schema),
           execute(args, options) {
@@ -1024,7 +1026,13 @@ NOTE: At any point in time through this workflow you should feel free to ask the
                   sessionID: input.session.id,
                 })
                 const ctx = context(args, options)
-                if (whitelist && !whitelist.has(item.id)) {
+                if (
+                  !ToolCapabilities.isRuntimeUsable({
+                    toolID: item.id,
+                    internal: item.internal,
+                    whitelist,
+                  })
+                ) {
                   const output = rejectionFor(item.id)
                   log.debug("tool execute rejected", {
                     tool: item.id,
@@ -1105,6 +1113,16 @@ NOTE: At any point in time through this workflow you should feel free to ask the
             )
           },
         })
+        tools[item.id] = ToolCapabilities.annotate(aiTool, {
+          capabilities: item.capabilities,
+          internal: item.internal,
+        })
+        if (
+          !item.internal &&
+          ToolCapabilities.isRuntimeUsable({ toolID: item.id, internal: item.internal, whitelist })
+        ) {
+          usableToolIDs.add(item.id)
+        }
       }
 
       for (const [key, item] of Object.entries(yield* mcp.tools())) {
@@ -1237,9 +1255,10 @@ NOTE: At any point in time through this workflow you should feel free to ask the
             }),
           )
         tools[key] = item
+        if (ToolCapabilities.isRuntimeUsable({ toolID: key, whitelist })) usableToolIDs.add(key)
       }
 
-      return tools
+      return { tools, usableToolIDs: [...usableToolIDs].sort() }
     })
 
     const handleSubtask = Effect.fn("SessionPrompt.handleSubtask")(function* (input: {
@@ -3257,7 +3276,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
             const lastUserMsg = msgs.findLast((m) => m.info.role === "user")
             const bypassAgentCheck = lastUserMsg?.parts.some((p) => p.type === "agent") ?? false
 
-            const tools = yield* resolveTools({
+            const resolvedTools = yield* resolveTools({
               agent,
               session,
               model,
@@ -3268,6 +3287,8 @@ NOTE: At any point in time through this workflow you should feel free to ask the
               agentID: lastUser.agentID,
               task_id,
             })
+            const tools = resolvedTools.tools
+            const usableToolIDs = resolvedTools.usableToolIDs
 
             if (lastUser.format?.type === "json_schema") {
               tools["StructuredOutput"] = createStructuredOutputTool({
@@ -3276,6 +3297,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
                   structured = output
                 },
               })
+              usableToolIDs.push("StructuredOutput")
             }
 
             if (step === 1)
@@ -3415,6 +3437,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
                   prebuiltSystem,
                   messages: [...modelMsgs, ...(isLastStep ? [{ role: "user" as const, content: MAX_STEPS }] : [])],
                   tools,
+                  usableToolIDs,
                   model,
                   toolChoice: isLastStep ? "none" : format.type === "json_schema" ? "required" : undefined,
                   agentID: lastUser.agentID,
@@ -3604,6 +3627,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
               prebuiltSystem,
               messages: [...modelMsgs, ...(isLastStep ? [{ role: "user" as const, content: MAX_STEPS }] : [])],
               tools,
+              usableToolIDs,
               model,
               toolChoice: isLastStep ? ("none" as const) : format.type === "json_schema" ? ("required" as const) : undefined,
               agentID: lastUser.agentID,

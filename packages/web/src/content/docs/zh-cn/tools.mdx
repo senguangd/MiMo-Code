@@ -253,12 +253,12 @@ description: 管理 LLM 可以使用的工具。
 在网络上搜索信息。
 
 :::note
-该工具仅在使用 OpenCode 提供商时，或当 `OPENCODE_ENABLE_EXA` 环境变量设置为任意真值（例如 `true` 或 `1`）时可用。
+该工具在已配置小米原生搜索凭据、使用 OpenCode 提供商，或将 `MIMOCODE_ENABLE_EXA` 环境变量设为真值（例如 `true` 或 `1`）时可用。旧名称 `OPENCODE_ENABLE_EXA` 仍作为兼容别名生效。
 
-在启动 OpenCode 时启用：
+启动 MiMo Code 时显式启用 Exa：
 
 ```bash
-OPENCODE_ENABLE_EXA=1 opencode
+MIMOCODE_ENABLE_EXA=1 mimo
 ```
 
 :::

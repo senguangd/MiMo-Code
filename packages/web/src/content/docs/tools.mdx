@@ -257,12 +257,12 @@ Allows the LLM to fetch and read web pages. Useful for looking up documentation 
 Search the web for information.
 
 :::note
-This tool is only available when using the OpenCode provider or when the `OPENCODE_ENABLE_EXA` environment variable is set to any truthy value (e.g., `true` or `1`).
+This tool is available when Xiaomi native search credentials are configured, when using the OpenCode provider, or when the `MIMOCODE_ENABLE_EXA` environment variable is set to a truthy value (for example, `true` or `1`). The legacy `OPENCODE_ENABLE_EXA` name remains accepted as a compatibility alias.
 
-To enable when launching OpenCode:
+To enable Exa explicitly when launching MiMo Code:
 
 ```bash
-OPENCODE_ENABLE_EXA=1 opencode
+MIMOCODE_ENABLE_EXA=1 mimo
 ```
 
 :::
