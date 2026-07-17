@@ -247,6 +247,9 @@ export const layer: Layer.Layer<
       promptOps: ActorPromptOps
       agentID?: string
     }) {
+      // Only checkpoint-owning agents participate. Subagents share the session
+      // ID but keep independent context slices, so letting them advance the main
+      // watermark would make future rebuilds capture the wrong conversation.
       if (!(yield* actorReg.servesCheckpoint(input.sessionID, input.agentID))) return
 
       const cfg = yield* config.get()
@@ -260,10 +263,10 @@ export const layer: Layer.Layer<
       if (thresholds.length === 0) return
 
       const current =
-        input.tokens.total ??
+        input.tokens.total ||
         input.tokens.input +
           input.tokens.output +
-          input.tokens.reasoning +
+          (input.tokens.reasoning ?? 0) +
           input.tokens.cache.read +
           input.tokens.cache.write
       const state =

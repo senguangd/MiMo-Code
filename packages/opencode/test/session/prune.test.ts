@@ -373,9 +373,7 @@ describe("defaultThresholdsFor (Part 2 density)", () => {
   // Constants used in expected outputs; declared once so a typo in any one
   // assertion is caught against a single source.
   const FOUR_AT_20 = ["20%", "40%", "60%", "80%"] as const
-  const NINE_AT_10 = [
-    "10%", "20%", "30%", "40%", "50%", "60%", "70%", "80%", "90%",
-  ] as const
+  const NINE_AT_10 = ["10%", "20%", "30%", "40%", "50%", "60%", "70%", "80%", "90%"] as const
   const EIGHTEEN_AT_5 = Array.from({ length: 18 }, (_, i) => `${(i + 1) * 5}%`)
 
   test("window < 25K returns empty (subsystem disabled)", () => {
@@ -417,7 +415,6 @@ describe("defaultThresholdsFor (Part 2 density)", () => {
     }
   })
 })
-
 
 describe("SessionPrune checkpoint epochs", () => {
   function harness(result: "started" | "queued" | "skipped" = "queued") {

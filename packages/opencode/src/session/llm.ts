@@ -265,7 +265,7 @@ export type StreamInput = {
   agent: Agent.Info
   permission?: Permission.Ruleset
   system: string[]
-  prebuiltSystem?: string[]      // when set, skip buildSystemArray and use this verbatim
+  prebuiltSystem?: string[] // when set, skip buildSystemArray and use this verbatim
   messages: ModelMessage[]
   small?: boolean
   tools: Record<string, Tool>
@@ -311,7 +311,13 @@ export class Service extends Context.Service<Service, Interface>()("@opencode/LL
 const live: Layer.Layer<
   Service,
   never,
-  Auth.Service | Config.Service | Provider.Service | Plugin.Service | Permission.Service | ActorRegistry.Service | Memory.Service
+  | Auth.Service
+  | Config.Service
+  | Provider.Service
+  | Plugin.Service
+  | Permission.Service
+  | ActorRegistry.Service
+  | Memory.Service
 > = Layer.effect(
   Service,
   Effect.gen(function* () {
@@ -840,7 +846,7 @@ const live: Layer.Layer<
                       maxAttempts: 10,
                       reason,
                       nextDelayMs: delayMs,
-                    })
+                    }),
                   )
                 })
 
@@ -848,9 +854,9 @@ const live: Layer.Layer<
                 Effect.tapError((error) => {
                   if (!isTransientCapacityError(error)) return Effect.void
                   return Ref.updateAndGet(attemptRef, (n) => n + 1).pipe(
-                    Effect.flatMap((nextAttempt) => publishRetryEvent(error, nextAttempt))
+                    Effect.flatMap((nextAttempt) => publishRetryEvent(error, nextAttempt)),
                   )
-                })
+                }),
               )
 
               const result = yield* streamWithTelemetry.pipe(
@@ -866,9 +872,7 @@ const live: Layer.Layer<
               // AbortController scope teardown are exactly as before. The reactive
               // prefill retry is layered lazily below and only pays a cost when an
               // actual error surfaces.
-              return Stream.fromAsyncIterable(result.fullStream, (e) =>
-                e instanceof Error ? e : new Error(String(e)),
-              )
+              return Stream.fromAsyncIterable(result.fullStream, (e) => (e instanceof Error ? e : new Error(String(e))))
             }),
           ),
         )
@@ -934,10 +938,7 @@ export const defaultLayer = Layer.suspend(() =>
 )
 
 function resolveTools(input: Pick<StreamInput, "tools" | "agent" | "permission" | "user">) {
-  const disabled = Permission.disabled(
-    Object.keys(input.tools),
-    Agent.runtimePermission(input.agent, input.permission),
-  )
+  const disabled = Permission.disabled(Object.keys(input.tools), Agent.runtimePermission(input.agent, input.permission))
   return Record.filter(input.tools, (_, k) => input.user.tools?.[k] !== false && !disabled.has(k))
 }
 

@@ -252,7 +252,8 @@ const InfoSchema = Schema.Struct({
         description: "Maximum number of tokens from recent turns to preserve verbatim after compaction",
       }),
       reserved: Schema.optional(NonNegativeInt).annotate({
-        description: "Input headroom that automatic context reduction must free for subsequent requests. Default: up to 20000 tokens.",
+        description:
+          "Input headroom that automatic context reduction must free for subsequent requests. Default: up to 20000 tokens.",
       }),
     }),
   ),
@@ -260,7 +261,7 @@ const InfoSchema = Schema.Struct({
     Schema.Struct({
       thresholds: Schema.optional(Schema.Array(Schema.String)).annotate({
         description:
-          "Context-growth thresholds that trigger background checkpoint writes only; they never trigger context reduction. Strings may be percentages (\"40%\"), absolute tokens (\"100K\", \"1.5M\"), or mixed. Defaults vary by effective input window.",
+          'Context-growth thresholds that trigger background checkpoint writes only; they never trigger context reduction. Strings may be percentages ("40%"), absolute tokens ("100K", "1.5M"), or mixed. Defaults vary by effective input window.',
       }),
       reserved: Schema.optional(NonNegativeInt).annotate({
         description: "Token buffer reserved for checkpoint writer thresholds. Default: 13000.",
@@ -302,16 +303,20 @@ const InfoSchema = Schema.Struct({
             description: "Token cap for the session notes (notes.md) of rebuild context. Default: 6000.",
           }),
           design_decisions: Schema.optional(PositiveInt).annotate({
-            description: "Token cap for §10 Design decisions section of checkpoint.md (writer-side budget validation). Default: 3000.",
+            description:
+              "Token cap for §10 Design decisions section of checkpoint.md (writer-side budget validation). Default: 3000.",
           }),
           open_notes: Schema.optional(PositiveInt).annotate({
-            description: "Token cap for §11 Open notes section of checkpoint.md (writer-side budget validation). Default: 800.",
+            description:
+              "Token cap for §11 Open notes section of checkpoint.md (writer-side budget validation). Default: 800.",
           }),
           recent_user: Schema.optional(NonNegativeInt).annotate({
-            description: "Token cap for the recent user input section (verbatim user messages from the live DB, FIFO eviction). Default: 16000. Set 0 to disable.",
+            description:
+              "Token cap for the recent user input section (verbatim user messages from the live DB, FIFO eviction). Default: 16000. Set 0 to disable.",
           }),
           recent_user_per_msg: Schema.optional(PositiveInt).annotate({
-            description: "Per-message cap inside recent user input section; oversized messages get head/tail truncation with messageID elision marker. Default: 2000.",
+            description:
+              "Per-message cap inside recent user input section; oversized messages get head/tail truncation with messageID elision marker. Default: 2000.",
           }),
         }),
       ).annotate({
@@ -319,7 +324,8 @@ const InfoSchema = Schema.Struct({
           "Per-section token caps for rebuild context (renderRebuildContext). Each section is loaded up to its cap so the rebuild stays within a predictable budget.",
       }),
       task_archive_days: Schema.optional(PositiveInt).annotate({
-        description: "Number of days after task done/abandoned before it's filtered out of `list({include_archived: false})`. Rows are NOT deleted — see v9 for true GC. Default: 7.",
+        description:
+          "Number of days after task done/abandoned before it's filtered out of `list({include_archived: false})`. Rows are NOT deleted — see v9 for true GC. Default: 7.",
       }),
       task_cleanup_days: Schema.optional(PositiveInt).annotate({
         description: "[deprecated] Alias for task_archive_days. Will be removed in v9.",
@@ -347,8 +353,7 @@ const InfoSchema = Schema.Struct({
   dream: Schema.optional(
     Schema.Struct({
       auto: Schema.optional(Schema.Boolean).annotate({
-        description:
-          "Auto-trigger dream memory consolidation on new session start. Default: true.",
+        description: "Auto-trigger dream memory consolidation on new session start. Default: true.",
       }),
       interval_days: Schema.optional(NonNegativeInt).annotate({
         description: "Minimum days between automatic dream runs. Set to 0 to trigger on every new session. Default: 7.",
@@ -358,8 +363,7 @@ const InfoSchema = Schema.Struct({
   distill: Schema.optional(
     Schema.Struct({
       auto: Schema.optional(Schema.Boolean).annotate({
-        description:
-          "Auto-trigger distill workflow packaging on new session start. Default: true.",
+        description: "Auto-trigger distill workflow packaging on new session start. Default: true.",
       }),
       interval_days: Schema.optional(NonNegativeInt).annotate({
         description: "Minimum days between automatic distill runs. Default: 30.",
@@ -654,17 +658,12 @@ export const layer = Layer.effect(
       const gitignore = path.join(dir, ".gitignore")
       const hasIgnore = yield* fs.existsSafe(gitignore)
       if (!hasIgnore) {
-        yield* fs
-          .writeFileString(
-            gitignore,
-            MIMOCODE_GITIGNORE_ENTRIES.join("\n"),
-          )
-          .pipe(
-            Effect.catchIf(
-              (e) => e.reason._tag === "PermissionDenied",
-              () => Effect.void,
-            ),
-          )
+        yield* fs.writeFileString(gitignore, MIMOCODE_GITIGNORE_ENTRIES.join("\n")).pipe(
+          Effect.catchIf(
+            (e) => e.reason._tag === "PermissionDenied",
+            () => Effect.void,
+          ),
+        )
       }
     })
 
