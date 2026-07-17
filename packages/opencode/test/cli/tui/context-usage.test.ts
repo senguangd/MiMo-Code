@@ -23,6 +23,7 @@ function assistant(
     cacheWrite?: number
     output?: number
     reasoning?: number
+    context?: number
   } = {},
 ): AssistantMessage {
   return {
@@ -38,6 +39,7 @@ function assistant(
     summary: options.summary,
     cost: 0,
     tokens: {
+      context: options.context,
       input,
       output: options.output ?? 0,
       reasoning: options.reasoning ?? 0,
@@ -96,6 +98,15 @@ describe("TUI context usage", () => {
         assistant("a2", 40_000, { cacheRead: 5_000, cacheWrite: 2_000, output: 9_000, reasoning: 4_000 }),
       ]),
     ).toEqual({ kind: "last", input: 47_000, reserved: null, limit: 100_000 })
+  })
+
+  test("uses persisted exact request context after streaming ends", () => {
+    expect(
+      resolve([
+        user("u1"),
+        assistant("a2", 40_000, { context: 52_000, cacheRead: 5_000, output: 9_000, reasoning: 4_000 }),
+      ]),
+    ).toEqual({ kind: "last", input: 52_000, reserved: null, limit: 100_000 })
   })
 
   test("compaction summary invalidates the pre-compaction request instead of exposing its usage", () => {

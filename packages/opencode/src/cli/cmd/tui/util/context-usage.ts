@@ -35,7 +35,8 @@ export function resolveContextUsage(input: Input): ContextUsage | undefined {
     if (message.summary) return { kind: "invalidated" }
     if (message.time.completed === undefined) continue
 
-    const tokens = message.tokens.input + message.tokens.cache.read + message.tokens.cache.write
+    const tokens =
+      message.tokens.context ?? message.tokens.input + message.tokens.cache.read + message.tokens.cache.write
     if (tokens <= 0) continue
 
     return {

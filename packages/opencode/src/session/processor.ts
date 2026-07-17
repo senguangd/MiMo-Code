@@ -386,6 +386,7 @@ export const layer: Layer.Layer<
 
         ctx.assistantMessage.error = undefined
         ctx.assistantMessage.time.completed = undefined
+        ctx.assistantMessage.tokens.context = undefined
         ctx.needsOverflowHandling = false
         ctx.blocked = false
         resetAttemptState()
@@ -753,7 +754,11 @@ export const layer: Layer.Layer<
             })
             ctx.assistantMessage.finish = value.finishReason
             ctx.assistantMessage.cost += usage.cost
-            ctx.assistantMessage.tokens = usage.tokens
+            const context = ctx.assistantMessage.tokens.context
+            ctx.assistantMessage.tokens = {
+              ...usage.tokens,
+              ...(context === undefined ? {} : { context }),
+            }
             yield* session.updatePart({
               id: PartID.ascending(),
               reason: value.finishReason,
@@ -977,6 +982,7 @@ export const layer: Layer.Layer<
                 // Summary agents measure internal work, not the main session context.
                 if (ctx.assistantMessage.summary) return
                 contextUsage = usage
+                ctx.assistantMessage.tokens.context = usage.input
                 await Effect.runPromise(publishBusyStatus(undefined, { force: true }))
               },
             })

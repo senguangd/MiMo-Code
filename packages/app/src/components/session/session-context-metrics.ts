@@ -34,15 +34,15 @@ type Metrics = {
   context: Context | undefined
 }
 
-const tokenTotal = (msg: AssistantMessage) => {
-  return msg.tokens.input + msg.tokens.output + msg.tokens.reasoning + msg.tokens.cache.read + msg.tokens.cache.write
+const contextTokenTotal = (msg: AssistantMessage) => {
+  return msg.tokens.context ?? msg.tokens.input + msg.tokens.cache.read + msg.tokens.cache.write
 }
 
 const lastAssistantWithTokens = (messages: Message[]) => {
   for (let i = messages.length - 1; i >= 0; i--) {
     const msg = messages[i]
     if (msg.role !== "assistant") continue
-    if (tokenTotal(msg) <= 0) continue
+    if (contextTokenTotal(msg) <= 0) continue
     return msg
   }
 }
@@ -55,7 +55,7 @@ const build = (messages: Message[] = [], providers: Provider[] = []): Metrics =>
   const provider = providers.find((item) => item.id === message.providerID)
   const model = provider?.models[message.modelID]
   const limit = model?.limit.context
-  const total = tokenTotal(message)
+  const total = contextTokenTotal(message)
 
   return {
     totalCost,

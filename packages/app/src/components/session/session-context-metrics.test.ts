@@ -4,7 +4,7 @@ import { getSessionContextMetrics } from "./session-context-metrics"
 
 const assistant = (
   id: string,
-  tokens: { input: number; output: number; reasoning: number; read: number; write: number },
+  tokens: { input: number; output: number; reasoning: number; read: number; write: number; context?: number },
   cost: number,
   providerID = "openai",
   modelID = "gpt-4.1",
@@ -16,6 +16,7 @@ const assistant = (
     modelID,
     cost,
     tokens: {
+      context: tokens.context,
       input: tokens.input,
       output: tokens.output,
       reasoning: tokens.reasoning,
@@ -61,10 +62,20 @@ describe("getSessionContextMetrics", () => {
 
     expect(metrics.totalCost).toBe(1.75)
     expect(metrics.context?.message.id).toBe("a2")
-    expect(metrics.context?.total).toBe(500)
-    expect(metrics.context?.usage).toBe(50)
+    expect(metrics.context?.total).toBe(350)
+    expect(metrics.context?.usage).toBe(35)
     expect(metrics.context?.providerLabel).toBe("OpenAI")
     expect(metrics.context?.modelLabel).toBe("GPT-4.1")
+  })
+
+  test("prefers persisted exact request context over provider billing usage", () => {
+    const messages = [assistant("a1", { input: 300, output: 100, reasoning: 50, read: 25, write: 25, context: 420 }, 1)]
+    const providers = [{ id: "openai", models: { "gpt-4.1": { limit: { context: 1000 } } } }]
+
+    const metrics = getSessionContextMetrics(messages, providers)
+
+    expect(metrics.context?.total).toBe(420)
+    expect(metrics.context?.usage).toBe(42)
   })
 
   test("preserves fallback labels and null usage when model metadata is missing", () => {

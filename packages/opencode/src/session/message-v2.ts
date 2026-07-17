@@ -499,6 +499,9 @@ export const Assistant = Base.extend({
   cost: z.number(),
   tokens: z.object({
     total: z.number().optional(),
+    // Exact input context measured from the final request payload. Provider
+    // usage remains the source of billing token fields below.
+    context: z.number().optional(),
     input: z.number(),
     output: z.number(),
     reasoning: z.number(),
