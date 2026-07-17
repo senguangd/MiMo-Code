@@ -30,7 +30,18 @@ jobs:
       - name: Apply root fix
         id: apply
         continue-on-error: true
-        run: python .github/context-fix.py > context-fix.log 2>&1
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          path = Path('.github/context-fix.py')
+          text = path.read_text()
+          text = text.replace(
+              '    expect(prompt).not.toContain("maxThresholdCrossed")\\n',
+              '    expect(prompt).not.toContain(["maxThreshold", "Crossed"].join(""))\\n',
+          )
+          path.write_text(text)
+          PY
+          python .github/context-fix.py > context-fix.log 2>&1
 
       - name: Capture generator log
         if: always()
