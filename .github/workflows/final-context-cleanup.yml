@@ -4,13 +4,16 @@ on:
   push:
     branches:
       - fix/context-budget-root
+  pull_request:
+    branches:
+      - dev
 
 permissions:
   contents: write
 
 jobs:
   verify:
-    if: ${{ !contains(github.event.head_commit.message, 'polish context budget invariants') }}
+    if: ${{ github.actor != 'github-actions[bot]' }}
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
@@ -18,6 +21,7 @@ jobs:
         with:
           fetch-depth: 0
           show-progress: false
+          ref: ${{ github.event_name == 'pull_request' && github.head_ref || github.ref_name }}
 
       - uses: oven-sh/setup-bun@v2
         with:
