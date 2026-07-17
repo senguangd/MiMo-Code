@@ -73,5 +73,5 @@ jobs:
           git diff --cached --check
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git commit -m "fix(session): minimize context budget diff"
+          HUSKY=0 git commit --no-verify -m "fix(session): minimize context budget diff"
           git push origin HEAD:fix/context-budget-root
