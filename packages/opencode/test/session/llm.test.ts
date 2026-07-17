@@ -148,6 +148,10 @@ function waitRequest(pathname: string, response: Response) {
   return pending.promise
 }
 
+function waitTokenCount(totalTokens = 1) {
+  return waitRequest("/utils/token_counter", Response.json({ total_tokens: totalTokens }))
+}
+
 function timeout(ms: number) {
   return new Promise<never>((_, reject) => {
     setTimeout(() => reject(new Error(`timed out after ${ms}ms`)), ms)
@@ -310,6 +314,7 @@ describe("session.llm.stream", () => {
     const fixture = await loadFixture(providerID, modelID)
     const model = fixture.model
 
+    const counter = waitTokenCount()
     const request = waitRequest(
       "/chat/completions",
       new Response(createChatStream("Hello"), {
@@ -371,6 +376,7 @@ describe("session.llm.stream", () => {
           tools: {},
         })
 
+        const counted = await counter
         const capture = await request
         const body = capture.body
         const headers = capture.headers
@@ -380,6 +386,8 @@ describe("session.llm.stream", () => {
         expect(url.pathname.endsWith("/chat/completions")).toBe(true)
         expect(headers.get("Authorization")).toBe("Bearer test-key")
 
+        expect(counted.url.pathname).toBe("/utils/token_counter")
+        expect(counted.body.model).toBe(resolved.api.id)
         expect(body.model).toBe(resolved.api.id)
         expect(body.temperature).toBe(0.4)
         expect(body.top_p).toBe(0.8)
@@ -403,6 +411,7 @@ describe("session.llm.stream", () => {
     const modelID = "qwen-plus"
     const fixture = await loadFixture(providerID, modelID)
     const model = fixture.model
+    const counter = waitTokenCount()
     const pending = waitStreamingRequest("/chat/completions")
 
     await using tmp = await tmpdir({
@@ -462,6 +471,7 @@ describe("session.llm.stream", () => {
           { signal: ctrl.signal },
         )
 
+        await counter
         await pending.request
         ctrl.abort()
 
