@@ -31,7 +31,7 @@ import * as Editor from "@tui/util/editor"
 import * as Voice from "@tui/util/voice"
 import { useExit } from "../../context/exit"
 import * as Clipboard from "../../util/clipboard"
-import type { AssistantMessage, FilePart, UserMessage } from "@mimo-ai/sdk/v2"
+import type { FilePart, UserMessage } from "@mimo-ai/sdk/v2"
 import { TuiEvent } from "../../event"
 import { iife } from "@/util/iife"
 import { Locale } from "@/util"
@@ -50,6 +50,7 @@ import { DialogWorkspaceCreate, restoreWorkspaceSession } from "../dialog-worksp
 import { DialogWorkspaceUnavailable } from "../dialog-workspace-unavailable"
 import { DialogAgreement, FREE_AGREEMENT_KEY, FREE_MODEL_IDS } from "../dialog-agreement"
 import { useArgs } from "@tui/context/args"
+import { resolveContextUsage } from "@tui/util/context-usage"
 
 export type PromptProps = {
   sessionID?: string
@@ -464,18 +465,29 @@ export function Prompt(props: PromptProps) {
   const usage = createMemo(() => {
     if (!props.sessionID) return
     const msg = sync.data.message[props.sessionID]?.["main"] ?? []
-    const last = msg.findLast((item): item is AssistantMessage => item.role === "assistant" && item.tokens.output > 0)
-    if (!last) return
-
-    const tokens =
-      last.tokens.input + last.tokens.output + last.tokens.reasoning + last.tokens.cache.read + last.tokens.cache.write
-    if (tokens <= 0) return
-
-    const model = sync.data.provider.find((item) => item.id === last.providerID)?.models[last.modelID]
-    const pct = model?.limit.context ? `${Math.round((tokens / model.limit.context) * 100)}%` : undefined
+    const live = (status() as { context?: { input: number; output: number; limit: number } }).context
+    const context = resolveContextUsage({
+      messages: msg,
+      parts: (messageID) => sync.data.part[messageID] ?? [],
+      live,
+      contextLimit: (providerID, modelID) =>
+        sync.data.provider.find((item) => item.id === providerID)?.models[modelID]?.limit.context,
+    })
     const cost = msg.reduce((sum, item) => sum + (item.role === "assistant" ? item.cost : 0), 0)
+    const label =
+      context?.kind === "invalidated"
+        ? t("tui.prompt.context.recalculating")
+        : context
+          ? [
+              Locale.number(context.input),
+              context.limit ? `(${Math.round((context.input / context.limit) * 100)}%)` : undefined,
+            ]
+              .filter(Boolean)
+              .join(" ")
+          : undefined
+    if (!label && cost <= 0) return
     return {
-      context: pct ? `${Locale.number(tokens)} (${pct})` : Locale.number(tokens),
+      context: label,
       cost: cost > 0 ? money.format(cost) : undefined,
     }
   })

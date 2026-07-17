@@ -2,9 +2,15 @@ import type { AssistantMessage } from "@mimo-ai/sdk/v2"
 import type { TuiPlugin, TuiPluginApi, TuiPluginModule } from "@mimo-ai/plugin/tui"
 import { Show, createEffect, createMemo, createSignal, onCleanup } from "solid-js"
 import { completedTPS, formatTPS, streamingTPS } from "./tps"
+import { resolveContextUsage, type ContextUsage } from "../../util/context-usage"
 
 const id = "internal:sidebar-context"
 const REFRESH_MS = 1000
+type Reading = Exclude<ContextUsage, { kind: "invalidated" }>
+
+function reservedTokens(usage: Reading) {
+  return usage.kind === "live" ? usage.reserved : 0
+}
 
 const money = new Intl.NumberFormat("en-US", {
   style: "currency",
@@ -68,47 +74,48 @@ function View(props: { api: TuiPluginApi; session_id: string }) {
     const live = (props.api.state.session.status(props.session_id) as
       | { type: string; context?: { input: number; output: number; limit: number } }
       | undefined)?.context
-    if (live) {
-      return {
-        tokens: live.input,
-        reserved: live.output,
-        percent: live.limit ? Math.round(((live.input + live.output) / live.limit) * 100) : null,
-      }
-    }
-
-    const last = msg().findLast((item): item is AssistantMessage => item.role === "assistant" && item.tokens.output > 0)
-    if (!last) {
-      return {
-        tokens: 0,
-        reserved: null,
-        percent: null,
-      }
-    }
-
-    const tokens =
-      last.tokens.input + last.tokens.output + last.tokens.reasoning + last.tokens.cache.read + last.tokens.cache.write
-    const model = props.api.state.provider.find((item) => item.id === last.providerID)?.models[last.modelID]
-    return {
-      tokens,
-      reserved: null,
-      percent: model?.limit.context ? Math.round((tokens / model.limit.context) * 100) : null,
-    }
+    return resolveContextUsage({
+      messages: msg(),
+      parts: (messageID) => props.api.state.part(messageID),
+      live,
+      contextLimit: (providerID, modelID) =>
+        props.api.state.provider.find((item) => item.id === providerID)?.models[modelID]?.limit.context,
+    })
   })
+  const reading = createMemo<Reading | undefined>(() => {
+    const value = state()
+    return value?.kind === "invalidated" ? undefined : value
+  })
+  const invalidated = createMemo(() => state()?.kind === "invalidated")
 
   return (
     <box>
       <text fg={theme().text}>
         <b>Context</b>
       </text>
-      <text fg={theme().textMuted}>
-        {state().tokens.toLocaleString()} {state().reserved === null ? "tokens (last request)" : "input tokens"}
-      </text>
-      <Show when={state().reserved !== null}>
-        <text fg={theme().textMuted}>{state().reserved!.toLocaleString()} output reserved</text>
+      <Show
+        when={reading()}
+        fallback={invalidated() ? <text fg={theme().textMuted}>Recalculates on next request</text> : undefined}
+      >
+        {(usage) => (
+          <>
+            <text fg={theme().textMuted}>
+              {usage().input.toLocaleString()} {usage().kind === "live" ? "input tokens" : "tokens (last request)"}
+            </text>
+            <Show when={usage().kind === "live" ? usage().reserved : null}>
+              {(reserved) => <text fg={theme().textMuted}>{reserved().toLocaleString()} output reserved</text>}
+            </Show>
+            <Show when={usage().limit}>
+              {(limit) => (
+                <text fg={theme().textMuted}>
+                  {Math.round(((usage().input + reservedTokens(usage())) / limit()) * 100)}%{" "}
+                  {usage().kind === "live" ? "budget used" : "used (last request)"}
+                </text>
+              )}
+            </Show>
+          </>
+        )}
       </Show>
-      <text fg={theme().textMuted}>
-        {state().percent ?? 0}% {state().reserved === null ? "used (last request)" : "budget used"}
-      </text>
       <Show when={tpsLabel()}>{(label) => <text fg={theme().textMuted}>{label()}</text>}</Show>
       <text fg={theme().textMuted}>{money.format(cost())} spent</text>
     </box>

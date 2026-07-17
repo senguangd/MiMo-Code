@@ -25,6 +25,7 @@ export const dict = {
   // Prompt placeholders
   "tui.prompt.placeholder.normal": '問點什麼…… "{{example}}"',
   "tui.prompt.placeholder.shell": '執行指令…… "{{example}}"',
+  "tui.prompt.context.recalculating": "上下文已壓縮，將在下一次請求時重新計算",
   "tui.prompt.ghost": "{{prediction}}  (按 Tab 採納)",
   "tui.paste.image.fallback_path": "目前模型不支援圖片，已改為插入圖片路徑。使用 /modalities 啟用圖片支援",
   "tui.home.placeholder.example.todo": "修復程式碼庫中的 TODO",
