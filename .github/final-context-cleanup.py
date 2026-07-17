@@ -16,7 +16,8 @@ replace(
     const label =
 ''',
     '''    const cost = msg.reduce((sum, item) => sum + (item.role === "assistant" ? item.cost : 0), 0)
-    const effectiveLimit = context?.kind === "live" ? context.inputLimit : context?.limit
+    const effectiveLimit =
+      context?.kind === "live" ? context.inputLimit : context?.kind === "last" ? context.limit : undefined
     const label =
 ''',
 )
