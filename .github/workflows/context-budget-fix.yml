@@ -59,6 +59,8 @@ jobs:
         run: bun install --frozen-lockfile
 
       - name: Unit and integration tests
+        id: tests
+        continue-on-error: true
         working-directory: packages/opencode
         run: |
           bun test --timeout 30000 \
@@ -70,11 +72,40 @@ jobs:
             test/session/status-context.test.ts \
             test/cli/tui/context-usage.test.ts \
             test/session/checkpoint-rebuild-unify.test.ts \
-            test/session/prompt-effect.test.ts
+            test/session/prompt-effect.test.ts \
+            > ../../context-fix-tests.log 2>&1
+
+      - name: Capture test log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: context-fix-tests
+          path: context-fix-tests.log
+
+      - name: Stop after test failure
+        if: steps.tests.outcome != 'success'
+        run: |
+          tail -n 200 context-fix-tests.log
+          exit 1
 
       - name: Typecheck
+        id: types
+        continue-on-error: true
         working-directory: packages/opencode
-        run: bun typecheck
+        run: bun typecheck > ../../context-fix-typecheck.log 2>&1
+
+      - name: Capture typecheck log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: context-fix-typecheck
+          path: context-fix-typecheck.log
+
+      - name: Stop after typecheck failure
+        if: steps.types.outcome != 'success'
+        run: |
+          tail -n 200 context-fix-typecheck.log
+          exit 1
 
       - name: Review generated diff
         run: |
@@ -85,7 +116,7 @@ jobs:
 
       - name: Commit verified implementation
         run: |
-          rm .github/context-fix.py .github/workflows/context-budget-fix.yml context-fix.log
+          rm .github/context-fix.py .github/workflows/context-budget-fix.yml context-fix.log context-fix-tests.log context-fix-typecheck.log
           git add -A
           git diff --cached --check
           git config user.name "github-actions[bot]"
