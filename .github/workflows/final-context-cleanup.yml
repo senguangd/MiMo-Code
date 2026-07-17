@@ -69,8 +69,23 @@ jobs:
             test/session/prompt-effect.test.ts
 
       - name: Typecheck
+        id: types
+        continue-on-error: true
         working-directory: packages/opencode
-        run: bun typecheck
+        run: bun typecheck > ../../final-context-typecheck.log 2>&1
+
+      - name: Capture typecheck log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: final-context-typecheck
+          path: final-context-typecheck.log
+
+      - name: Stop after typecheck failure
+        if: steps.types.outcome != 'success'
+        run: |
+          cat final-context-typecheck.log
+          exit 1
 
       - name: Lint
         run: bun run lint
@@ -84,6 +99,7 @@ jobs:
 
       - name: Commit verified cleanup
         run: |
+          rm final-context-typecheck.log
           git add packages/opencode
           git diff --cached --check
           git config user.name "github-actions[bot]"
