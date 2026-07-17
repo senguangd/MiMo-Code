@@ -151,10 +151,10 @@ export interface Interface {
     promptOps: ActorPromptOps
     agentID?: string
   }) => Effect.Effect<void>
-  /** True when the current tokens have just crossed the max checkpoint threshold. */
-  readonly maxThresholdCrossed: (sessionID: SessionID) => Effect.Effect<boolean>
-  /** Clear the crossed-threshold state for a session (e.g. after discard+rebuild). */
+  /** Clear checkpoint progress without changing the current context epoch. */
   readonly resetThresholds: (sessionID: SessionID) => Effect.Effect<void>
+  /** Start a new context epoch; the next measured request becomes its baseline. */
+  readonly markContextReduced: (sessionID: SessionID) => Effect.Effect<void>
 }
 
 export class Service extends Context.Service<Service, Interface>()("@opencode/SessionPrune") {}
@@ -171,13 +171,17 @@ export const layer: Layer.Layer<
     const checkpoint = yield* SessionCheckpoint.Service
     const actorReg = yield* ActorRegistry.Service
 
-    // Per-session state: which checkpoint thresholds have already been crossed
-    // (and had a checkpoint writer enqueued). Prevents re-firing on the same
-    // threshold every turn.
-    const crossed = new Map<SessionID, Set<number>>()
-    // Per-session signal: the max threshold was just crossed; prompt.ts should
-    // trigger discard+rebuild on the next loop iteration.
-    const maxCrossed = new Set<SessionID>()
+    type CheckpointProgress = {
+      baseline: number
+      last: number
+      crossed: Set<number>
+      pendingBaseline: boolean
+    }
+
+    // Checkpoint thresholds measure growth inside the current model-visible
+    // context epoch. A rebuild/compaction starts a new epoch so the context
+    // injected by the reduction itself cannot immediately retrigger writers.
+    const progress = new Map<SessionID, CheckpointProgress>()
     // Per-session consecutive writer-failure count. Resets on success.
     // After the configured `max_writer_failures` (default MAX_WRITER_FAILURES)
     // consecutive failures, the session stops retrying checkpoint writes
@@ -234,9 +238,8 @@ export const layer: Layer.Layer<
       }
     })
 
-    // Fires a checkpoint write for every threshold newly crossed by the
-    // current token count. Exposed publicly so runLoop can call it at each
-    // iteration to catch mid-turn threshold crossings (not just turn end).
+    // Fires at most one checkpoint for the highest newly-crossed threshold.
+    // One checkpoint at the latest watermark subsumes all lower thresholds.
     const fireCheckpoints = Effect.fn("SessionPrune.fireCheckpoints")(function* (input: {
       sessionID: SessionID
       model: Provider.Model
@@ -244,111 +247,87 @@ export const layer: Layer.Layer<
       promptOps: ActorPromptOps
       agentID?: string
     }) {
-      // Checkpoint serves main/peer only; subagents use per-actor compaction
-      // (independent layers — see 2026-05-22-checkpoint-v8-design.md:71), and
-      // system-spawned agents (checkpoint-writer/dream/distill) are the writers
-      // themselves and must not self-trigger. Both exclusions live in the shared
-      // `servesCheckpoint` judgement (keyed on agent TYPE and MODE, kept orthogonal
-      // there so a future system agent spawned as mode:"peer" can't slip back in).
-      // It also shares the exact judgement with LLM.buildSystemArray's memory gate,
-      // so "who owns a checkpoint" and "who is taught about it" can never drift.
-      // A subagent shares the parent sessionID, so if it triggered a checkpoint the
-      // writer's unfiltered-stream watermark could land on the subagent's messages
-      // and the fork would capture the wrong parent system prompt. Unresolved actor
-      // (no agentID / unregistered / race) → servesCheckpoint fails open and fires:
-      // main and peer must never silently lose checkpoints.
       if (!(yield* actorReg.servesCheckpoint(input.sessionID, input.agentID))) return
-
-      // Lock: skip if a writer is already running for this session.
-      // crossed Set is NOT incremented here — when the in-flight writer
-      // finishes, the next fireCheckpoints invocation can re-fire previously-
-      // skipped thresholds.
-      if (yield* checkpoint.isWriterRunning(input.sessionID)) {
-        log.info("checkpoint writer running, skipping new threshold trigger", {
-          sessionID: input.sessionID,
-        })
-        return
-      }
 
       const cfg = yield* config.get()
       const windowSize = usable({ cfg, model: input.model })
       if (windowSize === 0) return
-      const raw = cfg.checkpoint?.thresholds ?? defaultThresholdsFor(windowSize)
-
-      // resolveThresholds throws on invalid config; we let that propagate so
-      // the user sees the error fast at the first overflow check.
-      const thresholds = resolveThresholds(raw, windowSize, cfg.checkpoint?.reserved)
+      const thresholds = resolveThresholds(
+        cfg.checkpoint?.thresholds ?? defaultThresholdsFor(windowSize),
+        windowSize,
+        cfg.checkpoint?.reserved,
+      )
       if (thresholds.length === 0) return
 
-      const maxFailures = cfg.checkpoint?.max_writer_failures ?? MAX_WRITER_FAILURES
+      const current =
+        input.tokens.total ??
+        input.tokens.input +
+          input.tokens.output +
+          input.tokens.reasoning +
+          input.tokens.cache.read +
+          input.tokens.cache.write
+      const state =
+        progress.get(input.sessionID) ??
+        ({ baseline: 0, last: 0, crossed: new Set<number>(), pendingBaseline: false } satisfies CheckpointProgress)
 
-      const currentTokens =
-        input.tokens.total ||
-        input.tokens.input + input.tokens.output + input.tokens.cache.read + input.tokens.cache.write
-
-      const already = crossed.get(input.sessionID) ?? new Set<number>()
-      const maxThreshold = thresholds[thresholds.length - 1]
-
-      for (const t of thresholds) {
-        if (currentTokens < t) break // sorted ascending; nothing more to trigger
-        if (already.has(t)) continue
-
-        const outcome = yield* checkpoint
-          .tryStartCheckpointWriter({
-            sessionID: input.sessionID,
-            model: { providerID: input.model.providerID, modelID: input.model.id },
-            promptOps: input.promptOps,
-          })
-          .pipe(Effect.catch(() => Effect.succeed<"started" | "queued" | "skipped">("skipped")))
-
-        if (outcome === "started") {
-          // Fork a watcher that settles after the detached writer fiber
-          // finishes. On success, clear the failure counter. On failure,
-          // increment the counter; if below MAX_WRITER_FAILURES, clear the
-          // session's crossed thresholds so the next iteration retries.
-          //
-          // Known narrow race: between tryStartCheckpointWriter returning "started" and
-          // the watcher's forkDetach scheduling, a very-fast writer fiber can
-          // complete and delete itself from the writers map. waitForWriter
-          // then returns "no-writer" and the watcher exits without touching
-          // the counter. Impact is low — real writers run an LLM round-trip
-          // (seconds) vs. microseconds to schedule the fork, so observable
-          // failures tick the counter in practice. Proper fix: have
-          // tryStartCheckpointWriter return the Deferred handle so the watcher doesn't
-          // re-read the writers map.
-          yield* Effect.gen(function* () {
-            const result = yield* checkpoint.waitForWriter(input.sessionID)
-            if (result === "success") {
-              writerFailures.delete(input.sessionID)
-              return
-            }
-            if (result !== "failure") return
-            const next = (writerFailures.get(input.sessionID) ?? 0) + 1
-            writerFailures.set(input.sessionID, next)
-            if (next < maxFailures) {
-              crossed.delete(input.sessionID)
-              maxCrossed.delete(input.sessionID)
-              log.info("checkpoint writer failed — cleared thresholds for retry", {
-                sessionID: input.sessionID,
-                attempt: next,
-                maxAttempts: maxFailures,
-              })
-            } else {
-              log.warn("checkpoint writer gave up after max consecutive failures", {
-                sessionID: input.sessionID,
-                maxAttempts: maxFailures,
-              })
-            }
-          }).pipe(Effect.forkDetach)
-        }
-
-        already.add(t)
-        log.info("checkpoint triggered", { threshold: t, currentTokens })
-
-        if (t === maxThreshold) maxCrossed.add(input.sessionID)
+      if (state.pendingBaseline || current < state.last) {
+        state.baseline = current
+        state.last = current
+        state.crossed.clear()
+        state.pendingBaseline = false
+        progress.set(input.sessionID, state)
+        log.info("checkpoint epoch baseline established", { sessionID: input.sessionID, baseline: current })
+        return
       }
 
-      crossed.set(input.sessionID, already)
+      state.last = current
+      progress.set(input.sessionID, state)
+      if (yield* checkpoint.isWriterRunning(input.sessionID)) return
+
+      const growth = current - state.baseline
+      const threshold = thresholds.findLast((value) => growth >= value && !state.crossed.has(value))
+      if (threshold === undefined) return
+
+      const outcome = yield* checkpoint
+        .tryStartCheckpointWriter({
+          sessionID: input.sessionID,
+          model: { providerID: input.model.providerID, modelID: input.model.id },
+          promptOps: input.promptOps,
+        })
+        .pipe(Effect.catch(() => Effect.succeed<"started" | "queued" | "skipped">("skipped")))
+      if (outcome === "skipped") return
+
+      for (const value of thresholds) {
+        if (value > threshold) break
+        state.crossed.add(value)
+      }
+      log.info("checkpoint triggered", { threshold, growth, current })
+
+      if (outcome !== "started") return
+      const maxFailures = cfg.checkpoint?.max_writer_failures ?? MAX_WRITER_FAILURES
+      yield* Effect.gen(function* () {
+        const result = yield* checkpoint.waitForWriter(input.sessionID)
+        if (result === "success") {
+          writerFailures.delete(input.sessionID)
+          return
+        }
+        if (result !== "failure") return
+        const next = (writerFailures.get(input.sessionID) ?? 0) + 1
+        writerFailures.set(input.sessionID, next)
+        if (next >= maxFailures) {
+          log.warn("checkpoint writer gave up after max consecutive failures", {
+            sessionID: input.sessionID,
+            maxAttempts: maxFailures,
+          })
+          return
+        }
+        progress.get(input.sessionID)?.crossed.clear()
+        log.info("checkpoint writer failed — cleared thresholds for retry", {
+          sessionID: input.sessionID,
+          attempt: next,
+          maxAttempts: maxFailures,
+        })
+      }).pipe(Effect.forkDetach)
     })
 
     // Each turn end, decide (based on cache-TTL + pressure) whether to soft-trim
@@ -443,18 +422,20 @@ export const layer: Layer.Layer<
       }
     })
 
-    const maxThresholdCrossed = Effect.fn("SessionPrune.maxThresholdCrossed")(function* (
-      sessionID: SessionID,
-    ) {
-      return maxCrossed.has(sessionID)
-    })
-
     const resetThresholds = Effect.fn("SessionPrune.resetThresholds")(function* (sessionID: SessionID) {
-      crossed.delete(sessionID)
-      maxCrossed.delete(sessionID)
+      progress.delete(sessionID)
     })
 
-    return Service.of({ prune, fireCheckpoints, maxThresholdCrossed, resetThresholds })
+    const markContextReduced = Effect.fn("SessionPrune.markContextReduced")(function* (sessionID: SessionID) {
+      progress.set(sessionID, {
+        baseline: 0,
+        last: 0,
+        crossed: new Set(),
+        pendingBaseline: true,
+      })
+    })
+
+    return Service.of({ prune, fireCheckpoints, resetThresholds, markContextReduced })
   }),
 )
 

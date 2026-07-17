@@ -15,7 +15,7 @@ describe("session status context ownership", () => {
       Effect.gen(function* () {
         const status = yield* SessionStatus.Service
         const sessionID = SessionID.make("ses_context")
-        const context = { input: 80_000, output: 20_000, limit: 200_000 }
+        const context = { input: 80_000, output: 20_000, limit: 200_000, inputLimit: 180_000 }
 
         yield* status.set(sessionID, { type: "busy", messageID: MessageID.make("msg_main"), context })
         yield* status.set(sessionID, { type: "busy", message: "Running tools..." })

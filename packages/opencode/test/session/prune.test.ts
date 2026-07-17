@@ -417,3 +417,123 @@ describe("defaultThresholdsFor (Part 2 density)", () => {
     }
   })
 })
+
+
+describe("SessionPrune checkpoint epochs", () => {
+  function harness(result: "started" | "queued" | "skipped" = "queued") {
+    const state = { starts: 0 }
+    const checkpointLayer = Layer.succeed(
+      SessionCheckpoint.Service,
+      SessionCheckpoint.Service.of({
+        tryStartCheckpointWriter: () =>
+          Effect.sync(() => {
+            state.starts++
+            return result
+          }),
+        waitForWriter: () => Effect.succeed("success"),
+        drainWriters: () => Effect.succeed({ drained: 0, timedOut: 0 }),
+        hasCheckpoint: () => Effect.succeed(false),
+        hasMemoryOrTasks: () => Effect.succeed(false),
+        loadLatest: () => Effect.succeed(undefined),
+        loadCheckpoints: () => Effect.succeed([]),
+        renderIndex: () => Effect.succeed(""),
+        renderRebuildContext: () => Effect.succeed(""),
+        lastBoundary: () => Effect.succeed(undefined),
+        isWriterRunning: () => Effect.succeed(false),
+        insertRebuildBoundary: () => Effect.succeed(false),
+      }),
+    )
+    return {
+      state,
+      layer: Layer.mergeAll(
+        SessionNs.defaultLayer,
+        CrossSpawnSpawner.defaultLayer,
+        SessionPrune.layer.pipe(
+          Layer.provide(SessionNs.defaultLayer),
+          Layer.provide(checkpointLayer),
+          Layer.provide(ActorRegistry.defaultLayer),
+          Layer.provideMerge(deps),
+        ),
+      ),
+    }
+  }
+
+  test("a large jump writes only the newest checkpoint", async () => {
+    const value = harness()
+    await Effect.runPromise(
+      provideTmpdirInstance(
+        () =>
+          Effect.gen(function* () {
+            const service = yield* SessionPrune.Service
+            const session = yield* SessionNs.Service
+            const info = yield* session.create({})
+            const model = createModel({ context: 128_000, output: 32_000 })
+            yield* service.fireCheckpoints({
+              sessionID: info.id,
+              model,
+              tokens: { input: 80_000, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+              promptOps: {} as any,
+            })
+          }),
+        { config: { checkpoint: { thresholds: ["20%", "40%", "60%", "80%"] } } },
+      ).pipe(Effect.scoped, Effect.provide(value.layer)),
+    )
+    expect(value.state.starts).toBe(1)
+  })
+
+  test("a reduced context establishes a baseline before checkpointing again", async () => {
+    const value = harness()
+    await Effect.runPromise(
+      provideTmpdirInstance(
+        () =>
+          Effect.gen(function* () {
+            const service = yield* SessionPrune.Service
+            const session = yield* SessionNs.Service
+            const info = yield* session.create({})
+            const model = createModel({ context: 128_000, output: 32_000 })
+            const run = (input: number) =>
+              service.fireCheckpoints({
+                sessionID: info.id,
+                model,
+                tokens: { input, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+                promptOps: {} as any,
+              })
+
+            yield* run(80_000)
+            yield* service.markContextReduced(info.id)
+            yield* run(60_000)
+            yield* run(70_000)
+            expect(value.state.starts).toBe(1)
+            yield* run(80_000)
+          }),
+        { config: { checkpoint: { thresholds: ["20K"] } } },
+      ).pipe(Effect.scoped, Effect.provide(value.layer)),
+    )
+    expect(value.state.starts).toBe(2)
+  })
+
+  test("a skipped writer does not consume the threshold", async () => {
+    const value = harness("skipped")
+    await Effect.runPromise(
+      provideTmpdirInstance(
+        () =>
+          Effect.gen(function* () {
+            const service = yield* SessionPrune.Service
+            const session = yield* SessionNs.Service
+            const info = yield* session.create({})
+            const model = createModel({ context: 128_000, output: 32_000 })
+            const input = {
+              sessionID: info.id,
+              model,
+              tokens: { input: 30_000, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+              promptOps: {} as any,
+            }
+            yield* service.fireCheckpoints(input)
+            yield* service.fireCheckpoints(input)
+          }),
+        { config: { checkpoint: { thresholds: ["20K"] } } },
+      ).pipe(Effect.scoped, Effect.provide(value.layer)),
+    )
+    expect(value.state.starts).toBe(2)
+  })
+})

@@ -34,6 +34,7 @@ import * as OtelTracer from "@effect/opentelemetry/Tracer"
 import { ActorRegistry } from "@/actor/registry"
 import { Memory } from "@/memory"
 import { isRetryableTransientError } from "./retry"
+import { contextBudget } from "./overflow"
 
 const log = Log.create({ service: "llm" })
 export const OUTPUT_TOKEN_MAX = ProviderTransform.OUTPUT_TOKEN_MAX
@@ -43,6 +44,7 @@ export type ContextUsage = {
   input: number
   output: number
   limit: number
+  inputLimit: number
 }
 
 const unsupportedTokenCounters = new Set<string>()
@@ -749,20 +751,19 @@ const live: Layer.Layer<
                 })
                 if (!counted) return doStream()
 
+                const output = call.maxOutputTokens ?? ProviderTransform.maxOutputTokens(input.model)
+                const budget = contextBudget({ cfg, model: input.model, output })
                 const context = {
                   input: counted.tokens,
-                  output: call.maxOutputTokens ?? ProviderTransform.maxOutputTokens(input.model),
-                  limit: input.model.limit.context,
+                  output,
+                  limit: budget.context,
+                  inputLimit: budget.input,
                 }
                 await input.onContextUsage?.(context)
                 if (context.limit === 0) return doStream()
 
-                const inputLimit = Math.min(
-                  input.model.limit.input ?? Number.POSITIVE_INFINITY,
-                  Math.max(0, context.limit - context.output),
-                )
-                if (context.input > inputLimit) {
-                  const message = `Input requires ${context.input} tokens, but only ${inputLimit} are available after reserving ${context.output} output tokens.`
+                if (context.input > context.inputLimit) {
+                  const message = `Input requires ${context.input} tokens, but only ${context.inputLimit} are available after reserving ${context.output} output tokens.`
                   throw new APICallError({
                     message,
                     url: counted.url,

@@ -4,7 +4,7 @@ import z from "zod"
 import { SessionID, MessageID, PartID } from "./schema"
 import { MessageV2 } from "./message-v2"
 import { classifyAssistantStep } from "./classify"
-import { Log } from "../util"
+import { Log, Token } from "../util"
 import { SessionRevert } from "./revert"
 import * as Session from "./session"
 import { Agent } from "../agent/agent"
@@ -29,7 +29,7 @@ import { SessionPrune } from "./prune"
 import { SessionCheckpoint } from "./checkpoint"
 import { SessionCompaction } from "./compaction"
 import { computeLastMessageInfo } from "./last-message-info"
-import { pressureLevel, isOverflow as overflowCheck } from "./overflow"
+import { pressureLevel, isOverflow as overflowCheck, rebuildTarget } from "./overflow"
 import { Config } from "@/config"
 import { Global } from "@/global"
 import { Bus } from "../bus"
@@ -391,7 +391,7 @@ export const layer = Layer.effect(
       msgs: MessageV2.WithParts[]
       agentID?: string
       agent: string
-      model: { providerID: string; id: string }
+      model: Provider.Model
     }) {
       const hasCP = yield* checkpoint
         .hasCheckpoint(input.sessionID)
@@ -403,7 +403,16 @@ export const layer = Layer.effect(
         .pipe(Effect.catch(() => Effect.succeed(undefined)))
       if (!boundary) return false
 
-      const boundaryMsg = input.msgs.find((m) => m.info.id === boundary)
+      const boundaryIdx = input.msgs.findIndex((m) => m.info.id === boundary)
+      const tail = boundaryIdx < 0 ? [] : input.msgs.slice(boundaryIdx + 1)
+      const tailTokens = Token.estimate(
+        JSON.stringify(yield* MessageV2.toModelMessagesEffect(tail, input.model)),
+      )
+      const maxTokens = Math.max(
+        0,
+        rebuildTarget({ cfg: yield* config.get(), model: input.model }) - tailTokens,
+      )
+      const boundaryMsg = input.msgs[boundaryIdx]
       const inserted = yield* checkpoint
         .insertRebuildBoundary({
           sessionID: input.sessionID,
@@ -413,10 +422,11 @@ export const layer = Layer.effect(
           agent: input.agent,
           model: { providerID: input.model.providerID, modelID: input.model.id },
           boundaryCreatedAt: boundaryMsg?.info.time.created,
+          maxTokens,
         })
         .pipe(Effect.catch(() => Effect.succeed(false)))
 
-      if (inserted) yield* prune.resetThresholds(input.sessionID)
+      if (inserted) yield* prune.markContextReduced(input.sessionID)
       return inserted
     })
 
@@ -3120,7 +3130,13 @@ NOTE: At any point in time through this workflow you should feel free to ask the
           // based on the latest completed assistant message's tokens. Must run
           // BEFORE the overflow/maxThreshold check below so maxCrossed flag is
           // set in time to trigger rebuild on this same iteration.
-          if (!skipOverflowCheck && !isBoundedComputation && lastFinished && lastFinished.tokens) {
+          if (
+            !skipOverflowCheck &&
+            !isBoundedComputation &&
+            lastFinished &&
+            lastFinished.summary !== true &&
+            lastFinished.tokens
+          ) {
             const fireOps = yield* ops()
             yield* prune
               .fireCheckpoints({
@@ -3138,8 +3154,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
             !isBoundedComputation &&
             lastFinished &&
             lastFinished.summary !== true &&
-            (overflowCheck({ cfg: yield* config.get(), tokens: lastFinished.tokens, model }) ||
-              (yield* prune.maxThresholdCrossed(sessionID)))
+            overflowCheck({ cfg: yield* config.get(), tokens: lastFinished.tokens, model })
           ) {
             // Subagent overflow → per-actor compaction (lossy LLM summarization
             // scoped to the actor's (sessionID, agent_id) slice). Subagents
@@ -3178,7 +3193,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
               msgs,
               agentID: lastUser.agentID,
               agent: lastUser.agent,
-              model: { providerID: model.providerID, id: model.id },
+              model,
             })
             if (inserted) {
               skipOverflowCheck = true
@@ -3701,7 +3716,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
                 msgs,
                 agentID: lastUser.agentID,
                 agent: lastUser.agent,
-                model: { providerID: model.providerID, id: model.id },
+                model,
               })
               if (inserted2) {
                 yield* contextStatus("Rebuilding context from checkpoint...")
@@ -3820,7 +3835,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
                 msgs,
                 agentID: lastUser.agentID,
                 agent: lastUser.agent,
-                model: { providerID: model.providerID, id: model.id },
+                model,
               })
               if (inserted2) {
                 yield* contextStatus("Rebuilding context from checkpoint...")
@@ -4045,13 +4060,14 @@ NOTE: At any point in time through this workflow you should feel free to ask the
       if (input.command === Command.Default.REBUILD) {
         const msgs = yield* sessions.messages({ sessionID: input.sessionID, agentID: "main" })
         const lastUser = msgs.findLast((m) => m.info.role === "user")
-        const model = yield* lastModel(input.sessionID)
+        const modelRef = yield* lastModel(input.sessionID)
+        const model = yield* getModel(modelRef.providerID, modelRef.modelID, input.sessionID)
         const inserted = yield* rebuildFromCheckpoint({
           sessionID: input.sessionID,
           msgs,
           agentID: lastUser?.info.agentID ?? "main",
           agent: agentName,
-          model: { providerID: model.providerID, id: model.modelID },
+          model,
         }).pipe(Effect.catch(() => Effect.succeed(false)))
         return yield* prompt({
           sessionID: input.sessionID,

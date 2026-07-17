@@ -545,27 +545,18 @@ describe("SessionNs.getUsage", () => {
 })
 
 describe("usable", () => {
-  test("caps output reservation at 20K when model.limit.output is larger", () => {
-    // 200K context with 32K output — without the cap, usable would be 200K - 32K = 168K.
-    // With OUTPUT_CAP=20K, usable should be 200K - 20K - reserved.
+  test("uses the physical input capacity after reserving model output", () => {
     const model = createModel({ context: 200_000, output: 32_000 })
-    const cfg = mockCfg() // reserved defaults to min(20K, 32K) = 20K
-    expect(usable({ cfg, model })).toBe(160_000) // 200K - 20K (output cap) - 20K (reserved)
+    expect(usable({ cfg: mockCfg(), model })).toBe(168_000)
   })
 
-  test("does not cap when model.limit.output is below 20K", () => {
-    // 100K context with 8K output — output cap (20K) does not bite.
-    // usable should be 100K - 8K - reserved.
+  test("uses the full remaining capacity for smaller output windows", () => {
     const model = createModel({ context: 100_000, output: 8_000 })
-    const cfg = mockCfg() // reserved defaults to min(20K, 8K) = 8K
-    expect(usable({ cfg, model })).toBe(84_000) // 100K - 8K (raw output, below cap) - 8K (reserved)
+    expect(usable({ cfg: mockCfg(), model })).toBe(92_000)
   })
 
-  test("respects user-configured cfg.compaction.reserved", () => {
-    // 200K context, output 32K, user sets reserved=5K explicitly.
-    // usable = 200K - min(32K, 20K) - 5K = 175K
+  test("keeps compaction headroom separate from physical input capacity", () => {
     const model = createModel({ context: 200_000, output: 32_000 })
-    const cfg = mockCfg({ reserved: 5_000 })
-    expect(usable({ cfg, model })).toBe(175_000)
+    expect(usable({ cfg: mockCfg({ reserved: 5_000 }), model })).toBe(168_000)
   })
 })

@@ -465,7 +465,7 @@ export function Prompt(props: PromptProps) {
   const usage = createMemo(() => {
     if (!props.sessionID) return
     const msg = sync.data.message[props.sessionID]?.["main"] ?? []
-    const live = (status() as { context?: { input: number; output: number; limit: number } }).context
+    const live = (status() as { context?: { input: number; output: number; limit: number; inputLimit: number } }).context
     const context = resolveContextUsage({
       messages: msg,
       parts: (messageID) => sync.data.part[messageID] ?? [],
@@ -480,7 +480,11 @@ export function Prompt(props: PromptProps) {
         : context
           ? [
               Locale.number(context.input),
-              context.limit ? `(${Math.round((context.input / context.limit) * 100)}%)` : undefined,
+              (context.kind === "live" ? context.inputLimit : context.limit)
+                ? `(${Math.round(
+                    (context.input / (context.kind === "live" ? context.inputLimit : context.limit!)) * 100,
+                  )}%)`
+                : undefined,
             ]
               .filter(Boolean)
               .join(" ")

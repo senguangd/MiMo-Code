@@ -1,14 +1,14 @@
 import type { Message, Part } from "@mimo-ai/sdk/v2"
 
 export type ContextUsage =
-  | { kind: "live"; input: number; reserved: number; limit: number }
+  | { kind: "live"; input: number; reserved: number; limit: number; inputLimit: number }
   | { kind: "last"; input: number; reserved: null; limit?: number }
   | { kind: "invalidated" }
 
 type Input = {
   messages: readonly Message[]
   parts: (messageID: string) => readonly Part[]
-  live?: { input: number; output: number; limit: number }
+  live?: { input: number; output: number; limit: number; inputLimit: number }
   contextLimit: (providerID: string, modelID: string) => number | undefined
 }
 
@@ -19,6 +19,7 @@ export function resolveContextUsage(input: Input): ContextUsage | undefined {
       input: input.live.input,
       reserved: input.live.output,
       limit: input.live.limit,
+      inputLimit: input.live.inputLimit,
     }
   }
 
