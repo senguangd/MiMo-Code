@@ -41,6 +41,38 @@ jobs:
           path.write_text(text)
           PY
           python .github/context-fix.py > context-fix.log 2>&1
+          python - <<'PY'
+          from pathlib import Path
+
+          overflow = Path('packages/opencode/src/session/overflow.ts')
+          text = overflow.read_text().replace(
+              'tokens.input + tokens.output + tokens.reasoning + tokens.cache.read + tokens.cache.write',
+              'tokens.input + tokens.output + (tokens.reasoning ?? 0) + tokens.cache.read + tokens.cache.write',
+          )
+          overflow.write_text(text)
+
+          tests = Path('packages/opencode/test/session/overflow.test.ts')
+          text = tests.read_text()
+          start = text.index('describe("usable", () => {')
+          text = text[:start] + '''describe("usable", () => {
+            test("uses the physical input capacity after reserving model output", () => {
+              const model = createModel({ context: 200_000, output: 32_000 })
+              expect(usable({ cfg: mockCfg(), model })).toBe(168_000)
+            })
+
+            test("uses the full remaining capacity for smaller output windows", () => {
+              const model = createModel({ context: 100_000, output: 8_000 })
+              expect(usable({ cfg: mockCfg(), model })).toBe(92_000)
+            })
+
+            test("keeps compaction headroom separate from physical input capacity", () => {
+              const model = createModel({ context: 200_000, output: 32_000 })
+              expect(usable({ cfg: mockCfg({ reserved: 5_000 }), model })).toBe(168_000)
+            })
+          })
+          '''
+          tests.write_text(text)
+          PY
 
       - name: Capture generator log
         if: always()
