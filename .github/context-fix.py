@@ -504,7 +504,29 @@ replace(
     "packages/opencode/src/session/prompt.ts",
     'model: { providerID: model.providerID, id: model.id },',
     'model,',
-    count=4,
+    count=3,
+)
+replace(
+    "packages/opencode/src/session/prompt.ts",
+    '''        const model = yield* lastModel(input.sessionID)
+        const inserted = yield* rebuildFromCheckpoint({
+          sessionID: input.sessionID,
+          msgs,
+          agentID: lastUser?.info.agentID ?? "main",
+          agent: agentName,
+          model: { providerID: model.providerID, id: model.modelID },
+        }).pipe(Effect.catch(() => Effect.succeed(false)))
+''',
+    '''        const modelRef = yield* lastModel(input.sessionID)
+        const model = yield* getModel(modelRef.providerID, modelRef.modelID, input.sessionID)
+        const inserted = yield* rebuildFromCheckpoint({
+          sessionID: input.sessionID,
+          msgs,
+          agentID: lastUser?.info.agentID ?? "main",
+          agent: agentName,
+          model,
+        }).pipe(Effect.catch(() => Effect.succeed(false)))
+''',
 )
 
 replace(
