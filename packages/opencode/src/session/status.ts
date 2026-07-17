@@ -63,7 +63,7 @@ export const Event = {
 export interface Interface {
   readonly get: (sessionID: SessionID) => Effect.Effect<Info>
   readonly list: () => Effect.Effect<Map<SessionID, Info>>
-  readonly set: (sessionID: SessionID, status: Info) => Effect.Effect<void>
+  readonly set: (sessionID: SessionID, status: Info, options?: { preserveContext?: boolean }) => Effect.Effect<void>
 }
 
 export class Service extends Context.Service<Service, Interface>()("@opencode/SessionStatus") {}
@@ -86,10 +86,20 @@ export const layer = Layer.effect(
       return new Map(yield* InstanceState.get(state))
     })
 
-    const set = Effect.fn("SessionStatus.set")(function* (sessionID: SessionID, status: Info) {
+    const set = Effect.fn("SessionStatus.set")(function* (
+      sessionID: SessionID,
+      status: Info,
+      options?: { preserveContext?: boolean },
+    ) {
       const data = yield* InstanceState.get(state)
       const current = data.get(sessionID)
-      if (status.type === "busy" && current?.type === "busy" && !status.context && current.context) {
+      if (
+        options?.preserveContext !== false &&
+        status.type === "busy" &&
+        current?.type === "busy" &&
+        !status.context &&
+        current.context
+      ) {
         status = { ...status, context: current.context }
       }
 

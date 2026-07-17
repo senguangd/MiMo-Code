@@ -978,6 +978,8 @@ export const layer: Layer.Layer<
                   next: info.next,
                 }),
               onContextUsage: async (usage) => {
+                // Summary agents measure internal work, not the main session context.
+                if (ctx.assistantMessage.summary) return
                 contextUsage = usage
                 await Effect.runPromise(publishBusyStatus(undefined, { force: true }))
               },

@@ -2170,7 +2170,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
 
         const contextStatus = (message: string) =>
           resolvedAgentID === "main"
-            ? status.set(sessionID, { type: "busy" as const, message })
+            ? status.set(sessionID, { type: "busy" as const, message }, { preserveContext: false })
             : Effect.void
 
         // Fires session.post exactly once via Effect.onExit on the body below.
