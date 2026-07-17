@@ -4,18 +4,23 @@ on:
   push:
     branches:
       - fix/context-budget-root
+  pull_request:
+    branches:
+      - dev
 
 permissions:
   contents: write
 
 jobs:
   apply-and-verify:
+    if: github.event_name == 'push' || github.event.pull_request.head.ref == 'fix/context-budget-root'
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          ref: ${{ github.event_name == 'pull_request' && github.head_ref || github.ref_name }}
 
       - uses: oven-sh/setup-bun@v2
         with:
