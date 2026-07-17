@@ -51,6 +51,26 @@ jobs:
           )
           overflow.write_text(text)
 
+          sidebar = Path('packages/opencode/src/cli/cmd/tui/feature-plugins/sidebar/context.tsx')
+          text = sidebar.read_text().replace(
+              '''function inputLimit(usage: Reading) {
+            return usage.kind === "live" ? usage.inputLimit : usage.limit
+          }
+          ''',
+              '''function inputLimit(usage: Reading) {
+            return usage.kind === "live" ? usage.inputLimit : usage.limit
+          }
+
+          function liveInputLimit(usage: Reading) {
+            return usage.kind === "live" ? usage.inputLimit : null
+          }
+          ''',
+          ).replace(
+              'usage().kind === "live" ? usage().inputLimit : null',
+              'liveInputLimit(usage())',
+          )
+          sidebar.write_text(text)
+
           tests = Path('packages/opencode/test/session/overflow.test.ts')
           text = tests.read_text()
           start = text.index('describe("usable", () => {')
