@@ -4,6 +4,16 @@ import fs from "fs/promises"
 import { Glob } from "@mimo-ai/shared/util/glob"
 import { tmpdir } from "../fixture/fixture"
 
+async function expectRejects(promise: Promise<unknown>, pattern: RegExp) {
+  try {
+    await promise
+  } catch (error) {
+    expect(error instanceof Error ? error.message : String(error)).toMatch(pattern)
+    return
+  }
+  throw new Error("Expected promise to reject")
+}
+
 describe("Glob", () => {
   describe("scan()", () => {
     test("finds files matching pattern", async () => {
@@ -72,6 +82,21 @@ describe("Glob", () => {
       const results = await Glob.scan("*.nonexistent", { cwd: tmp.path })
 
       expect(results).toEqual([])
+    })
+
+    test("stops traversal when the result limit is exceeded", async () => {
+      await using tmp = await tmpdir()
+      await Promise.all(["a.txt", "b.txt", "c.txt"].map((name) => fs.writeFile(path.join(tmp.path, name), "", "utf-8")))
+
+      await expectRejects(Glob.scan("*.txt", { cwd: tmp.path, maxResults: 2 }), /2-result limit/)
+    })
+
+    test("applies and validates the same result limit synchronously", async () => {
+      await using tmp = await tmpdir()
+      await Promise.all(["a.txt", "b.txt"].map((name) => fs.writeFile(path.join(tmp.path, name), "", "utf-8")))
+
+      expect(() => Glob.scanSync("*.txt", { cwd: tmp.path, maxResults: 1 })).toThrow(/1-result limit/)
+      expect(() => Glob.scanSync("*.txt", { cwd: tmp.path, maxResults: -1 })).toThrow(/non-negative integer/)
     })
 
     test("does not follow symlinks by default", async () => {

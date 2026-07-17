@@ -1,11 +1,27 @@
 import { describe, expect, test } from "bun:test"
-import { resolveInWorkspace, makeFileHooks } from "../../src/workflow/workspace"
+import { resolveInWorkspace, makeFileHooks, WorkspaceLimits } from "../../src/workflow/workspace"
 import { tmpdir } from "os"
-import { mkdtempSync } from "fs"
+import path from "path"
+import { mkdtempSync, symlinkSync, writeFileSync } from "fs"
+
+function errorCode(error: unknown) {
+  if (!error || typeof error !== "object" || !("code" in error)) return undefined
+  return typeof error.code === "string" ? error.code : undefined
+}
+
+async function expectRejects(promise: Promise<unknown>, pattern: RegExp) {
+  try {
+    await promise
+  } catch (error) {
+    expect(error instanceof Error ? error.message : String(error)).toMatch(pattern)
+    return
+  }
+  throw new Error("Expected promise to reject")
+}
 
 describe("resolveInWorkspace", () => {
   test("resolves a relative path inside the root", () => {
-    expect(resolveInWorkspace("/ws", "a/b.txt")).toBe("/ws/a/b.txt")
+    expect(resolveInWorkspace("/ws", "a/b.txt")).toBe(path.resolve("/ws", "a/b.txt"))
   })
 
   test("rejects a parent-traversal escape", () => {
@@ -17,8 +33,8 @@ describe("resolveInWorkspace", () => {
   })
 
   test("allows the root itself and nested dirs", () => {
-    expect(resolveInWorkspace("/ws", ".")).toBe("/ws")
-    expect(resolveInWorkspace("/ws", "deep/nested/x")).toBe("/ws/deep/nested/x")
+    expect(resolveInWorkspace("/ws", ".")).toBe(path.resolve("/ws"))
+    expect(resolveInWorkspace("/ws", "deep/nested/x")).toBe(path.resolve("/ws", "deep/nested/x"))
   })
 })
 
@@ -47,7 +63,47 @@ describe("makeFileHooks read/write/exists", () => {
   test("writeFile escaping the workspace throws", async () => {
     const root = mkdtempSync(`${tmpdir()}/wf-ws-`)
     const hooks = makeFileHooks(root)
-    await expect(hooks.writeFile("../escape", "x")).rejects.toThrow(/workspace/)
+    await expectRejects(hooks.writeFile("../escape", "x"), /workspace/)
+  })
+
+  test("rejects reads and writes through an escaping symlink or junction", async () => {
+    const root = mkdtempSync(`${tmpdir()}/wf-ws-`)
+    const outside = mkdtempSync(`${tmpdir()}/wf-outside-`)
+    writeFileSync(path.join(outside, "secret.txt"), "secret")
+    try {
+      symlinkSync(outside, path.join(root, "escape"), process.platform === "win32" ? "junction" : "dir")
+    } catch (error) {
+      if (errorCode(error) === "EPERM") return
+      throw error
+    }
+
+    const hooks = makeFileHooks(root)
+    await expectRejects(hooks.readFile("escape/secret.txt"), /escapes/)
+    await expectRejects(hooks.writeFile("escape/new.txt", "x"), /escapes/)
+    await expectRejects(hooks.exists("escape/secret.txt"), /escapes/)
+    expect(await hooks.glob("escape/**")).toEqual([])
+  })
+
+  test("enforces host-side read and write byte limits", async () => {
+    const root = mkdtempSync(`${tmpdir()}/wf-ws-`)
+    const hooks = makeFileHooks(root)
+    const oversized = "x".repeat(WorkspaceLimits.fileBytes + 1)
+
+    await expectRejects(hooks.writeFile("too-large.txt", oversized), /write limit/)
+    writeFileSync(path.join(root, "too-large.txt"), oversized)
+    await expectRejects(hooks.readFile("too-large.txt"), /read limit/)
+  })
+
+  test("rejects path inputs above the boundary limit", async () => {
+    const hooks = makeFileHooks(mkdtempSync(`${tmpdir()}/wf-ws-`))
+    await expectRejects(hooks.exists("x".repeat(WorkspaceLimits.pathBytes + 1)), /path.*limit/)
+  })
+
+  test("rejects null bytes before filesystem access", async () => {
+    const hooks = makeFileHooks(mkdtempSync(`${tmpdir()}/wf-ws-`))
+    await expectRejects(hooks.readFile("bad\0path"), /null byte/)
+    await expectRejects(hooks.writeFile("bad\0path", "x"), /null byte/)
+    await expectRejects(hooks.glob("bad\0pattern"), /null byte/)
   })
 })
 
@@ -59,7 +115,7 @@ describe("makeFileHooks glob", () => {
     await hooks.writeFile("src/a.zig", "")
     await hooks.writeFile("src/b.zig", "")
     const r = await hooks.glob("src/*.zig")
-    expect(r).toEqual(["src/a.zig", "src/b.zig", "src/c.zig"]) // sorted, relative
+    expect(r).toEqual([path.join("src", "a.zig"), path.join("src", "b.zig"), path.join("src", "c.zig")]) // sorted, relative
   })
 
   test("empty match set returns []", async () => {
@@ -78,10 +134,10 @@ describe("makeFileHooks glob", () => {
     writeFileSync(pathMod.join(outside, "secret.txt"), "x")
     // A file INSIDE the workspace (the legitimate match).
     await hooks.writeFile("inside.txt", "y")
-    // Parent-traversal and absolute patterns must NOT leak anything outside root.
-    expect(await hooks.glob("../wf-outside-*/*")).toEqual([])
-    expect(await hooks.glob(`${outside}/*`)).toEqual([])
-    expect(await hooks.glob("../*")).toEqual([])
+    // Parent-traversal and absolute patterns fail before the glob engine can scan outside the root.
+    await expectRejects(hooks.glob("../wf-outside-*/*"), /escapes/)
+    await expectRejects(hooks.glob(`${outside}/*`), /escapes/)
+    await expectRejects(hooks.glob("../*"), /escapes/)
     // A normal in-workspace glob still works.
     expect(await hooks.glob("*.txt")).toEqual(["inside.txt"])
   })

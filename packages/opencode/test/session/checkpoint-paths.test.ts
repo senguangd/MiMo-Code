@@ -7,10 +7,7 @@ import { ProjectID } from "../../src/project/schema"
 import { notesPath, globalMemoryPath, memoryPath, migrateProjectMemory } from "../../src/session/checkpoint-paths"
 
 async function sameFile(a: string, b: string) {
-  const [aStat, bStat] = await Promise.all([
-    fs.stat(a).catch(() => undefined),
-    fs.stat(b).catch(() => undefined),
-  ])
+  const [aStat, bStat] = await Promise.all([fs.stat(a).catch(() => undefined), fs.stat(b).catch(() => undefined)])
   if (!aStat || !bStat) return false
   return aStat.dev === bStat.dev && aStat.ino === bStat.ino
 }
@@ -24,15 +21,13 @@ describe("notesPath (F14)", () => {
 
 describe("globalMemoryPath", () => {
   test("returns <data>/memory/global/MEMORY.md", () => {
-    expect(globalMemoryPath()).toBe(
-      path.join(Global.Path.data, "memory", "global", "MEMORY.md"),
-    )
+    expect(globalMemoryPath()).toBe(path.join(Global.Path.data, "memory", "global", "MEMORY.md"))
   })
 })
 
 describe("migrateProjectMemory", () => {
   test("renames legacy memory.md to MEMORY.md when only legacy exists", async () => {
-    const pid = ProjectID.make(`p_test_${Date.now()}_${Math.random().toString(36).slice(2)}`)
+    const pid = ProjectID.make(`p_test_${Date.now()}_${crypto.randomUUID()}`)
     const upper = memoryPath(pid)
     const dir = path.dirname(upper)
     const lower = path.join(dir, "memory.md")
@@ -47,7 +42,7 @@ describe("migrateProjectMemory", () => {
   })
 
   test("no-op when MEMORY.md already exists", async () => {
-    const pid = ProjectID.make(`p_test_${Date.now()}_${Math.random().toString(36).slice(2)}`)
+    const pid = ProjectID.make(`p_test_${Date.now()}_${crypto.randomUUID()}`)
     const upper = memoryPath(pid)
     const dir = path.dirname(upper)
     const lower = path.join(dir, "memory.md")
@@ -63,13 +58,13 @@ describe("migrateProjectMemory", () => {
   })
 
   test("no-op when neither file exists", async () => {
-    const pid = ProjectID.make(`p_test_${Date.now()}_${Math.random().toString(36).slice(2)}`)
+    const pid = ProjectID.make(`p_test_${Date.now()}_${crypto.randomUUID()}`)
     await migrateProjectMemory(pid) // must not throw
     expect(await Bun.file(memoryPath(pid)).exists()).toBe(false)
   })
 
   test("concurrent migrators on same project: loser's ENOENT is tolerated, content preserved", async () => {
-    const pid = ProjectID.make(`p_test_${Date.now()}_${Math.random().toString(36).slice(2)}`)
+    const pid = ProjectID.make(`p_test_${Date.now()}_${crypto.randomUUID()}`)
     const upper = memoryPath(pid)
     const dir = path.dirname(upper)
     const lower = path.join(dir, "memory.md")

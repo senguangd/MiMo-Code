@@ -2,77 +2,44 @@ import { afterEach, describe, expect, test } from "bun:test"
 import { uuid } from "./uuid"
 
 const cryptoDescriptor = Object.getOwnPropertyDescriptor(globalThis, "crypto")
-const secureDescriptor = Object.getOwnPropertyDescriptor(globalThis, "isSecureContext")
-const randomDescriptor = Object.getOwnPropertyDescriptor(Math, "random")
 
-const setCrypto = (value: Partial<Crypto>) => {
-  Object.defineProperty(globalThis, "crypto", {
-    configurable: true,
-    value: value as Crypto,
-  })
+function setCrypto(value: unknown) {
+  Object.defineProperty(globalThis, "crypto", { configurable: true, value })
 }
 
-const setSecure = (value: boolean) => {
-  Object.defineProperty(globalThis, "isSecureContext", {
-    configurable: true,
-    value,
-  })
-}
-
-const setRandom = (value: () => number) => {
-  Object.defineProperty(Math, "random", {
-    configurable: true,
-    value,
-  })
+function zeroRandomValues(array: Uint8Array) {
+  array.fill(0)
+  return array
 }
 
 afterEach(() => {
-  if (cryptoDescriptor) {
-    Object.defineProperty(globalThis, "crypto", cryptoDescriptor)
-  }
-
-  if (secureDescriptor) {
-    Object.defineProperty(globalThis, "isSecureContext", secureDescriptor)
-  }
-
-  if (!secureDescriptor) {
-    delete (globalThis as { isSecureContext?: boolean }).isSecureContext
-  }
-
-  if (randomDescriptor) {
-    Object.defineProperty(Math, "random", randomDescriptor)
-  }
+  if (cryptoDescriptor) Object.defineProperty(globalThis, "crypto", cryptoDescriptor)
+  else Reflect.deleteProperty(globalThis, "crypto")
 })
 
 describe("uuid", () => {
-  test("uses randomUUID in secure contexts", () => {
+  test("uses randomUUID when available", () => {
     setCrypto({ randomUUID: () => "00000000-0000-0000-0000-000000000000" })
-    setSecure(true)
     expect(uuid()).toBe("00000000-0000-0000-0000-000000000000")
   })
 
-  test("falls back in insecure contexts", () => {
-    setCrypto({ randomUUID: () => "00000000-0000-0000-0000-000000000000" })
-    setSecure(false)
-    setRandom(() => 0.5)
-    expect(uuid()).toBe("8")
-  })
-
-  test("falls back when randomUUID throws", () => {
+  test("builds an RFC 4122 v4 UUID from getRandomValues when randomUUID throws", () => {
     setCrypto({
       randomUUID: () => {
         throw new DOMException("Failed", "OperationError")
       },
+      getRandomValues: zeroRandomValues,
     })
-    setSecure(true)
-    setRandom(() => 0.5)
-    expect(uuid()).toBe("8")
+    expect(uuid()).toBe("00000000-0000-4000-8000-000000000000")
   })
 
-  test("falls back when randomUUID is unavailable", () => {
+  test("uses getRandomValues when randomUUID is unavailable", () => {
+    setCrypto({ getRandomValues: zeroRandomValues })
+    expect(uuid()).toBe("00000000-0000-4000-8000-000000000000")
+  })
+
+  test("fails closed when secure randomness is unavailable", () => {
     setCrypto({})
-    setSecure(true)
-    setRandom(() => 0.5)
-    expect(uuid()).toBe("8")
+    expect(() => uuid()).toThrow(/Secure random/)
   })
 })

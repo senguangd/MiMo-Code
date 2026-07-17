@@ -36,7 +36,7 @@ describe("AppFileSystem", () => {
       "returns false for non-existent paths",
       Effect.gen(function* () {
         const fs = yield* AppFileSystem.Service
-        expect(yield* fs.isDir("/tmp/nonexistent-" + Math.random())).toBe(false)
+        expect(yield* fs.isDir("/tmp/nonexistent-" + crypto.randomUUID())).toBe(false)
       }),
     )
   })

@@ -51,6 +51,12 @@ export const AuthMiddleware: MiddlewareHandler = (c, next) => {
   return basicAuth({ username, password })(c, next)
 }
 
+export const SecurityHeadersMiddleware: MiddlewareHandler = async (c, next) => {
+  c.header("X-Content-Type-Options", "nosniff")
+  c.header("Referrer-Policy", "no-referrer")
+  await next()
+}
+
 export const LoggerMiddleware: MiddlewareHandler = async (c, next) => {
   const skip = c.req.path === "/log"
   if (!skip) {
@@ -67,21 +73,70 @@ export const LoggerMiddleware: MiddlewareHandler = async (c, next) => {
   if (!skip) timer.stop()
 }
 
-export function CorsMiddleware(opts?: { cors?: string[] }): MiddlewareHandler {
+const builtinOrigins = new Set([
+  "https://opencode.ai",
+  "tauri://localhost",
+  "http://tauri.localhost",
+  "https://tauri.localhost",
+])
+const loopbackHosts = new Set(["localhost", "127.0.0.1", "::1", "[::1]"])
+
+function normalizeOrigin(input: string) {
+  if (input !== input.trim()) throw new Error("origin must not contain surrounding whitespace")
+  const url = new URL(input)
+  if (!url.hostname) throw new Error("origin must include a host")
+  if (url.username || url.password) throw new Error("origin must not include credentials")
+  if (url.search || url.hash) throw new Error("origin must not include a query or fragment")
+  if (url.pathname && url.pathname !== "/") throw new Error("origin must not include a path")
+  return `${url.protocol}//${url.host}`
+}
+
+export type OriginPolicy = (input: string) => boolean
+
+export function createOriginPolicy(cors: string[] = []): OriginPolicy {
+  const configured = new Set(
+    cors.map((input) => {
+      try {
+        return normalizeOrigin(input)
+      } catch (error) {
+        const reason = error instanceof Error ? error.message : "invalid origin"
+        throw new Error(`Invalid CORS origin ${JSON.stringify(input)}: ${reason}`, { cause: error })
+      }
+    }),
+  )
+
+  return (input) => {
+    let origin: string
+    try {
+      origin = normalizeOrigin(input)
+    } catch {
+      return false
+    }
+    if (builtinOrigins.has(origin) || configured.has(origin)) return true
+
+    const url = new URL(origin)
+    return url.protocol === "http:" && loopbackHosts.has(url.hostname)
+  }
+}
+
+export function CorsMiddleware(allowedOrigin: OriginPolicy): MiddlewareHandler {
   return cors({
     maxAge: 86_400,
     origin(input) {
-      if (!input) return
-
-      if (input.startsWith("http://localhost:")) return input
-      if (input.startsWith("http://127.0.0.1:")) return input
-      if (input === "tauri://localhost" || input === "http://tauri.localhost" || input === "https://tauri.localhost")
-        return input
-
-      if (/^https:\/\/([a-z0-9-]+\.)*opencode\.ai$/.test(input)) return input
-      if (opts?.cors?.includes(input)) return input
+      return input && allowedOrigin(input) ? input : undefined
     },
   })
+}
+
+export function OriginMiddleware(allowedOrigin: OriginPolicy): MiddlewareHandler {
+  return async (c, next) => {
+    const origin = c.req.header("origin")
+    if (origin && !allowedOrigin(origin)) return c.json({ error: "Origin is not allowed" }, 403)
+    if (!origin && c.req.header("sec-fetch-site")?.trim().toLowerCase() === "cross-site") {
+      return c.json({ error: "Cross-site requests are not allowed" }, 403)
+    }
+    return next()
+  }
 }
 
 const zipped = compress()

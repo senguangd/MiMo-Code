@@ -1,3 +1,4 @@
+import { secureRandomBytes } from "./random"
 import z from "zod"
 
 const prefixes = {
@@ -74,26 +75,13 @@ function bytesToHex(bytes: Uint8Array): string {
 
 function randomBase62(length: number): string {
   const chars = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"
-  const bytes = getRandomBytes(length)
   let result = ""
-  for (let i = 0; i < length; i += 1) {
-    result += chars[bytes[i] % 62]
+  while (result.length < length) {
+    for (const byte of secureRandomBytes(length - result.length)) {
+      if (byte >= 248) continue
+      result += chars[byte % chars.length]
+      if (result.length === length) break
+    }
   }
   return result
-}
-
-function getRandomBytes(length: number): Uint8Array {
-  const bytes = new Uint8Array(length)
-  const cryptoObj = typeof globalThis !== "undefined" ? globalThis.crypto : undefined
-
-  if (cryptoObj && typeof cryptoObj.getRandomValues === "function") {
-    cryptoObj.getRandomValues(bytes)
-    return bytes
-  }
-
-  for (let i = 0; i < length; i += 1) {
-    bytes[i] = Math.floor(Math.random() * 256)
-  }
-
-  return bytes
 }

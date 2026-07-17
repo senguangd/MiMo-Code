@@ -108,7 +108,7 @@ export function fromClaude(name: string, input: unknown): { config: Info } | { w
     return { warning: `skipped Claude Code MCP server "${name}"; args must contain only strings.` }
   }
 
-  const enabled = input.disabled === true ? false : input.enabled === false ? false : true
+  const enabled = input.disabled !== true && input.enabled !== false
   const environment = stringRecord(input.environment) ?? stringRecord(input.env)
   const timeout = typeof input.timeout === "number" ? input.timeout : undefined
   const type = typeof input.type === "string" ? input.type : undefined
@@ -156,10 +156,30 @@ export function fromClaude(name: string, input: unknown): { config: Info } | { w
 }
 
 export function redactString(input: string) {
+  const value = "[^\\s\"'`;,]+"
+  const quotedValue = `(?:${value}|"[^"]*"|'[^']*'|\`[^\`]*\`)`
   return input
-    .replace(/(Bearer\s+)[^\s]+/gi, "$1****")
-    .replace(/([?&][^=\s&]*(?:authorization|token|api[_-]?key|apikey|key|secret|password|credential)[^=\s&]*=)[^&\s]+/gi, "$1****")
-    .replace(/((?:authorization|token|api[_-]?key|apikey|key|secret|password|credential)=)[^\s]+/gi, "$1****")
+    .replace(new RegExp(`((?:proxy-)?authorization\\s*[:=]\\s*(?:basic|bearer)\\s+)${value}`, "gi"), "$1****")
+    .replace(new RegExp(`(Bearer\\s+)${value}`, "gi"), "$1****")
+    .replace(
+      new RegExp(
+        `((?:^|\\s)--?(?:authorization|token|api[_-]?key|apikey|key|secret|password|credential)(?:\\s+|=))${quotedValue}`,
+        "gi",
+      ),
+      "$1****",
+    )
+    .replace(
+      new RegExp(
+        `([?&][^=\\s&]*(?:authorization|token|api[_-]?key|apikey|key|secret|password|credential)[^=\\s&]*=)${value}`,
+        "gi",
+      ),
+      "$1****",
+    )
+    .replace(
+      new RegExp(`((?:authorization|token|api[_-]?key|apikey|key|secret|password|credential)=)${value}`, "gi"),
+      "$1****",
+    )
+    .replace(new RegExp(`([a-z][a-z0-9+.-]*://[^:/\\s]+:)${value}@`, "gi"), "$1****@")
 }
 
 export function redactCommand(command: string[]) {

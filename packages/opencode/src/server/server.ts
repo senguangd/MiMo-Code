@@ -6,7 +6,16 @@ import { Log } from "@/util"
 import { Flag } from "@/flag/flag"
 import { WorkspaceID } from "@/control-plane/schema"
 import { MDNS } from "./mdns"
-import { AuthMiddleware, CompressionMiddleware, CorsMiddleware, ErrorMiddleware, LoggerMiddleware } from "./middleware"
+import {
+  AuthMiddleware,
+  CompressionMiddleware,
+  CorsMiddleware,
+  createOriginPolicy,
+  ErrorMiddleware,
+  LoggerMiddleware,
+  OriginMiddleware,
+  SecurityHeadersMiddleware,
+} from "./middleware"
 import { FenceMiddleware } from "./fence"
 import { initProjectors } from "./projectors"
 import { InstanceRoutes } from "./routes/instance"
@@ -34,9 +43,12 @@ export type Listener = {
 export const Default = lazy(() => create({}))
 
 function create(opts: { cors?: string[] }) {
+  const origins = createOriginPolicy(opts.cors)
   const app = new Hono()
     .onError(ErrorMiddleware)
-    .use(CorsMiddleware(opts))
+    .use(SecurityHeadersMiddleware)
+    .use(CorsMiddleware(origins))
+    .use(OriginMiddleware(origins))
     .use(LoggerMiddleware)
     .use(AuthMiddleware)
     .use(CompressionMiddleware)
@@ -99,8 +111,7 @@ export async function listen(opts: {
   cors?: string[]
   noAuth?: boolean
 }): Promise<Listener> {
-  const isLoopback =
-    opts.hostname === "127.0.0.1" || opts.hostname === "localhost" || opts.hostname === "::1"
+  const isLoopback = opts.hostname === "127.0.0.1" || opts.hostname === "localhost" || opts.hostname === "::1"
   if (!isLoopback && !Flag.MIMOCODE_SERVER_PASSWORD && !opts.noAuth) {
     throw new Error(
       "Refusing to bind to non-loopback address without MIMOCODE_SERVER_PASSWORD. " +

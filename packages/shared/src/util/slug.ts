@@ -1,3 +1,5 @@
+import { randomInt } from "node:crypto"
+
 export namespace Slug {
   const ADJECTIVES = [
     "brave",
@@ -66,9 +68,6 @@ export namespace Slug {
   ] as const
 
   export function create() {
-    return [
-      ADJECTIVES[Math.floor(Math.random() * ADJECTIVES.length)],
-      NOUNS[Math.floor(Math.random() * NOUNS.length)],
-    ].join("-")
+    return [ADJECTIVES[randomInt(ADJECTIVES.length)], NOUNS[randomInt(NOUNS.length)]].join("-")
   }
 }

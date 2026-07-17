@@ -1,5 +1,5 @@
 import { EOL } from "os"
-import { Config } from "../../../config"
+import { Config, ConfigRedact } from "../../../config"
 import { AppRuntime } from "@/effect/app-runtime"
 import { bootstrap } from "../../bootstrap"
 import { cmd } from "../cmd"
@@ -11,7 +11,7 @@ export const ConfigCommand = cmd({
   async handler() {
     await bootstrap(process.cwd(), async () => {
       const config = await AppRuntime.runPromise(Config.Service.use((cfg) => cfg.get()))
-      process.stdout.write(JSON.stringify(config, null, 2) + EOL)
+      process.stdout.write(JSON.stringify(ConfigRedact.value(config), null, 2) + EOL)
     })
   },
 })
