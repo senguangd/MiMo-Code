@@ -34,6 +34,7 @@ export const Info = z
           input: z.number(),
           output: z.number(),
           limit: z.number(),
+          inputLimit: z.number(),
         })
         .optional(),
     }),

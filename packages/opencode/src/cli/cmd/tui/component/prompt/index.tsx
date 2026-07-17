@@ -465,7 +465,7 @@ export function Prompt(props: PromptProps) {
   const usage = createMemo(() => {
     if (!props.sessionID) return
     const msg = sync.data.message[props.sessionID]?.["main"] ?? []
-    const live = (status() as { context?: { input: number; output: number; limit: number } }).context
+    const live = (status() as { context?: { input: number; output: number; limit: number; inputLimit: number } }).context
     const context = resolveContextUsage({
       messages: msg,
       parts: (messageID) => sync.data.part[messageID] ?? [],
@@ -474,13 +474,15 @@ export function Prompt(props: PromptProps) {
         sync.data.provider.find((item) => item.id === providerID)?.models[modelID]?.limit.context,
     })
     const cost = msg.reduce((sum, item) => sum + (item.role === "assistant" ? item.cost : 0), 0)
+    const effectiveLimit =
+      context?.kind === "live" ? context.inputLimit : context?.kind === "last" ? context.limit : undefined
     const label =
       context?.kind === "invalidated"
         ? t("tui.prompt.context.recalculating")
         : context
           ? [
               Locale.number(context.input),
-              context.limit ? `(${Math.round((context.input / context.limit) * 100)}%)` : undefined,
+              effectiveLimit ? `(${Math.round((context.input / effectiveLimit) * 100)}%)` : undefined,
             ]
               .filter(Boolean)
               .join(" ")

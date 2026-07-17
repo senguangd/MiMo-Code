@@ -8,8 +8,12 @@ const id = "internal:sidebar-context"
 const REFRESH_MS = 1000
 type Reading = Exclude<ContextUsage, { kind: "invalidated" }>
 
-function reservedTokens(usage: Reading) {
-  return usage.kind === "live" ? usage.reserved : 0
+function inputLimit(usage: Reading) {
+  return usage.kind === "live" ? usage.inputLimit : usage.limit
+}
+
+function liveInputLimit(usage: Reading) {
+  return usage.kind === "live" ? usage.inputLimit : null
 }
 
 const money = new Intl.NumberFormat("en-US", {
@@ -72,7 +76,7 @@ function View(props: { api: TuiPluginApi; session_id: string }) {
 
   const state = createMemo(() => {
     const live = (props.api.state.session.status(props.session_id) as
-      | { type: string; context?: { input: number; output: number; limit: number } }
+      | { type: string; context?: { input: number; output: number; limit: number; inputLimit: number } }
       | undefined)?.context
     return resolveContextUsage({
       messages: msg(),
@@ -105,13 +109,16 @@ function View(props: { api: TuiPluginApi; session_id: string }) {
             <Show when={usage().kind === "live" ? usage().reserved : null}>
               {(reserved) => <text fg={theme().textMuted}>{reserved().toLocaleString()} output reserved</text>}
             </Show>
-            <Show when={usage().limit}>
+            <Show when={inputLimit(usage())}>
               {(limit) => (
                 <text fg={theme().textMuted}>
-                  {Math.round(((usage().input + reservedTokens(usage())) / limit()) * 100)}%{" "}
-                  {usage().kind === "live" ? "budget used" : "used (last request)"}
+                  {Math.round((usage().input / limit()) * 100)}%{" "}
+                  {usage().kind === "live" ? "effective input used" : "used (last request)"}
                 </text>
               )}
+            </Show>
+            <Show when={liveInputLimit(usage())}>
+              {(limit) => <text fg={theme().textMuted}>{limit().toLocaleString()} effective input limit</text>}
             </Show>
           </>
         )}

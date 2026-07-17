@@ -49,6 +49,22 @@ function truncate(s: string, max: number): string {
   return s.length <= max ? s : s.slice(0, max - 60) + "\n... (truncated, full body at file)"
 }
 
+export function fitTokenBudget(text: string, maxTokens: number | undefined): string {
+  if (maxTokens === undefined || Token.estimate(text) <= maxTokens) return text
+  if (maxTokens <= 0) return ""
+
+  const marker = "\n\n[... additional memory omitted to fit the model context ...]\n\n"
+  const markerTokens = Token.estimate(marker)
+  if (maxTokens <= markerTokens) return marker.slice(0, maxTokens * 4)
+
+  const tailTokens = Math.min(1_000, Math.floor((maxTokens - markerTokens) * 0.2))
+  const headChars = Math.max(0, (maxTokens - markerTokens - tailTokens) * 4)
+  const tailChars = tailTokens * 4
+  const head = text.slice(0, headChars).replace(/[\uD800-\uDBFF]$/, "")
+  const tail = text.slice(-tailChars).replace(/^[\uDC00-\uDFFF]/, "")
+  return head + marker + tail
+}
+
 /**
  * Truncate verbatim user input that exceeds per-message cap. Keeps head (~60%)
  * + tail (~30%) with an elision marker pointing at messageID for full recall
@@ -483,7 +499,12 @@ export interface Interface {
    */
   readonly renderRebuildContext: (
     sessionID: SessionID,
-    opts?: { lastMessageInfo?: LastMessageInfo; agentID?: string },
+    opts?: {
+      lastMessageInfo?: LastMessageInfo
+      agentID?: string
+      coveredUpTo?: MessageID
+      maxTokens?: number
+    },
   ) => Effect.Effect<string>
 
   readonly lastBoundary: (sessionID: SessionID) => Effect.Effect<MessageID | undefined>
@@ -504,6 +525,7 @@ export interface Interface {
     agent: string
     model: { providerID: string; modelID: string }
     boundaryCreatedAt?: number
+    maxTokens?: number
   }) => Effect.Effect<boolean>
 }
 
@@ -1074,7 +1096,12 @@ export const layer: Layer.Layer<
 
     const renderRebuildContext = Effect.fn("SessionCheckpoint.renderRebuildContext")(function* (
       sessionID: SessionID,
-      opts?: { lastMessageInfo?: LastMessageInfo; agentID?: string },
+      opts?: {
+        lastMessageInfo?: LastMessageInfo
+        agentID?: string
+        coveredUpTo?: MessageID
+        maxTokens?: number
+      },
     ) {
       // renderRebuildContext is for the user-facing main agent's context rebuild.
       // Subagent-mode actors (system-spawned writers, model-spawned subagents)
@@ -1199,6 +1226,7 @@ export const layer: Layer.Layer<
         const userMsgs = MessageV2.page({ sessionID, agentID: "main", limit: 200 }).items.filter(
           (m) =>
             m.info.role === "user" &&
+            (!opts?.coveredUpTo || m.info.id <= opts.coveredUpTo) &&
             !m.parts.some((p) => p.type === "tool" || p.type === "checkpoint" || p.type === "compaction"),
         )
         // Iterate most-recent backward so FIFO drops oldest when total cap hits.
@@ -1221,6 +1249,7 @@ export const layer: Layer.Layer<
         !checkpointText.trim() &&
         !memoryText.trim() &&
         !globalText.trim() &&
+        !notesText.trim() &&
         actors.length === 0 &&
         recentUserEntries.length === 0
       ) {
@@ -1407,7 +1436,7 @@ export const layer: Layer.Layer<
         }
       }
 
-      return lines.join("\n")
+      return fitTokenBudget(lines.join("\n"), opts?.maxTokens)
     })
 
     const lastBoundary = Effect.fn("SessionCheckpoint.lastBoundary")(function* (sessionID: SessionID) {
@@ -1434,14 +1463,38 @@ export const layer: Layer.Layer<
       agent: string
       model: { providerID: string; modelID: string }
       boundaryCreatedAt?: number
+      maxTokens?: number
     }) {
+      const indexText = yield* renderIndex(input.sessionID).pipe(Effect.catch(() => Effect.succeed("")))
+      const actorsText = yield* actorRegistry
+        .renderForAgent(input.sessionID)
+        .pipe(Effect.catch(() => Effect.succeed("")))
+      const fixedTokens = Token.estimate([indexText, actorsText].filter(Boolean).join("\n"))
       const rebuildContext = yield* renderRebuildContext(input.sessionID, {
         lastMessageInfo: input.lastMessageInfo,
         agentID: input.agentID,
+        coveredUpTo: input.boundary,
+        maxTokens:
+          input.maxTokens === undefined ? undefined : Math.max(0, input.maxTokens - fixedTokens),
       }).pipe(Effect.catch(() => Effect.succeed("")))
       if (!rebuildContext) return false
 
-      const indexText = yield* renderIndex(input.sessionID).pipe(Effect.catch(() => Effect.succeed("")))
+      const active = yield* MessageV2.filterCompactedEffect(input.sessionID, { agentID: "main" })
+      if (
+        active.some(
+          (message) =>
+            message.info.role === "user" &&
+            message.parts.some(
+              (part) => part.type === "checkpoint" && part.coveredUpTo === input.boundary,
+            ),
+        )
+      ) {
+        log.warn("rebuild skipped: checkpoint watermark already active", {
+          sessionID: input.sessionID,
+          boundary: input.boundary,
+        })
+        return false
+      }
 
       const syntheticTime = (input.boundaryCreatedAt ?? Date.now()) + 1
       const msg = yield* session.updateMessage({
@@ -1483,9 +1536,6 @@ export const layer: Layer.Layer<
         text: rebuildContext,
       })
 
-      const actorsText = yield* actorRegistry
-        .renderForAgent(input.sessionID)
-        .pipe(Effect.catch(() => Effect.succeed("")))
       if (actorsText) {
         yield* session.updatePart({
           id: PartID.ascending(),

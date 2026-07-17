@@ -3,33 +3,54 @@ import type { Provider } from "@/provider"
 import { ProviderTransform } from "@/provider"
 import type { MessageV2 } from "./message-v2"
 
-const COMPACTION_BUFFER = 20_000
+const DEFAULT_REBUILD_HEADROOM = 20_000
 
-// Cap the output reservation so models with large output windows (e.g. 32K, 64K)
-// don't strangle the usable input window. 20K covers >99.99% of compaction
-// summary outputs based on production telemetry of summary token counts.
-const OUTPUT_CAP = 20_000
-
-export function usable(input: { cfg: Config.Info; model: Provider.Model }) {
-  const context = input.model.limit.context
-  if (context === 0) return 0
-
-  const reserved =
-    input.cfg.compaction?.reserved ?? Math.min(COMPACTION_BUFFER, ProviderTransform.maxOutputTokens(input.model))
-  const outputReserve = Math.min(ProviderTransform.maxOutputTokens(input.model), OUTPUT_CAP)
-
-  return input.model.limit.input
-    ? Math.max(0, input.model.limit.input - reserved)
-    : Math.max(0, context - outputReserve - reserved)
+function tokenCount(tokens: MessageV2.Assistant["tokens"]) {
+  return (
+    tokens.total ||
+    tokens.input + tokens.output + (tokens.reasoning ?? 0) + tokens.cache.read + tokens.cache.write
+  )
 }
 
-export function isOverflow(input: { cfg: Config.Info; tokens: MessageV2.Assistant["tokens"]; model: Provider.Model }) {
+export function contextBudget(input: {
+  cfg: Config.Info
+  model: Provider.Model
+  output?: number
+}) {
+  const context = input.model.limit.context
+  const output = Math.min(context, input.output ?? ProviderTransform.maxOutputTokens(input.model))
+  const physicalInput = Math.min(
+    input.model.limit.input ?? Number.POSITIVE_INFINITY,
+    Math.max(0, context - output),
+  )
+  const headroom =
+    input.cfg.compaction?.reserved ??
+    Math.min(DEFAULT_REBUILD_HEADROOM, ProviderTransform.maxOutputTokens(input.model))
+
+  return {
+    context,
+    output,
+    input: Number.isFinite(physicalInput) ? physicalInput : 0,
+    target: Math.max(0, physicalInput - headroom),
+  }
+}
+
+export function usable(input: { cfg: Config.Info; model: Provider.Model }) {
+  return contextBudget(input).input
+}
+
+export function rebuildTarget(input: { cfg: Config.Info; model: Provider.Model }) {
+  return contextBudget(input).target
+}
+
+export function isOverflow(input: {
+  cfg: Config.Info
+  tokens: MessageV2.Assistant["tokens"]
+  model: Provider.Model
+}) {
   if (input.cfg.compaction?.auto === false) return false
   if (input.model.limit.context === 0) return false
-
-  const count =
-    input.tokens.total || input.tokens.input + input.tokens.output + input.tokens.cache.read + input.tokens.cache.write
-  return count >= usable(input)
+  return tokenCount(input.tokens) >= usable(input)
 }
 
 export function pressureLevel(input: {
@@ -40,12 +61,10 @@ export function pressureLevel(input: {
   if (input.cfg.compaction?.auto === false) return 0
   if (input.model.limit.context === 0) return 0
 
-  const count =
-    input.tokens.total || input.tokens.input + input.tokens.output + input.tokens.cache.read + input.tokens.cache.write
   const limit = usable(input)
   if (limit === 0) return 0
 
-  const ratio = count / limit
+  const ratio = tokenCount(input.tokens) / limit
   if (ratio < 0.50) return 0
   if (ratio < 0.70) return 1
   if (ratio < 0.85) return 2

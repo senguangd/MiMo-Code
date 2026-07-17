@@ -66,7 +66,7 @@ function part(messageID: string, type: "checkpoint" | "compaction"): Part {
 function resolve(
   messages: Message[],
   parts: Record<string, Part[]> = {},
-  live?: { input: number; output: number; limit: number },
+  live?: { input: number; output: number; limit: number; inputLimit: number },
 ) {
   return resolveContextUsage({
     messages,
@@ -78,11 +78,14 @@ function resolve(
 
 describe("TUI context usage", () => {
   test("uses exact live request input and reserved output", () => {
-    expect(resolve([user("u1")], {}, { input: 12_000, output: 8_000, limit: 100_000 })).toEqual({
+    expect(
+      resolve([user("u1")], {}, { input: 12_000, output: 8_000, limit: 100_000, inputLimit: 92_000 }),
+    ).toEqual({
       kind: "live",
       input: 12_000,
       reserved: 8_000,
       limit: 100_000,
+      inputLimit: 92_000,
     })
   })
 
