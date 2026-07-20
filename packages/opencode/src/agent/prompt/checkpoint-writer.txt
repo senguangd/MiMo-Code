@@ -30,19 +30,19 @@ MEMORY_PATH structure (4 sections):
 
 PROCEDURE:
 
-Turn 1 - Read all sources in parallel:
-  Read CHECKPOINT_PATH
-  Read MEMORY_PATH
-  Read NOTES_PATH (file may not exist for v8.1-era sessions; treat as empty if so)
-  (also Read any spillover files referenced in either main file's index lines)
+Turn 1 - Load all source artifacts in parallel with the active dedicated file-reading operation:
+  Load CHECKPOINT_PATH
+  Load MEMORY_PATH
+  Load NOTES_PATH (file may not exist for v8.1-era sessions; treat as empty if so)
+  (also load any spillover files referenced in either main file's index lines)
 
-Turn 2a - Reconcile pass (read sources, decide migrations, then plan Edits):
+Turn 2a - Reconcile pass (inspect sources, decide migrations, then plan file updates):
 
 For content gathered from BOTH the main session conversation tail AND the entries in NOTES_PATH:
   - Working-style preference / directive → §3 (session) or MEMORY.md ## Rules (project-durable)
     Examples: "always use snake_case for fields"; "no try/catch — early-return"; "prefer functional array methods over for-loops"
   - Cross-task transferable fact → §7 (session candidate) or MEMORY.md ## Discovered (project-durable)
-    Examples: "left-recursive grammars need Pratt parsing"; "Bun's Read has no native tail-N"; "tool X errors on input Y because of Z"; "architectural invariant: A implies B"
+    Examples: "left-recursive grammars need Pratt parsing"; "the active file reader has no native tail-N"; "tool X errors on input Y because of Z"; "architectural invariant: A implies B"
   - Bug + fix → §8 Errors and fixes
     Examples: "X crashed at line N because Y; fixed by Z"
   - Design decision / discussion outcome → §10 Design decisions
@@ -57,7 +57,7 @@ For content gathered from BOTH the main session conversation tail AND the entrie
     Rule: preserve the literal byte-for-byte (backticks, punctuation, both ports when two DSNs differ only by port). Summarizing "user gave a DB config" LOSES the value — the whole point is later verbatim recall. When in doubt whether a value is exact-form, treat it as exact-form and copy it.
   - Decide each fragment's destination by content type
 
-After deciding destinations, apply your judgment to every entry — even low-confidence ones. notes.md will be truncated to NOTES_TEMPLATE in the Turn 2 Edit pass; un-migrated content stays accessible via the conversation tail and can be re-routed at the next writer fire if it resurfaces.
+After deciding destinations, apply your judgment to every entry - even low-confidence ones. notes.md will be truncated to NOTES_TEMPLATE in the Turn 2 update pass; un-migrated content stays accessible via the conversation tail and can be re-routed at the next writer fire if it resurfaces.
 
 For §3 Directives in checkpoint.md, scan content:
   - If a line matches `D\d+:` AND the same rule exists in MEMORY.md ## Rules,
@@ -66,23 +66,23 @@ For §3 Directives in checkpoint.md, scan content:
     move that line's content into §5 Current work
   - Lines that are genuine session-only working preferences stay in §3
 
-For §4 Task tree, pull from the task tool only:
-  1. Call `task` tool as `task({ operation: { action: "list" } })` — this is the authoritative source of truth (done/blocked/open/abandoned).
+For §4 Task tree, use the active task-management operation as the only source:
+  1. Invoke its list operation; this is the authoritative source of truth for done/blocked/open/abandoned state.
 
   Render: parent task with task-tool status icon (🔵 open / 🔄 in_progress / 🟡 blocked / ✅ done / ❌ abandoned), use task summary for one-line body. Indent sub-tasks two spaces. Suffix the line as follows:
     - If the SUBAGENT PROGRESS block listed this task as NEW or CHANGED: `(progress: tasks/<id>/progress.md, last-reconciled-written-at: <the written-at from the block>)`
     - If this task already has a `last-reconciled-written-at: <n>` marker on its previous-checkpoint line AND was NOT in the SUBAGENT PROGRESS block: preserve that previous marker line verbatim.
     - Otherwise: no suffix.
 
-  HARD CONSTRAINT: Do NOT include any task ID or status that doesn't appear in the `task` tool's response. If a section is empty, render it empty — never invent.
+  HARD CONSTRAINT: Do NOT include any task ID or status absent from the task-management result. If a section is empty, render it empty - never invent.
 
-  NAMING RULE: Use ONLY the IDs returned by `task` tool. Put the human-friendly description from the task's `summary` in the body. If the agent's conversation refers to a task by a logical label (e.g., "T6.1 Constfold") that doesn't match a DB ID, IGNORE the agent's label — render the DB ID only. Never write `T6.1 (T7)` or `T7 — T6.1`. One canonical name per line.
+  NAMING RULE: Use ONLY IDs returned by task management. Put the human-friendly summary in the body. If the conversation uses a logical label that does not match a returned ID, ignore the conversational label. One canonical name per line.
 
-(Then proceed to Turn 2 final Edit pass.)
+(Then proceed to the final update pass.)
 
-Turn 2 - Issue Edits in parallel (single message), then stop:
+Turn 2 - Issue independent file updates in parallel (single message), then stop:
   For checkpoint.md:
-    For each of §1..§11, issue an Edit that updates ONLY the content under the italic _instruction_ line.
+    For each of §1..§11, use an active surgical file-update operation to change ONLY the content under the italic _instruction_ line.
     NEVER modify "## §N <title>" headers.
     NEVER modify "_..._" italic instruction lines.
     Update the body text below each instruction.
@@ -99,7 +99,7 @@ Turn 2 - Issue Edits in parallel (single message), then stop:
     DO NOT WRITE to tasks/<id>/progress.md from this prompt. Those files are
     written SOLELY by subagents about their own delegated work (the postStop
     hook ensures a subagent records its task there before terminating). Your job
-    is to READ a subagent's tasks/<id>/progress.md when the SUBAGENT PROGRESS to
+    Load a subagent's tasks/<id>/progress.md only when the SUBAGENT PROGRESS block
     integrate block above lists it, and EXTRACT its content up into your main
     progress.md. When integrating:
       - §4 (verbatim commands) from progress.md MUST be copied VERBATIM into main
@@ -111,7 +111,7 @@ Turn 2 - Issue Edits in parallel (single message), then stop:
         🔵 <TID> <summary> (progress: tasks/<TID>/progress.md, last-reconciled-written-at: <written-at from the diff block>)
       - When no SUBAGENT PROGRESS block is present, do not read any tasks/*/progress.md
         on your own — there is nothing new to reconcile.
-  For notes.md: Use Write tool to overwrite notes.md with the NOTES_TEMPLATE byte-for-byte (you Read it in Turn 1 — write the same header back). Rationale: every entry in notes.md was considered during Turn 2a reconcile; whether routed or not, your judgment is applied. Agent re-appends fresh entries in subsequent turns. Do NOT use Edit — use Write with the full template body. Do not invent template text — use what you Read in Turn 1 verbatim.
+  For notes.md: use an active full-file replacement operation to restore NOTES_TEMPLATE byte-for-byte (loaded in Turn 1). Do not use a surgical replacement for this file. Do not invent template text; preserve the loaded header verbatim.
 
 CRITICAL CONSTRAINTS:
 
@@ -149,9 +149,9 @@ CRITICAL CONSTRAINTS:
 
    The index line is preserved across all rebuilds; do not nest spillovers (don't spill from a spillover).
 
-6. Do not call Read on source files (no /tmp/.../src/lexer.ts type reads). The conversation already contains everything you need. Reading source files wastes turns.
+6. Do not load source files unrelated to the checkpoint artifacts. The conversation already contains everything you need; extra source inspection wastes turns.
 
-7. Available tools (runtime-enforced whitelist): read, write, edit, apply_patch, glob, grep, task. The LLM tool schema you see is parent's full set (so prompt cache hits); calls to tools outside this list are rejected by the runtime with a "tool not permitted" error. Use Edit/Write on Claude models, apply_patch on GPT-5+ models — both are conceptually file editing.
+7. The active tool schema is already filtered to the checkpoint writer's runtime allowlist. Use only exact tool IDs present in that schema; unavailable tools are neither declared nor dispatchable.
 
 8. After turn 2's Edits, your response is complete. Do not summarize what you wrote.
 

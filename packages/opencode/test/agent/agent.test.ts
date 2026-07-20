@@ -4,15 +4,14 @@ import path from "path"
 import { provideInstance, tmpdir, provideTmpdirInstance } from "../fixture/fixture"
 import { Instance } from "../../src/project/instance"
 import { Agent } from "../../src/agent/agent"
+import { CHECKPOINT_WRITER_TOOL_ALLOWLIST } from "../../src/agent/config"
 import { Permission } from "../../src/permission"
 import { ToolRegistry } from "../../src/tool"
 import { ModelID, ProviderID } from "../../src/provider/schema"
 import * as CrossSpawnSpawner from "../../src/effect/cross-spawn-spawner"
 import { testEffect } from "../lib/effect"
 
-const itTool = testEffect(
-  Layer.mergeAll(ToolRegistry.defaultLayer, Agent.defaultLayer, CrossSpawnSpawner.defaultLayer),
-)
+const itTool = testEffect(Layer.mergeAll(ToolRegistry.defaultLayer, Agent.defaultLayer, CrossSpawnSpawner.defaultLayer))
 
 // Helper to evaluate permission for a tool with wildcard pattern
 function evalPerm(agent: Agent.Info | undefined, permission: string): Permission.Action | undefined {
@@ -151,7 +150,9 @@ test("compose:* skills are denied for build/plan, allowed for compose", async ()
       expect(Permission.evaluate("skill", "compose:tdd", compose!.permission).action).toBe("allow")
       expect(Permission.evaluate("skill", "compose:review", compose!.permission).action).toBe("allow")
       // Non-compose skills remain allowed for all agents
-      expect(Permission.evaluate("skill", "effect", agents.find((a) => a.name === "build")!.permission).action).toBe("allow")
+      expect(Permission.evaluate("skill", "effect", agents.find((a) => a.name === "build")!.permission).action).toBe(
+        "allow",
+      )
       expect(Permission.evaluate("skill", "effect", compose!.permission).action).toBe("allow")
     },
   })
@@ -216,7 +217,6 @@ test("explore agent asks for external directories and allows Truncate.GLOB", asy
     },
   })
 })
-
 
 test("custom agent from config creates new agent", async () => {
   await using tmp = await tmpdir({
@@ -930,16 +930,14 @@ test("checkpoint-writer inherits default permission (no bespoke block); memory w
   })
 })
 
-test("checkpoint-writer agent has no toolAllowlist (fork agents must mirror parent's tool schema)", async () => {
+test("checkpoint-writer exposes only its runtime tool allowlist", async () => {
   await using tmp = await tmpdir()
   await Instance.provide({
     directory: tmp.path,
     fn: async () => {
       const cp = await load(tmp.path, (svc) => svc.get("checkpoint-writer"))
       expect(cp).toBeDefined()
-      expect(cp?.toolAllowlist).toBeUndefined()
-      // apply_patch is now permission-allowed (for GPT-5+ models where it
-      // replaces edit/write at the registry patch-swap step)
+      expect(cp?.toolAllowlist).toEqual([...CHECKPOINT_WRITER_TOOL_ALLOWLIST])
       expect(Permission.evaluate("apply_patch", "any/path", cp!.permission).action).toBe("allow")
     },
   })
@@ -984,9 +982,9 @@ test("title/summary/checkpoint-writer are mode=subagent + hidden (spawnable filt
   })
 })
 
-// Regression for ses_19d1aa927: the fork agent (checkpoint-writer) inherits
-// compose's tool list verbatim (Task 2.6 removed toolAllowlist). This test
-// confirms the patch-swap in registry.ts fires correctly per model family.
+// Regression for the model-family edit-tool swap. The registry must expose only
+// the editing implementation selected for the current model before request-level
+// filtering and tool_script binding are applied.
 itTool.live("compose's tool list contains apply_patch on GPT-5+ but not on Claude", () =>
   provideTmpdirInstance((dir) =>
     Effect.gen(function* () {

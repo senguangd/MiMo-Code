@@ -101,6 +101,14 @@ export function render(current: Snapshot): string {
         : `${LABEL[capability]} is unavailable in this request.`,
     )
   }
+  const editing = ["apply_patch", "edit", "write", "multiedit", "notebook_edit"].filter((id) =>
+    current.usableToolIDs.includes(id),
+  )
+  lines.push(
+    editing.length
+      ? `File editing is available via: ${editing.map((id) => `\`${id}\``).join(", ")}.`
+      : "File editing is unavailable in this request.",
+  )
   lines.push(
     "Use each tool's declared schema exactly; do not invent aliases or substitute a different tool by name similarity.",
   )

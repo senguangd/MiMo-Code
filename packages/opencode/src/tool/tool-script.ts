@@ -5,11 +5,44 @@ import { Effect } from "effect"
 import { EffectBridge, InstanceState } from "@/effect"
 import { Log, Filesystem } from "@/util"
 import { evalScript, type HostFn } from "../workflow/sandbox"
-import { toolScriptRegistry, TOOL_SCRIPT_EXCLUDED } from "./tool-script-ref"
 import DESCRIPTION from "./tool-script.txt"
 import * as Tool from "./tool"
 
 const log = Log.create({ service: "tool.tool_script" })
+
+// Agent control-flow tools steer the conversation rather than transform data,
+// so they are excluded from both the declared script API and nested dispatch.
+export const TOOL_SCRIPT_EXCLUDED = new Set([
+  "tool_script",
+  "invalid",
+  "question",
+  "task",
+  "actor",
+  "skill",
+  "plan_enter",
+  "plan_exit",
+  "cron",
+  "session",
+  "workflow",
+  "change_directory",
+])
+
+type ToolScriptRuntime = {
+  defs: readonly Tool.Def[]
+  dispatch: (def: Tool.Def, args: unknown, ctx: Tool.Context) => Effect.Effect<Tool.ExecuteResult>
+}
+
+const TOOL_SCRIPT_RUNTIME = "toolScriptRuntime"
+
+function runtimeFrom(ctx: Tool.Context): ToolScriptRuntime {
+  const value = ctx.extra?.[TOOL_SCRIPT_RUNTIME]
+  if (!value || typeof value !== "object") throw new Error("tool_script runtime unavailable")
+  const runtime = value as Partial<ToolScriptRuntime>
+  if (!Array.isArray(runtime.defs) || typeof runtime.dispatch !== "function") {
+    throw new Error("tool_script runtime unavailable")
+  }
+  return runtime as ToolScriptRuntime
+}
 
 const MAX_TOOL_CALLS = 50
 const MAX_CONCURRENT = 8
@@ -151,6 +184,27 @@ function makeSemaphore(max: number) {
   }
 }
 
+export function bindToolScript(input: {
+  tool: Tool.Def
+  defs: readonly Tool.Def[]
+  dispatch?: ToolScriptRuntime["dispatch"]
+}): Tool.Def {
+  const defs = input.defs.filter((def) => !TOOL_SCRIPT_EXCLUDED.has(def.id))
+  const runtime: ToolScriptRuntime = {
+    defs,
+    dispatch: input.dispatch ?? ((def, args, ctx) => def.execute(args, ctx)),
+  }
+  return {
+    ...input.tool,
+    description: [input.tool.description, renderToolScriptDeclarations(defs)].join("\n"),
+    execute: (args, ctx) =>
+      input.tool.execute(args, {
+        ...ctx,
+        extra: { ...ctx.extra, [TOOL_SCRIPT_RUNTIME]: runtime },
+      }),
+  }
+}
+
 export const ToolScriptTool = Tool.define(
   "tool_script",
   Effect.gen(function* () {
@@ -173,10 +227,8 @@ export const ToolScriptTool = Tool.define(
             }
           }
 
-          const getDefs = toolScriptRegistry.current
-          if (!getDefs) throw new Error("tool_script registry unavailable")
-          const defs = (yield* getDefs()).filter((def) => !TOOL_SCRIPT_EXCLUDED.has(def.id))
-          const byId = new Map(defs.map((def) => [def.id, def]))
+          const runtime = runtimeFrom(ctx)
+          const byId = new Map(runtime.defs.map((def) => [def.id, def]))
           // Non-git projects report worktree === "/" (see Instance.containsPath) —
           // "/" as a jail root would allow EVERYTHING. Fall back to the project
           // directory in that case. Relative guest paths resolve against roots[0].
@@ -192,7 +244,10 @@ export const ToolScriptTool = Tool.define(
           // Bun.Transpiler would reject it. The wrapped form transpiles to a plain
           // JS async-arrow expression the guest body can invoke.
           const transpiled = yield* Effect.try({
-            try: () => new Bun.Transpiler({ loader: "ts" }).transformSync(`globalThis.__main = async () => {\n${params.code}\n}`),
+            try: () =>
+              new Bun.Transpiler({ loader: "ts" }).transformSync(
+                `globalThis.__main = async () => {\n${params.code}\n}`,
+              ),
             catch: (err) => err,
           }).pipe(
             Effect.catch((err) =>
@@ -226,7 +281,9 @@ export const ToolScriptTool = Tool.define(
               c.n++
               if (t.status === "error") c.errors++
             }
-            bridge.promise(ctx.metadata({ metadata: { running: true, toolCalls: trace.length, counts } })).catch(() => {})
+            bridge
+              .promise(ctx.metadata({ metadata: { running: true, toolCalls: trace.length, counts } }))
+              .catch(() => {})
           }
 
           const callTool: HostFn = (name: unknown, args: unknown) => {
@@ -241,7 +298,7 @@ export const ToolScriptTool = Tool.define(
             return withSlot(() =>
               bridge
                 .promise(
-                  def.execute(args, {
+                  runtime.dispatch(def, args, {
                     ...ctx,
                     callID: `${ctx.callID ?? "tool_script"}:${seq}`,
                     // Sub-call metadata would clobber the outer tool_script call's
@@ -296,17 +353,21 @@ export const ToolScriptTool = Tool.define(
 
           const outcome = yield* Effect.tryPromise({
             try: () =>
-              evalScript(GUEST_PRELUDE + "\n" + transpiled + "\nreturn await globalThis.__main()", {
-                __callTool: callTool,
-                __log: logHook,
-                __readText: readText,
-                __writeText: writeText,
-              }, {
-                deterministic: false,
-                deadlineMs: WALL_DEADLINE_MS,
-                activeDeadlineMs: ACTIVE_DEADLINE_MS,
-                interrupt: () => ctx.abort.aborted,
-              }),
+              evalScript(
+                GUEST_PRELUDE + "\n" + transpiled + "\nreturn await globalThis.__main()",
+                {
+                  __callTool: callTool,
+                  __log: logHook,
+                  __readText: readText,
+                  __writeText: writeText,
+                },
+                {
+                  deterministic: false,
+                  deadlineMs: WALL_DEADLINE_MS,
+                  activeDeadlineMs: ACTIVE_DEADLINE_MS,
+                  interrupt: () => ctx.abort.aborted,
+                },
+              ),
             catch: (err) => (err instanceof Error ? err : new Error(String(err))),
           }).pipe(Effect.result)
 

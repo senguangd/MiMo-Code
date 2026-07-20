@@ -79,7 +79,7 @@ Decisions are `allow` / `ask` / `deny`. By default `read` of `*.env` / `*.env.*`
 ### Tools
 
 The tool registry lives in `packages/opencode/src/tool/`. The groups below describe possible implementations, not guaranteed availability. The current request tool schemas and tool contract are authoritative. Functional groups:
-- **File**: `read`, `edit`, `multiedit`, `write` (via `apply_patch`), `notebook-edit`
+- **File operations**: use only the active dedicated file tools declared for the current request.
 - **Search**: local filename/content search and optional code/documentation search tools
 - **Shell**: `bash`, `bash-interactive`, `change-directory`
 - **Knowledge**: web retrieval/search, memory, history, and language-service tools when available
@@ -127,7 +127,7 @@ Memory writes go through `memory-path-guard.ts`: you cannot escape the memory di
 Plan mode is the canonical example of MiMoCode encoding safety as data, not code:
 1. The `plan` agent's `hardPermission` denies `edit` everywhere EXCEPT plan-file paths.
 2. `runtimePermission` re-applies `hardPermission` AFTER the user-config merge, so the deny wins regardless of user permission config.
-3. Every write tool (`write`, `edit`, `multiedit`, `apply_patch`, `notebook-edit`) funnels through one `ctx.ask({ permission: "edit" })` call, so the single rule governs them all.
+3. Every active write-capable tool funnels through the shared edit-permission boundary, so the single rule governs every write path.
 4. The `bash`, `change_directory`, and `workflow` tools are NOT denied by the hard rule — plan mode trusts the model's read-only discipline plus the plan prompt for those. The permission layer is a backstop, not the only line of defense.
 5. Exit plan mode only via the plan-exit tool, and only after the user approves the plan.
 

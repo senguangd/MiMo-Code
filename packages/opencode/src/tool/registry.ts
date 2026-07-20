@@ -68,8 +68,7 @@ import { shellWrap } from "./shell-wrap"
 import * as BashInteractive from "./bash-interactive"
 import { resolveInvocationStyle } from "./invocation-style"
 import { BuiltinWorkflow } from "@/workflow/builtin"
-import { ToolScriptTool, renderToolScriptDeclarations } from "./tool-script"
-import { toolScriptRegistry } from "./tool-script-ref"
+import { ToolScriptTool } from "./tool-script"
 import * as WebSearchBackend from "./websearch/backend"
 
 const log = Log.create({ service: "tool.registry" })
@@ -210,10 +209,12 @@ export const layer = Layer.effect(
           const mod = yield* Effect.tryPromise({
             try: () => import(`${pathToFileURL(match).href}?v=${Date.now()}`),
             catch: (err) => err,
-          }).pipe(Effect.catch((err) => {
-            log.error("failed to load file tool, skipping", { path: match, error: errorMessage(err) })
-            return Effect.succeed(undefined)
-          }))
+          }).pipe(
+            Effect.catch((err) => {
+              log.error("failed to load file tool, skipping", { path: match, error: errorMessage(err) })
+              return Effect.succeed(undefined)
+            }),
+          )
           if (!mod) continue
           for (const [id, def] of Object.entries<ToolDefinition>(mod)) {
             custom.push(fromPlugin(id === "default" ? namespace : `${namespace}_${id}`, def))
@@ -303,10 +304,6 @@ export const layer = Layer.effect(
       return [...builtins, ...s.custom] as Tool.Def[]
     })
 
-    // Late-bound ref (see tool-script-ref.ts): tool_script dispatches guest RPC
-    // calls through the same def list the agent sees, without a module cycle.
-    toolScriptRegistry.current = all
-
     const ids: Interface["ids"] = Effect.fn("ToolRegistry.ids")(function* () {
       return (yield* all()).map((tool) => tool.id)
     })
@@ -315,14 +312,8 @@ export const layer = Layer.effect(
       return renderWorkflowCatalog()
     })
 
-    const describeToolScript = Effect.fn("ToolRegistry.describeToolScript")(function* () {
-      return renderToolScriptDeclarations(yield* all())
-    })
-
     const describeTask = Effect.fn("ToolRegistry.describeTask")(function* (agent: Agent.Info) {
-      const items = (yield* agents.list()).filter(
-        (item) => item.mode !== "primary" && !item.hidden,
-      )
+      const items = (yield* agents.list()).filter((item) => item.mode !== "primary" && !item.hidden)
       const filtered = items.filter(
         (item) => Permission.evaluate("task", item.name, agent.permission).action !== "deny",
       )
@@ -410,7 +401,6 @@ export const layer = Layer.effect(
               description,
               tool.id === ActorTool.id ? yield* describeTask(input.agent) : undefined,
               tool.id === WorkflowTool.id ? yield* describeWorkflow() : undefined,
-              tool.id === ToolScriptTool.id ? yield* describeToolScript() : undefined,
             ]
               .filter(Boolean)
               .join("\n"),

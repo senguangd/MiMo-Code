@@ -4,11 +4,13 @@ import z from "zod"
 import { MessageV2 } from "./message-v2"
 import type { SessionID } from "./schema"
 import { ModelID } from "../provider/schema"
-import type { Agent } from "../agent/agent"
+import { Agent } from "../agent/agent"
 import type { Provider } from "../provider"
 import { LLM } from "./llm"
 import { ToolRegistry } from "../tool"
 import { ProviderTransform } from "../provider"
+import { Permission } from "../permission"
+import { bindToolScript, ToolScriptTool } from "../tool/tool-script"
 
 /**
  * Build the LLM request prefix (system + tools + inheritedMessages) from the
@@ -38,6 +40,9 @@ export const buildLLMRequestPrefix = Effect.fn("Session.buildLLMRequestPrefix")(
    * order. Caller is responsible for the ordering and content.
    */
   additions: string[]
+  permission?: Permission.Ruleset
+  toolWhitelist?: readonly string[]
+  toolIDs?: readonly string[]
 }) {
   const llm = yield* LLM.Service
   const toolRegistry = yield* ToolRegistry.Service
@@ -49,8 +54,7 @@ export const buildLLMRequestPrefix = Effect.fn("Session.buildLLMRequestPrefix")(
 
   // Find the last user message; required for system "user.system" pass-through
   const lastUserMsg = input.msgs.findLast((m) => m.info.role === "user")
-  if (!lastUserMsg)
-    return yield* Effect.die(new Error("buildLLMRequestPrefix: no user message in msgs"))
+  if (!lastUserMsg) return yield* Effect.die(new Error("buildLLMRequestPrefix: no user message in msgs"))
   const lastUser = lastUserMsg.info as MessageV2.User
 
   // Build system using LLM.buildSystemArray (single source of truth shared with stream())
@@ -63,14 +67,31 @@ export const buildLLMRequestPrefix = Effect.fn("Session.buildLLMRequestPrefix")(
     agentID: lastUser.agentID,
   })
 
-  // Resolve tools using parent agent's permission and toolAllowlist
+  // Resolve the request-visible definitions from model, permission, user overrides, and any runtime whitelist
   const toolDefs = yield* toolRegistry.tools({
     modelID: ModelID.make(input.model.api.id),
     providerID: input.model.providerID,
     agent: input.agent,
   })
+  const disabled = Permission.disabled(
+    toolDefs.map((item) => item.id),
+    Agent.runtimePermission(input.agent, input.permission),
+  )
+  const whitelist = input.toolWhitelist ? new Set(input.toolWhitelist) : undefined
+  const requested = input.toolIDs ? new Set(input.toolIDs) : undefined
+  const effective = toolDefs.filter(
+    (item) =>
+      item.internal ||
+      ((!whitelist || whitelist.has(item.id)) &&
+        (!requested || requested.has(item.id)) &&
+        lastUser.tools?.[item.id] !== false &&
+        !disabled.has(item.id)),
+  )
+  const bound = effective.map((item) =>
+    item.id === ToolScriptTool.id ? bindToolScript({ tool: item, defs: effective }) : item,
+  )
   const tools: Record<string, AITool> = {}
-  for (const item of toolDefs) {
+  for (const item of bound) {
     const schema = ProviderTransform.schema(input.model, z.toJSONSchema(item.parameters))
     tools[item.id] = tool({
       description: item.description,

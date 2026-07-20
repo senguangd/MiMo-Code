@@ -69,26 +69,18 @@ This format lets the spawning agent and the checkpoint writer extract your progr
 export interface ForkContext {
   readonly system: string[]
   /**
-   * Tool schema as parent would emit at watermark, captured for invariant
-   * verification only. NOT consumed by fork's runLoop for the actual LLM
-   * request — that uses `resolveTools(forkAgent)` for executable tools with
-   * dispatch closures. Schema parity is currently enforced because
-   * checkpoint-writer has no `toolAllowlist` (Task 2.6); both paths call
-   * `registry.tools` with equivalent agent inputs and produce identical
-   * schemas. If `toolAllowlist` is ever re-added, this field would still
-   * snapshot parent's schema while the runtime tools would diverge, silently
-   * breaking cache parity. Test guard: `test/agent/agent.test.ts` asserts
-   * `cp.toolAllowlist === undefined` for checkpoint-writer.
+   * Frozen schema-only snapshot captured at the watermark for prefix-cache
+   * invariant verification. The fork runLoop rebuilds executable closures via
+   * `resolveTools`, but both paths apply the same model selection, permission
+   * rules, request overrides, and actor whitelist. This field is never used as
+   * a dispatch registry.
    */
   readonly tools: Record<string, AITool>
   /**
-   * Parent agent's permission ruleset, captured at spawn. The fork evaluates
-   * permissions and filters its LLM-visible tool list against THIS (the parent's)
-   * ruleset rather than the checkpoint-writer agent's own — restoring prompt-cache
-   * tool-visibility parity with the parent and keeping permission semantics
-   * consistent with the captor. Memory-tree writes are still governed by
-   * memory-path-guard (see askEditUnlessMemory), so an inherited `edit:deny`
-   * does not block the writer's own checkpoint files.
+   * Parent agent permission snapshot captured at spawn. It is the single
+   * visibility ruleset for the fork's executable tool binding, tool_script
+   * declarations, and final LLM schema filter. Per-call approval routing remains
+   * separate, and memory-tree writes remain governed by memory-path-guard.
    */
   readonly parentPermission: Permission.Ruleset
   readonly inheritedMessages: ModelMessage[]

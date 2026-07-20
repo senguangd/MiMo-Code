@@ -343,7 +343,7 @@ function composeWriterPrompt(input: {
 }): string {
   return [
     "<system-reminder>",
-    "You are now operating in checkpoint-writer mode. Ignore the general coding-assistant framing in the system prompt above. The read, write, edit, apply_patch, glob, grep, and task tools are available; do not invoke others.",
+    "You are now operating in checkpoint-writer mode. Ignore the general coding-assistant framing in the system prompt above. The active tool schema is filtered to the runtime allowlist; invoke only exact tool IDs present in that schema.",
     "",
     "========================================================================",
     "ABSOLUTE PATHS — USE THESE VERBATIM. NEVER COMPUTE, INFER, OR MODIFY.",

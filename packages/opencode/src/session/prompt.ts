@@ -114,6 +114,7 @@ import { Metrics } from "@/metrics"
 import { resolveInvocationStyle, type ToolStyleConfig } from "../tool/invocation-style"
 import { ToolResultError } from "../tool/result-error"
 import * as ToolCapabilities from "@/tool/capability"
+import { bindToolScript, ToolScriptTool } from "@/tool/tool-script"
 import { shouldAutoDream, shouldAutoDistill, DREAM_TASK, DISTILL_TASK, AUTO_DREAM_TITLE, AUTO_DISTILL_TITLE } from "./auto-dream"
 
 // @ts-ignore
@@ -340,12 +341,24 @@ export const layer = Layer.effect(
         // (checkpoint-writer never requests json_schema output, so STRUCTURED_OUTPUT_SYSTEM_PROMPT
         // is not included; parent's runLoop adds it conditionally based on user.format)
         const additions = [...env, ...(skills ? [skills] : []), ...instructions.content]
+        const captureMsgs = input.msgs as Parameters<typeof buildLLMRequestPrefix>[0]["msgs"]
+        const captureLastUser = captureMsgs.findLast((message) => message.info.role === "user")
+        const captureActor =
+          captureLastUser?.info.role === "user" &&
+          captureLastUser.info.agent === input.agentName &&
+          captureLastUser.info.agentID
+            ? yield* actorRegistry
+                .get(input.sessionID, captureLastUser.info.agentID)
+                .pipe(Effect.catch(() => Effect.succeed(undefined)))
+            : undefined
         const prefix = yield* buildLLMRequestPrefix({
           sessionID: input.sessionID,
           agent: ag,
           model,
-          msgs: input.msgs as Parameters<typeof buildLLMRequestPrefix>[0]["msgs"],
+          msgs: captureMsgs,
           additions,
+          permission: captureSession.permission,
+          toolWhitelist: captureActor && Array.isArray(captureActor.tools) ? captureActor.tools : undefined,
         }).pipe(
           Effect.provideService(LLM.Service, llm),
           Effect.provideService(ToolRegistry.Service, registry),
@@ -901,6 +914,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
       model: Provider.Model
       session: Session.Info
       tools?: Record<string, boolean>
+      visibilityPermission?: Permission.Ruleset
       processor: Pick<SessionProcessor.Handle, "message" | "updateToolCall" | "completeToolCall">
       bypassAgentCheck: boolean
       messages: MessageV2.WithParts[]
@@ -1006,11 +1020,103 @@ NOTE: At any point in time through this workflow you should feel free to ask the
             .pipe(Effect.orDie),
       })
 
-      for (const item of yield* registry.tools({
+      const registryItems = yield* registry.tools({
         modelID: ModelID.make(input.model.api.id),
         providerID: input.model.providerID,
         agent: input.agent,
-      })) {
+      })
+      const mcpItems = Object.entries(yield* mcp.tools()).filter(([, item]) => item.execute !== undefined)
+      const disabled = Permission.disabled(
+        [...registryItems.map((item) => item.id), ...mcpItems.map(([id]) => id)],
+        Agent.runtimePermission(input.agent, input.visibilityPermission),
+      )
+      const isEffective = (toolID: string, internal = false) =>
+        internal || ((!whitelist || whitelist.has(toolID)) && input.tools?.[toolID] !== false && !disabled.has(toolID))
+      const effectiveRegistryItems = registryItems.filter((item) => isEffective(item.id, item.internal))
+      const executeRegistryItem = <T extends Tool.ExecuteResult = Tool.ExecuteResult>(
+        item: Tool.Def,
+        args: unknown,
+        ctx: Tool.Context,
+        decorate?: (result: Tool.ExecuteResult) => T,
+      ): Effect.Effect<T> =>
+        Effect.gen(function* () {
+          const startTs = Date.now()
+          const callID = ctx.callID ?? "?"
+          log.debug("tool execute start", {
+            tool: item.id,
+            callID,
+            sessionID: input.session.id,
+          })
+          const beforeOutput: { args: any; cancel?: boolean; cancelReason?: string } = { args }
+          yield* plugin.trigger(
+            "tool.execute.before",
+            { tool: item.id, sessionID: ctx.sessionID, callID: ctx.callID },
+            beforeOutput,
+          )
+          if (beforeOutput.cancel) {
+            const output: Tool.ExecuteResult = {
+              title: "Cancelled",
+              output: beforeOutput.cancelReason || "Tool call cancelled by hook",
+              metadata: { cancelled: true },
+            }
+            yield* bus
+              .publish(Metrics.ToolCall, {
+                sessionID: ctx.sessionID,
+                tool_name: item.id,
+                input_bytes: Metrics.jsonByteLength(beforeOutput.args),
+                output_bytes: 0,
+                tool_call_id: ctx.callID ?? "?",
+                tool_call_status: "cancelled",
+              })
+              .pipe(Effect.ignore)
+            return output as T
+          }
+          const result = yield* item.execute(beforeOutput.args, ctx)
+          const output = decorate ? decorate(result) : (result as T)
+          log.debug("tool execute done", {
+            tool: item.id,
+            callID,
+            durationMs: Date.now() - startTs,
+            ok: true,
+          })
+          yield* plugin.trigger(
+            "tool.execute.after",
+            { tool: item.id, sessionID: ctx.sessionID, callID: ctx.callID, args: beforeOutput.args },
+            output,
+          )
+          if (
+            (item.id === "write" || item.id === "edit") &&
+            beforeOutput.args?.file_path &&
+            isExtensionPath(beforeOutput.args.file_path)
+          ) {
+            yield* registry.reload().pipe(
+              Effect.tapError((err) => Effect.sync(() => log.warn("extension reload failed", { error: err }))),
+              Effect.ignore,
+            )
+          }
+          yield* bus
+            .publish(Metrics.ToolCall, {
+              sessionID: ctx.sessionID,
+              tool_name: item.id,
+              input_bytes: Metrics.jsonByteLength(beforeOutput.args),
+              output_bytes: Buffer.byteLength(output.output ?? "", "utf8"),
+              tool_call_id: ctx.callID ?? "?",
+              tool_call_status: "success",
+            })
+            .pipe(Effect.ignore)
+          return output
+        })
+      const boundRegistryItems = effectiveRegistryItems.map((item) =>
+        item.id === ToolScriptTool.id
+          ? bindToolScript({
+              tool: item,
+              defs: effectiveRegistryItems,
+              dispatch: (def, args, ctx) => executeRegistryItem(def, args, ctx),
+            })
+          : item,
+      )
+
+      for (const item of boundRegistryItems) {
         const schema = ProviderTransform.schema(input.model, z.toJSONSchema(item.parameters))
         const aiTool = tool({
           description: item.description,
@@ -1020,11 +1126,6 @@ NOTE: At any point in time through this workflow you should feel free to ask the
               Effect.gen(function* () {
                 const startTs = Date.now()
                 const callID = options?.toolCallId ?? "?"
-                log.debug("tool execute start", {
-                  tool: item.id,
-                  callID,
-                  sessionID: input.session.id,
-                })
                 const ctx = context(args, options)
                 if (
                   !ToolCapabilities.isRuntimeUsable({
@@ -1042,39 +1143,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
                   yield* input.processor.completeToolCall(options.toolCallId, output)
                   return output
                 }
-                const beforeOutput: { args: any; cancel?: boolean; cancelReason?: string } = { args }
-                yield* plugin.trigger(
-                  "tool.execute.before",
-                  { tool: item.id, sessionID: ctx.sessionID, callID: ctx.callID },
-                  beforeOutput,
-                )
-                if (beforeOutput.cancel) {
-                  const cancelOutput = {
-                    title: "Cancelled",
-                    output: beforeOutput.cancelReason || "Tool call cancelled by hook",
-                    metadata: { cancelled: true },
-                  }
-                  yield* bus
-                    .publish(Metrics.ToolCall, {
-                      sessionID: ctx.sessionID,
-                      tool_name: item.id,
-                      input_bytes: Metrics.jsonByteLength(beforeOutput.args),
-                      output_bytes: 0,
-                      tool_call_id: options.toolCallId,
-                      tool_call_status: "cancelled",
-                    })
-                    .pipe(Effect.ignore)
-                  yield* input.processor.completeToolCall(options.toolCallId, cancelOutput)
-                  return cancelOutput
-                }
-                const result = yield* item.execute(beforeOutput.args, ctx)
-                log.debug("tool execute done", {
-                  tool: item.id,
-                  callID,
-                  durationMs: Date.now() - startTs,
-                  ok: true,
-                })
-                const output = {
+                const output = yield* executeRegistryItem(item, args, ctx, (result) => ({
                   ...result,
                   attachments: result.attachments?.map((attachment) => ({
                     ...attachment,
@@ -1082,30 +1151,8 @@ NOTE: At any point in time through this workflow you should feel free to ask the
                     sessionID: ctx.sessionID,
                     messageID: input.processor.message.id,
                   })),
-                }
-                yield* plugin.trigger(
-                  "tool.execute.after",
-                  { tool: item.id, sessionID: ctx.sessionID, callID: ctx.callID, args: beforeOutput.args },
-                  output,
-                )
-                if (
-                  (item.id === "write" || item.id === "edit") &&
-                  beforeOutput.args?.file_path &&
-                  isExtensionPath(beforeOutput.args.file_path)
-                ) {
-                  yield* registry.reload().pipe(Effect.tapError((err) => Effect.sync(() => log.warn("extension reload failed", { error: err }))), Effect.ignore)
-                }
-                yield* bus
-                  .publish(Metrics.ToolCall, {
-                    sessionID: ctx.sessionID,
-                    tool_name: item.id,
-                    input_bytes: Metrics.jsonByteLength(beforeOutput.args),
-                    output_bytes: Buffer.byteLength(output.output ?? "", "utf8"),
-                    tool_call_id: options.toolCallId,
-                    tool_call_status: "success",
-                  })
-                  .pipe(Effect.ignore)
-                if (options.abortSignal?.aborted) {
+                }))
+                if (output.metadata.cancelled || options.abortSignal?.aborted) {
                   yield* input.processor.completeToolCall(options.toolCallId, output)
                 }
                 return output
@@ -1125,9 +1172,8 @@ NOTE: At any point in time through this workflow you should feel free to ask the
         }
       }
 
-      for (const [key, item] of Object.entries(yield* mcp.tools())) {
-        const execute = item.execute
-        if (!execute) continue
+      for (const [key, item] of mcpItems.filter(([id]) => isEffective(id))) {
+        const execute = item.execute!
 
         const schema = yield* Effect.promise(() => Promise.resolve(asSchema(item.inputSchema).jsonSchema))
         const transformed = ProviderTransform.schema(input.model, schema)
@@ -3311,11 +3357,41 @@ NOTE: At any point in time through this workflow you should feel free to ask the
             const lastUserMsg = msgs.findLast((m) => m.info.role === "user")
             const bypassAgentCheck = lastUserMsg?.parts.some((p) => p.type === "agent") ?? false
 
+            // Resolve fork state before tool binding so tool_script declarations,
+            // top-level schemas, and the final LLM permission filter all use the
+            // same visibility ruleset.
+            const actorRecord = lastUser.agentID
+              ? yield* actorRegistry.get(sessionID, lastUser.agentID).pipe(
+                  Effect.orElseSucceed(() => undefined),
+                )
+              : undefined
+            const isForkAgent =
+              actorRecord?.contextMode === "full" &&
+              (actorRecord.mode === "subagent" || actorRecord.mode === "peer")
+            const forkCtxEffect = isForkAgent ? spawnRef.current?.getForkContext(lastUser.agentID!) : undefined
+            const forkCtx = forkCtxEffect ? yield* forkCtxEffect : undefined
+            if (isForkAgent && !forkCtx) {
+              yield* slog.warn("fork agent runLoop: missing forkContext, failing actor", {
+                sessionID,
+                agentID: lastUser.agentID,
+              })
+              yield* actorRegistry
+                .updateStatus(sessionID, lastUser.agentID!, {
+                  status: "idle",
+                  lastOutcome: "failure",
+                  lastError: "missing fork context",
+                })
+                .pipe(Effect.ignore)
+              return "break" as const
+            }
+            const visibilityPermission = forkCtx?.parentPermission ?? session.permission
+
             const resolvedTools = yield* resolveTools({
               agent,
               session,
               model,
               tools: lastUser.tools,
+              visibilityPermission,
               processor: handle,
               bypassAgentCheck,
               messages: msgs,
@@ -3360,40 +3436,10 @@ NOTE: At any point in time through this workflow you should feel free to ask the
 
             const format = lastUser.format ?? { type: "text" as const }
 
-            // Determine if this iteration is for a fork agent (contextMode === "full").
-            // Fork agents use the frozen ForkContext snapshot captured at spawn time
-            // (system + inheritedMessages) rather than recomputing from their own
-            // agent identity — which would diverge from the parent and break the
-            // prefix cache.
-            const actorRecord = lastUser.agentID
-              ? yield* actorRegistry.get(sessionID, lastUser.agentID).pipe(
-                  Effect.orElseSucceed(() => undefined),
-                )
-              : undefined
-            // v9 registers main as `mode: "main"` with `contextMode: "full"`.
-            // Only spawned actors (subagent/peer) carry a frozen ForkContext;
-            // main is the captor, never the captured.
-            const isForkAgent =
-              actorRecord?.contextMode === "full" &&
-              (actorRecord.mode === "subagent" || actorRecord.mode === "peer")
-
-            // Fork path: read frozen ForkContext from Actor service (late-bound via
-            // spawnRef to break the Actor → SessionPrompt → Actor layer cycle).
-            // If forkCtx is missing (race / cleanup bug / spawn skipped), fail the
-            // actor so the next prune turn can spawn a fresh fork.
-            if (isForkAgent) {
-              const forkCtxEffect = spawnRef.current?.getForkContext(lastUser.agentID!)
-              const forkCtx = forkCtxEffect ? yield* forkCtxEffect : undefined
-              if (!forkCtx) {
-                yield* slog.warn("fork agent runLoop: missing forkContext, failing actor", {
-                  sessionID,
-                  agentID: lastUser.agentID,
-                })
-                yield* actorRegistry
-                  .updateStatus(sessionID, lastUser.agentID!, { status: "idle", lastOutcome: "failure", lastError: "missing fork context" })
-                  .pipe(Effect.ignore)
-                return "break" as const
-              }
+            // Fork agents use the frozen system and inherited-message snapshot
+            // captured at spawn time. The context was resolved before tool binding
+            // so its permission snapshot also governs the declared tool set.
+            if (forkCtx) {
               const ownNew = msgs.filter(
                 (m) => m.info.id > forkCtx.watermarkMsgID && m.info.agentID === lastUser.agentID,
               )
@@ -3404,11 +3450,9 @@ NOTE: At any point in time through this workflow you should feel free to ask the
               // additions is empty for fork agents: system is taken verbatim from
               // forkCtx.system. Passed as `system` to handle.process for logging/replay.
               const additions: string[] = []
-              // Note: fork uses `tools` from resolveTools (not `forkCtx.tools`) — runtime
-              // tool dispatch needs execute closures, which `forkCtx.tools` does not carry.
-              // Schema parity with parent is currently a consequence of checkpoint-writer
-              // having no toolAllowlist (Task 2.6 + agent.test.ts guard). See ForkContext.tools
-              // JSDoc in packages/opencode/src/actor/spawn.ts for the full contract.
+              // Fork runtime tools come from resolveTools because they require executable
+              // closures. forkCtx.tools is a frozen schema-only capture; both paths apply
+              // the effective permission and actor whitelist instead of exposing inventory.
               const queryParts =
                 msgs.findLast((m) => m.info.role === "user" && m.info.id === lastUser.id)?.parts ?? []
               const query = userQueryText(queryParts)
@@ -3451,20 +3495,10 @@ NOTE: At any point in time through this workflow you should feel free to ask the
                 .process({
                   user: lastUser,
                   agent,
-                  // Fork inherits the parent agent's permission (captured at spawn into
-                  // ForkContext). This drives llm.ts resolveTools/disabled() to the SAME
-                  // visible tool set as the parent → prompt-cache parity on the inherited
-                  // prefix. Scope: this affects tool VISIBILITY only; the per-call ask
-                  // ruleset (built separately in resolveTools' ask closure) is unchanged.
-                  // Parity is exact modulo non-default `session.permission`: the parent's
-                  // visibility ruleset is merge(parent.permission, session.permission)
-                  // while the fork's is merge(writer.permission, parentPermission) — so a
-                  // session-level rule pins the parent but not the fork. Still a strict
-                  // improvement over the old bespoke "*":"deny" block (which always
-                  // diverged). The `?? session.permission` is defense-in-depth only:
-                  // parentPermission is a required field (empty `[]` on a missed capture,
-                  // which `??` does NOT override), so the fallback fires solely if a future
-                  // refactor makes the field optional.
+                  // The fork uses the permission snapshot captured at spawn, while
+                  // resolveTools still applies the actor's runtime whitelist and current
+                  // request tool overrides. The fallback is defense-in-depth if the
+                  // captured field becomes optional in a future refactor.
                   permission: forkCtx.parentPermission ?? session.permission,
                   sessionID,
                   parentSessionID: session.parentID,
@@ -3627,8 +3661,8 @@ NOTE: At any point in time through this workflow you should feel free to ask the
             // intentionally don't use it here — the `tools` variable from `resolveTools`
             // (set earlier via `handle.process({tools: ...})`) carries `execute` closures
             // the AI SDK needs for runtime tool dispatch, while `buildLLMRequestPrefix`
-            // produces schema-only tools. Schema bytes match between both paths (both call
-            // registry.tools with identical args), so prefix cache parity holds.
+            // produces schema-only tools. Passing Object.keys(tools) below makes the
+            // schema use the exact effective IDs already resolved for runtime dispatch.
             // Main runLoop: no watermark — LLM must see the full msgs list,
             // including this turn's intermediate assistant turns (tool reads,
             // task creates, etc.) so each step doesn't replay from the bare
@@ -3641,6 +3675,8 @@ NOTE: At any point in time through this workflow you should feel free to ask the
                 model,
                 msgs,
                 additions,
+                permission: session.permission,
+                toolIDs: Object.keys(tools),
               }).pipe(
                 Effect.provideService(LLM.Service, llm),
                 Effect.provideService(ToolRegistry.Service, registry),

@@ -34,9 +34,7 @@ describe("buildLLMRequestPrefix", () => {
       directory: tmp.path,
       fn: async () => {
         // Create a session
-        const session = await AppRuntime.runPromise(
-          SessionNs.Service.use((svc) => svc.create({})),
-        )
+        const session = await AppRuntime.runPromise(SessionNs.Service.use((svc) => svc.create({})))
 
         // Insert a user message
         const userID = MessageID.ascending()
@@ -109,9 +107,7 @@ describe("buildLLMRequestPrefix", () => {
     await Instance.provide({
       directory: tmp.path,
       fn: async () => {
-        const session = await AppRuntime.runPromise(
-          SessionNs.Service.use((svc) => svc.create({})),
-        )
+        const session = await AppRuntime.runPromise(SessionNs.Service.use((svc) => svc.create({})))
 
         // Build 3 messages (user + asst + asst) so msgs has length 3 at end
         for (let i = 0; i < 3; i++) {
@@ -187,10 +183,81 @@ describe("buildLLMRequestPrefix", () => {
         // This catches re-introduction of slicing (which would chop the early
         // messages) and confirms toModelMessages output is deterministic for
         // a stable msgs prefix.
-        expect(r2.inheritedMessages.slice(0, r1.inheritedMessages.length))
-          .toEqual(r1.inheritedMessages)
-        expect(r3.inheritedMessages.slice(0, r2.inheritedMessages.length))
-          .toEqual(r2.inheritedMessages)
+        expect(r2.inheritedMessages.slice(0, r1.inheritedMessages.length)).toEqual(r1.inheritedMessages)
+        expect(r3.inheritedMessages.slice(0, r2.inheritedMessages.length)).toEqual(r2.inheritedMessages)
+      },
+    })
+  })
+  test("uses the caller's effective tool IDs for schemas and tool_script declarations", async () => {
+    await using tmp = await tmpdir({ git: true })
+    await Instance.provide({
+      directory: tmp.path,
+      fn: async () => {
+        const session = await AppRuntime.runPromise(SessionNs.Service.use((svc) => svc.create({})))
+        const userID = MessageID.ascending()
+        await AppRuntime.runPromise(
+          SessionNs.Service.use((svc) =>
+            svc.updateMessage({
+              id: userID,
+              sessionID: session.id,
+              role: "user",
+              time: { created: Date.now() },
+              agent: "build",
+              model: { providerID: ProviderID.make("openai"), modelID: ModelID.make("gpt-5.2") },
+              tools: {},
+              mode: "",
+            } as unknown as MessageV2.Info),
+          ),
+        )
+        await AppRuntime.runPromise(
+          SessionNs.Service.use((svc) =>
+            svc.updatePart({
+              id: PartID.ascending(),
+              sessionID: session.id,
+              messageID: userID,
+              type: "text",
+              text: "hello",
+            }),
+          ),
+        )
+        const msgs = await AppRuntime.runPromise(
+          SessionNs.Service.use((svc) => svc.messages({ sessionID: session.id })),
+        )
+        const result = await AppRuntime.runPromise(
+          buildLLMRequestPrefix({
+            sessionID: session.id,
+            agent: makeAgent(),
+            model: ProviderTest.model({
+              id: ModelID.make("gpt-5.2"),
+              providerID: ProviderID.make("openai"),
+            }),
+            msgs,
+            additions: [],
+            toolIDs: ["read", "tool_script"],
+          }),
+        )
+
+        expect(Object.keys(result.tools).sort()).toEqual(["invalid", "read", "tool_script"])
+        expect(result.tools.tool_script?.description).toContain("read(input:")
+        expect(result.tools.tool_script?.description).not.toContain("apply_patch(input:")
+
+        const denied = await AppRuntime.runPromise(
+          buildLLMRequestPrefix({
+            sessionID: session.id,
+            agent: makeAgent(),
+            model: ProviderTest.model({
+              id: ModelID.make("gpt-5.2"),
+              providerID: ProviderID.make("openai"),
+            }),
+            msgs,
+            additions: [],
+            permission: [{ permission: "edit", pattern: "*", action: "deny" }],
+            toolIDs: ["read", "apply_patch", "tool_script"],
+          }),
+        )
+        expect(Object.keys(denied.tools).sort()).toEqual(["invalid", "read", "tool_script"])
+        expect(denied.tools.tool_script?.description).toContain("read(input:")
+        expect(denied.tools.tool_script?.description).not.toContain("apply_patch(input:")
       },
     })
   })

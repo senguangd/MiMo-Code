@@ -23,6 +23,7 @@ describe("tool.capability", () => {
     expect(snapshot.byCapability["code-search"]).toEqual([])
     expect(ToolCapabilities.metadata(tools.search_files).capabilities).toBeUndefined()
     expect(ToolCapabilities.render(snapshot)).toContain("Web search is available via: `duckduckgo_search`.")
+    expect(ToolCapabilities.render(snapshot)).toContain("File editing is unavailable in this request.")
     expect(ToolCapabilities.render(snapshot)).not.toContain("`invalid`")
   })
   test("intersects visible schemas with the runtime whitelist", () => {
@@ -53,5 +54,16 @@ describe("tool.capability", () => {
     const snapshot = ToolCapabilities.snapshot({ tools })
     expect(ToolCapabilities.alternatives("WebSearch", snapshot)).toEqual(["duckduckgo_search"])
     expect(ToolCapabilities.alternatives("some_search_tool", snapshot)).toEqual([])
+  })
+  test("reports only active file-editing tool IDs", () => {
+    const tools = {
+      apply_patch: makeTool(),
+      edit: makeTool(),
+      read: makeTool(),
+    }
+    const snapshot = ToolCapabilities.snapshot({ tools, usableToolIDs: ["apply_patch", "read"] })
+    const rendered = ToolCapabilities.render(snapshot)
+    expect(rendered).toContain("File editing is available via: `apply_patch`.")
+    expect(rendered).not.toContain("File editing is available via: `apply_patch`, `edit`.")
   })
 })

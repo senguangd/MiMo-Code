@@ -1,46 +1,26 @@
-Execute a TypeScript script that orchestrates existing tools programmatically. Use this for BATCH tool operations: loops, concurrency, filtering, and aggregation over many tool calls — the intermediate results stay OUT of the conversation context; only what you `return` comes back.
+Execute a TypeScript script that orchestrates the tools active for this request. Use this for batch operations such as loops, concurrency, filtering, and aggregation. Intermediate results stay out of the conversation context; only the returned value comes back.
 
-The `code` argument is the BODY of an async function (TypeScript or JavaScript):
-- Call tools via the `tools` object, e.g. `await tools.glob({ pattern: "src/**/*.ts" })`
-- Every tool returns `Promise<ToolResult>` where `ToolResult = { title: string; output: string; metadata: Record<string, unknown> }` — `output` is the same text you would see when calling the tool directly (may be truncated for very large outputs; check `metadata.truncated`).
-- Use `Promise.all` / `Promise.allSettled` for concurrency (max 8 in flight; excess queue automatically).
-- `console.log(...)` output is captured and returned alongside the result (capped) — use it for debugging, not as the primary channel.
-- `return` a SMALL, aggregated value (object/array/string). Returning huge raw data defeats the purpose.
+The code argument is the body of an async function written in TypeScript or JavaScript:
+- Call only exact tool IDs declared in the generated tools interface below.
+- Every declared tool returns a ToolResult containing title, output, and metadata.
+- Use Promise.all or Promise.allSettled for concurrency. At most 8 calls run at once.
+- Console output is captured with a size cap and should be used only for debugging.
+- Return a small aggregated object, array, or string.
 
-Limits per execution: 50 tool calls, 8 concurrent, 60s of pure compute time (time spent waiting on tool calls is NOT charged), result capped at 256KB. Exceeding a limit fails the execution with a structured error.
+Limits per execution: 50 tool calls, 8 concurrent calls, 60 seconds of active compute time, and a 256 KB result. Time waiting for tool calls is not charged against active compute time.
 
-Permissions are enforced per tool call exactly as if you had called the tool directly — calls may pause awaiting user approval; a user rejection rejects that call's promise (catchable).
+The nested dispatcher uses the same effective tool definitions as the parent request. A tool absent from the declarations below is unavailable. Per-tool permission checks and approvals still apply.
 
-State does NOT persist between executions: each tool_script call runs in a fresh sandbox — variables from a previous execution are gone. To pass data between executions, either `return` it (best for small results) or use the `files` raw-IO API to stage it in a temp file:
+State does not persist between executions. Return small data directly. For larger machine-to-machine data, use the files raw-I/O API in the OS temporary directory:
 ```
-await files.writeText("/tmp/scan-results.json", JSON.stringify(hits))
-// ...next tool_script execution:
-const hits = JSON.parse(await files.readText("/tmp/scan-results.json"))
-```
-
-`tools.*` outputs are the AGENT-FACING text (e.g. `read` prefixes lines with `N: ` line numbers and may truncate). That is fine for scanning/matching, but for exact bytes (parsing JSON, byte-accurate content) use `files.readText` instead — raw content, no line numbers, no truncation. `files.readText` covers the project worktree and the OS temp dir; `files.writeText` is limited to the OS temp dir — project file writes must go through `tools.write` / `tools.edit` so permissions apply.
-
-When to use tool_script:
-- Same tool called many times (read 30 files, grep 10 patterns)
-- Results need deterministic filtering/aggregation/sorting/counting before you see them
-- Large intermediate outputs you don't need to read verbatim
-
-When NOT to use tool_script:
-- A single tool call — call the tool directly
-- Each step needs semantic judgment on the previous result — stay in the normal loop
-- You need to visually inspect results (images, screenshots)
-- High-risk side effects better done one at a time with your review between steps
-
-Example:
-```
-const files = await tools.glob({ pattern: "src/**/*.ts" })
-const paths = files.output.split("\n").filter(p => p.trim() && !p.startsWith("("))
-const reads = await Promise.all(paths.map(p => tools.read({ file_path: p })))
-const hits = paths
-  .map((p, i) => ({ path: p, todos: (reads[i].output.match(/TODO/g) ?? []).length }))
-  .filter(x => x.todos > 0)
-  .sort((a, b) => b.todos - a.todos)
-return { total: hits.length, top: hits.slice(0, 20) }
+await files.writeText("/tmp/scan-results.json", JSON.stringify(results))
+const results = JSON.parse(await files.readText("/tmp/scan-results.json"))
 ```
 
-The available tools and their exact input types are declared below.
+Tool outputs are agent-facing text and may be formatted or truncated. Use files.readText when exact bytes are required. files.readText is restricted to the project worktree and OS temporary directory. files.writeText is restricted to the OS temporary directory; project writes must use an active declared project-writing tool so normal permissions apply.
+
+Use tool_script when the same declared tool must be called many times, or when results need deterministic filtering, aggregation, sorting, or counting before entering the conversation.
+
+Do not use tool_script when one direct call is sufficient, each step needs semantic judgment, results need visual inspection, or high-risk side effects should be reviewed one at a time.
+
+The exact tools available to this script and their input types are declared below.

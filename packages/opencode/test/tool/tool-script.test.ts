@@ -7,8 +7,12 @@ import path from "path"
 import { evalScript } from "../../src/workflow/sandbox"
 import { Agent } from "../../src/agent/agent"
 import { Truncate, Tool } from "../../src/tool"
-import { ToolScriptTool, renderToolScriptDeclarations } from "../../src/tool/tool-script"
-import { toolScriptRegistry, TOOL_SCRIPT_EXCLUDED } from "../../src/tool/tool-script-ref"
+import {
+  ToolScriptTool,
+  bindToolScript,
+  renderToolScriptDeclarations,
+  TOOL_SCRIPT_EXCLUDED,
+} from "../../src/tool/tool-script"
 import { Instance } from "../../src/project/instance"
 
 describe("sandbox non-deterministic mode", () => {
@@ -79,41 +83,33 @@ function fakeDef(id: string, execute: (args: any) => Promise<string>): Tool.Def 
     description: `fake ${id}`,
     parameters: z.object({ value: z.string().optional() }),
     execute: (args: any) =>
-      Effect.promise(() => execute(args)).pipe(
-        Effect.map((output) => ({ title: id, output, metadata: {} })),
-      ),
+      Effect.promise(() => execute(args)).pipe(Effect.map((output) => ({ title: id, output, metadata: {} }))),
   }
 }
 
 async function runToolScript(code: string, defs: Tool.Def[], abort?: AbortSignal) {
-  const prev = toolScriptRegistry.current
-  toolScriptRegistry.current = () => Effect.succeed(defs)
-  try {
-    return await Instance.provide({
-      directory: tmp,
-      fn: async () => {
-        const info = await runtime.runPromise(ToolScriptTool)
-        const def = await Effect.runPromise(Tool.init(info))
-        return runtime.runPromise(
-          def.execute(
-            { code },
-            {
-              sessionID: "ses_test" as any,
-              messageID: "msg_test" as any,
-              agent: "build",
-              abort: abort ?? new AbortController().signal,
-              callID: "call_test",
-              messages: [],
-              metadata: () => Effect.void,
-              ask: () => Effect.void,
-            },
-          ),
-        )
-      },
-    })
-  } finally {
-    toolScriptRegistry.current = prev
-  }
+  return Instance.provide({
+    directory: tmp,
+    fn: async () => {
+      const info = await runtime.runPromise(ToolScriptTool)
+      const def = bindToolScript({ tool: await Effect.runPromise(Tool.init(info)), defs })
+      return runtime.runPromise(
+        def.execute(
+          { code },
+          {
+            sessionID: "ses_test" as any,
+            messageID: "msg_test" as any,
+            agent: "build",
+            abort: abort ?? new AbortController().signal,
+            callID: "call_test",
+            messages: [],
+            metadata: () => Effect.void,
+            ask: () => Effect.void,
+          },
+        ),
+      )
+    },
+  })
 }
 
 describe("tool_script", () => {
@@ -159,6 +155,53 @@ describe("tool_script", () => {
     expect(result.output).toContain('hello {"a":1}')
   })
 
+  test("bound declarations and nested dispatch use the same effective definitions", async () => {
+    let hiddenCalls = 0
+    const visible = fakeDef("read", async () => "visible")
+    const hidden = fakeDef("apply_patch", async () => {
+      hiddenCalls++
+      return "hidden"
+    })
+    const info = await runtime.runPromise(ToolScriptTool)
+    const bound = bindToolScript({ tool: await Effect.runPromise(Tool.init(info)), defs: [visible] })
+    expect(bound.description).toContain("read(input:")
+    expect(bound.description).not.toContain("apply_patch(input:")
+
+    const result = await Instance.provide({
+      directory: tmp,
+      fn: () =>
+        runtime.runPromise(
+          bound.execute(
+            { code: `try { await tools.apply_patch({}) } catch (e) { return e.message }` },
+            {
+              sessionID: "ses_test" as any,
+              messageID: "msg_test" as any,
+              agent: "build",
+              abort: new AbortController().signal,
+              callID: "call_test",
+              messages: [],
+              metadata: () => Effect.void,
+              ask: () => Effect.void,
+            },
+          ),
+        ),
+    })
+    expect(result.output).toContain("unknown tool: apply_patch")
+    expect(hiddenCalls).toBe(0)
+    void hidden
+  })
+
+  test("concurrent bindings do not leak tools across requests", async () => {
+    const [alpha, beta] = await Promise.all([
+      runToolScript(`return (await tools.alpha({})).output`, [fakeDef("alpha", async () => "A")]),
+      runToolScript(`return (await tools.beta({})).output`, [fakeDef("beta", async () => "B")]),
+    ])
+    expect(alpha.output).toContain('"A"')
+    expect(beta.output).toContain('"B"')
+    expect(alpha.output).not.toContain('"B"')
+    expect(beta.output).not.toContain('"A"')
+  })
+
   test("unknown tool rejects catchably; trace records the error", async () => {
     const result = await runToolScript(
       `
@@ -177,10 +220,7 @@ describe("tool_script", () => {
         throw new Error("kapow")
       }),
     ]
-    const result = await runToolScript(
-      `try { await tools.boom({}) } catch (e) { return e.message }`,
-      defs,
-    )
+    const result = await runToolScript(`try { await tools.boom({}) } catch (e) { return e.message }`, defs)
     expect(result.metadata.status).toBe("completed")
     expect(result.output).toContain("boom: kapow")
     expect(result.output).toContain("→ error")
@@ -215,10 +255,7 @@ describe("tool_script", () => {
 
   test("excluded tools are not dispatchable", async () => {
     const defs = [fakeDef("task", async () => "should never run")]
-    const result = await runToolScript(
-      `try { await tools.task({}) } catch (e) { return e.message }`,
-      defs,
-    )
+    const result = await runToolScript(`try { await tools.task({}) } catch (e) { return e.message }`, defs)
     expect(result.output).toContain("unknown tool: task")
   })
 
@@ -253,9 +290,10 @@ describe("tool_script", () => {
 
   test("files.writeText → files.readText round-trips raw bytes via tmp", async () => {
     const marker = `ts-${Date.now()}`
+    const file = path.join(os.tmpdir(), `${marker}.json`)
     const write = await runToolScript(
       `
-      await files.writeText("${path.join(os.tmpdir(), marker)}.json", JSON.stringify({ a: [1, 2], s: "x: 1" }))
+      await files.writeText(${JSON.stringify(file)}, JSON.stringify({ a: [1, 2], s: "x: 1" }))
       return "written"
       `,
       [],
@@ -263,14 +301,14 @@ describe("tool_script", () => {
     expect(write.metadata.status).toBe("completed")
     const read = await runToolScript(
       `
-      const data = JSON.parse(await files.readText("${path.join(os.tmpdir(), marker)}.json"))
+      const data = JSON.parse(await files.readText(${JSON.stringify(file)}))
       return data.a.length + ":" + data.s
       `,
       [],
     )
     expect(read.metadata.status).toBe("completed")
     expect(read.output).toContain("2:x: 1")
-    await fs.rm(path.join(os.tmpdir(), `${marker}.json`), { force: true })
+    await fs.rm(file, { force: true })
   })
 
   test("files.readText returns null for missing file", async () => {
@@ -282,10 +320,7 @@ describe("tool_script", () => {
   })
 
   test("files.readText rejects paths outside jail (catchable)", async () => {
-    const result = await runToolScript(
-      `try { await files.readText("/etc/passwd") } catch (e) { return e.message }`,
-      [],
-    )
+    const result = await runToolScript(`try { await files.readText("/etc/passwd") } catch (e) { return e.message }`, [])
     expect(result.metadata.status).toBe("completed")
     expect(result.output).toContain("outside allowed roots")
   })
