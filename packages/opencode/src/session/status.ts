@@ -4,6 +4,7 @@ import { InstanceState } from "@/effect"
 import { MessageID, SessionID } from "./schema"
 import { Effect, Layer, Context } from "effect"
 import z from "zod"
+import { ContextEstimate } from "./context-estimate"
 
 export const Info = z
   .union([
@@ -20,6 +21,7 @@ export const Info = z
       // session. Keeping the owner lets newer busy work ignore stale retry
       // updates from an older/background message.
       messageID: MessageID.zod.optional(),
+      contextEstimate: ContextEstimate.Info.optional(),
     }),
     z.object({
       type: z.literal("busy"),
@@ -29,6 +31,7 @@ export const Info = z
       // network/provider is still failing. Only a busy status emitted after real
       // stream progress may clear a retry for the same message.
       recoveredFromRetry: z.boolean().optional(),
+      contextEstimate: ContextEstimate.Info.optional(),
     }),
   ])
   .meta({
@@ -82,14 +85,24 @@ export const layer = Layer.effect(
     const set = Effect.fn("SessionStatus.set")(function* (sessionID: SessionID, status: Info) {
       const data = yield* InstanceState.get(state)
       const current = data.get(sessionID)
+      const sameMessageEstimate =
+        status.type !== "idle" &&
+        status.contextEstimate === undefined &&
+        current?.type !== "idle" &&
+        current?.contextEstimate !== undefined &&
+        current.messageID !== undefined &&
+        (status.messageID === undefined || current.messageID === status.messageID)
+          ? current.contextEstimate
+          : undefined
+      const next = sameMessageEstimate ? { ...status, contextEstimate: sameMessageEstimate } : status
       // Retry is sticky for its owning message. Generic busy updates from
       // run-state/onBusy, beginRun, lifecycle events, or reconnect bookkeeping
       // must not erase the visible retry footer. Otherwise users see the red
       // transient warning and then no persistent grey retry status while the
       // network is still down.
-      if (status.type === "busy" && current?.type === "retry") {
+      if (next.type === "busy" && current?.type === "retry") {
         const currentOwner = current.messageID
-        const nextOwner = status.messageID
+        const nextOwner = next.messageID
 
         const sameOwner =
           currentOwner
@@ -100,24 +113,24 @@ export const layer = Layer.effect(
         // 1. recoveredFromRetry: true  => real stream progress, clear footer
         // 2. message present           => keep showing the last transport error
         //                                as the old grey busy footer
-        if (sameOwner && !status.recoveredFromRetry && !status.message) return
+        if (sameOwner && !next.recoveredFromRetry && !next.message) return
       }
 
       // A session has only one visible prompt status, but there can be multiple
       // effects associated with the same session. Do not let an unowned or
       // different-message retry banner overwrite the busy status of the message
       // that is currently making progress.
-      if (status.type === "retry" && current?.type === "busy" && current.messageID) {
-        if (!status.messageID || status.messageID !== current.messageID) return
+      if (next.type === "retry" && current?.type === "busy" && current.messageID) {
+        if (!next.messageID || next.messageID !== current.messageID) return
       }
 
-      yield* bus.publish(Event.Status, { sessionID, status })
-      if (status.type === "idle") {
+      yield* bus.publish(Event.Status, { sessionID, status: next })
+      if (next.type === "idle") {
         yield* bus.publish(Event.Idle, { sessionID })
         data.delete(sessionID)
         return
       }
-      data.set(sessionID, status)
+      data.set(sessionID, next)
     })
 
     return Service.of({ get, list, set })

@@ -14,6 +14,7 @@ import { isMedia } from "@/util/media"
 import type { SystemError } from "bun"
 import type { Provider } from "@/provider"
 import { ModelID, ProviderID } from "@/provider/schema"
+import { ContextEstimate } from "./context-estimate"
 import { Effect } from "effect"
 import { EffectLogger } from "@/effect"
 import {
@@ -218,6 +219,7 @@ export const CheckpointPart = PartBase.extend({
   checkpointDir: z.string(),
   checkpointNumber: z.number(),
   coveredUpTo: MessageID.zod,
+  context_estimate: ContextEstimate.Info.optional(),
 }).meta({
   ref: "CheckpointPart",
 })
@@ -248,6 +250,7 @@ export const CompactionPart = PartBase.extend({
   // recent-turns kept after summarization). Optional: when undefined, no tail
   // was preserved (entire history was summarized).
   tail_start_id: MessageID.zod.optional(),
+  context_estimate: ContextEstimate.Info.optional(),
 }).meta({
   ref: "CompactionPart",
 })

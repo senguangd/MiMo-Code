@@ -63,7 +63,7 @@ describe("getSessionContextMetrics", () => {
     const metrics = getSessionContextMetrics(messages, providers)
 
     expect(metrics.totalCost).toBe(1.75)
-    expect(metrics.context?.message.id).toBe("a2")
+    expect(metrics.context?.message?.id).toBe("a2")
     expect(metrics.context?.total).toBe(500)
     expect(metrics.context?.usage).toBe(50)
     expect(metrics.context?.providerLabel).toBe("OpenAI")
@@ -86,6 +86,108 @@ describe("getSessionContextMetrics", () => {
     expect(metrics.context?.usage).toBe(52)
   })
 
+  test("uses a pending request estimate before measured usage is available", () => {
+    const messages = [assistant("a1", { input: 300, output: 100, reasoning: 0, read: 0, write: 0 }, 1)]
+    const providers = [{ id: "openai", models: { "gpt-4.1": { limit: { context: 1000 } } } }]
+    const metrics = getSessionContextMetrics(messages, providers, {
+      status: {
+        type: "busy",
+        contextEstimate: {
+          tokens: 275,
+          basis: "pending-request",
+          providerID: "openai",
+          modelID: "gpt-4.1",
+          calculatedAt: 10,
+        },
+      },
+    })
+
+    expect(metrics.context).toMatchObject({
+      kind: "estimated",
+      basis: "pending-request",
+      total: 275,
+      usage: 28,
+      input: undefined,
+      output: undefined,
+    })
+    expect(metrics.context?.message).toBeUndefined()
+  })
+
+  test("uses a persisted compaction estimate instead of stale pre-compaction usage", () => {
+    const summary = assistant("a3", { input: 900, output: 50, reasoning: 0, read: 0, write: 0 }, 0)
+    if (summary.role === "assistant") summary.summary = true
+    const messages = [
+      assistant("a1", { input: 800, output: 100, reasoning: 0, read: 0, write: 0 }, 1),
+      user("u2"),
+      summary,
+    ]
+    const providers = [{ id: "openai", models: { "gpt-4.1": { limit: { context: 1000 } } } }]
+    const metrics = getSessionContextMetrics(messages, providers, {
+      parts: {
+        u2: [
+          {
+            id: "p2",
+            sessionID: "s1",
+            messageID: "u2",
+            type: "compaction",
+            auto: false,
+            context_estimate: {
+              tokens: 220,
+              basis: "post-compaction",
+              providerID: "openai",
+              modelID: "gpt-4.1",
+              calculatedAt: 11,
+            },
+          },
+        ],
+      },
+    })
+
+    expect(metrics.context).toMatchObject({
+      kind: "estimated",
+      basis: "post-compaction",
+      total: 220,
+      usage: 22,
+    })
+  })
+
+  test("uses a persisted checkpoint estimate after a rebuild boundary", () => {
+    const messages = [
+      assistant("a1", { input: 800, output: 100, reasoning: 0, read: 0, write: 0 }, 1),
+      user("u2"),
+    ]
+    const providers = [{ id: "openai", models: { "gpt-4.1": { limit: { context: 1000 } } } }]
+    const metrics = getSessionContextMetrics(messages, providers, {
+      parts: {
+        u2: [
+          {
+            id: "p2",
+            sessionID: "s1",
+            messageID: "u2",
+            type: "checkpoint",
+            checkpointDir: "",
+            checkpointNumber: 0,
+            coveredUpTo: "u1",
+            context_estimate: {
+              tokens: 180,
+              basis: "post-rebuild",
+              providerID: "openai",
+              modelID: "gpt-4.1",
+              calculatedAt: 12,
+            },
+          },
+        ],
+      },
+    })
+
+    expect(metrics.context).toMatchObject({
+      kind: "estimated",
+      basis: "post-rebuild",
+      total: 180,
+      usage: 18,
+    })
+  })
+
   test("preserves fallback labels and null usage when model metadata is missing", () => {
     const messages = [assistant("a1", { input: 40, output: 10, reasoning: 0, read: 0, write: 0 }, 0.1, "p-1", "m-1")]
     const providers = [{ id: "p-1", models: {} }]
@@ -106,8 +208,8 @@ describe("getSessionContextMetrics", () => {
     messages.push(assistant("a2", { input: 100, output: 20, reasoning: 0, read: 0, write: 0 }, 0.75))
     const two = getSessionContextMetrics(messages, providers)
 
-    expect(one.context?.message.id).toBe("a1")
-    expect(two.context?.message.id).toBe("a2")
+    expect(one.context?.message?.id).toBe("a1")
+    expect(two.context?.message?.id).toBe("a2")
     expect(two.totalCost).toBe(1)
   })
 

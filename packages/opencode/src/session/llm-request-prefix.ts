@@ -11,6 +11,7 @@ import { ToolRegistry } from "../tool"
 import { ProviderTransform } from "../provider"
 import { Permission } from "../permission"
 import { bindToolScript, ToolScriptTool } from "../tool/tool-script"
+import * as ToolCapabilities from "../tool/capability"
 
 /**
  * Build the LLM request prefix (system + tools + inheritedMessages) from the
@@ -93,10 +94,13 @@ export const buildLLMRequestPrefix = Effect.fn("Session.buildLLMRequestPrefix")(
   const tools: Record<string, AITool> = {}
   for (const item of bound) {
     const schema = ProviderTransform.schema(input.model, z.toJSONSchema(item.parameters))
-    tools[item.id] = tool({
-      description: item.description,
-      inputSchema: jsonSchema(schema),
-    })
+    tools[item.id] = ToolCapabilities.annotate(
+      tool({
+        description: item.description,
+        inputSchema: jsonSchema(schema),
+      }),
+      { capabilities: item.capabilities, internal: item.internal },
+    )
   }
 
   return { system, tools, inheritedMessages }

@@ -1,4 +1,4 @@
-import type { AssistantMessage } from "@mimo-ai/sdk/v2"
+import type { AssistantMessage, SessionStatus } from "@mimo-ai/sdk/v2"
 import type { TuiPlugin, TuiPluginApi, TuiPluginModule } from "@mimo-ai/plugin/tui"
 import { Show, createEffect, createMemo, createSignal, onCleanup } from "solid-js"
 import { completedTPS, formatTPS, streamingTPS } from "./tps"
@@ -66,14 +66,17 @@ function View(props: { api: TuiPluginApi; session_id: string }) {
 
   const tpsLabel = createMemo(() => formatTPS(tps()))
 
-  const state = createMemo(() =>
-    resolveContextUsage({
+  const state = createMemo(() => {
+    const current = props.api.state.session.status(props.session_id) as SessionStatus | undefined
+    const estimate = current && current.type !== "idle" ? current.contextEstimate : undefined
+    return resolveContextUsage({
       messages: msg(),
       parts: (messageID) => props.api.state.part(messageID),
+      estimate,
       contextLimit: (providerID, modelID) =>
         props.api.state.provider.find((item) => item.id === providerID)?.models[modelID]?.limit.context,
-    }),
-  )
+    })
+  })
   const reading = createMemo<Reading | undefined>(() => {
     const value = state()
     return value?.kind === "invalidated" ? undefined : value
@@ -87,14 +90,19 @@ function View(props: { api: TuiPluginApi; session_id: string }) {
       </text>
       <Show
         when={reading()}
-        fallback={invalidated() ? <text fg={theme().textMuted}>Recalculates on next request</text> : undefined}
+        fallback={invalidated() ? <text fg={theme().textMuted}>Waiting for next model response</text> : undefined}
       >
         {(usage) => (
           <>
-            <text fg={theme().textMuted}>{usage().tokens.toLocaleString()} tokens</text>
+            <text fg={theme().textMuted}>
+              {usage().kind === "estimated" ? "~" : ""}
+              {usage().tokens.toLocaleString()} tokens
+            </text>
             <Show when={usage().limit}>
               {(limit) => (
-                <text fg={theme().textMuted}>{Math.round((usage().tokens / limit()) * 100)}% used</text>
+                <text fg={theme().textMuted}>
+                  {Math.round((usage().tokens / limit()) * 100)}% {usage().kind === "estimated" ? "estimated" : "used"}
+                </text>
               )}
             </Show>
           </>

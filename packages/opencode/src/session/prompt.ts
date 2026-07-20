@@ -86,6 +86,11 @@ import {
   sessionErrorText,
 } from "./trajectory"
 import { prefixCaptureRef } from "./prefix-capture-ref"
+import {
+  estimateContext,
+  shouldPropagateEstimateCause,
+  type Info as ContextEstimateInfo,
+} from "./context-estimate"
 import { spawnRef } from "@/actor/spawn-ref"
 import { Inbox } from "@/inbox"
 import { sessionPromptRef, defaultModelRef } from "@/inbox/inbox-ref"
@@ -385,6 +390,221 @@ export const layer = Layer.effect(
       } satisfies ActorPromptOps
     })
 
+    const estimateTools = Effect.fn("SessionPrompt.estimateTools")(function* (input: {
+      agent: Agent.Info
+      model: Provider.Model
+      user: MessageV2.User
+      baseTools: Record<string, AITool>
+      permission?: Permission.Ruleset
+      toolWhitelist?: readonly string[]
+    }) {
+      const tools: Record<string, AITool> = { ...input.baseTools }
+      const whitelist = input.toolWhitelist ? new Set(input.toolWhitelist) : undefined
+      const mcpItems = Object.entries(yield* mcp.tools()).filter(([, item]) => item.execute !== undefined)
+      const disabled = Permission.disabled(
+        [...Object.keys(tools), ...mcpItems.map(([id]) => id)],
+        Agent.runtimePermission(input.agent, input.permission),
+      )
+      const usableToolIDs = new Set(
+        Object.entries(tools)
+          .filter(([, item]) => !ToolCapabilities.isInternal(item))
+          .map(([toolID]) => toolID),
+      )
+      for (const [key, item] of mcpItems) {
+        if ((whitelist && !whitelist.has(key)) || input.user.tools?.[key] === false || disabled.has(key)) continue
+        const schema = yield* Effect.promise(() => Promise.resolve(asSchema(item.inputSchema).jsonSchema))
+        tools[key] = ToolCapabilities.annotate(
+          tool({
+            description: item.description,
+            inputSchema: jsonSchema(ProviderTransform.schema(input.model, schema)),
+          }),
+          ToolCapabilities.metadata(item),
+        )
+        usableToolIDs.add(key)
+      }
+      if (input.user.format?.type === "json_schema") {
+        tools.StructuredOutput = createStructuredOutputTool({
+          schema: input.user.format.schema,
+          onSuccess() {},
+        })
+        usableToolIDs.add("StructuredOutput")
+      }
+      return { tools, usableToolIDs: [...usableToolIDs].sort() }
+    })
+
+    const calculateContextEstimate = Effect.fn("SessionPrompt.calculateContextEstimate")(function* (input: {
+      basis: ContextEstimateInfo["basis"]
+      agent: Agent.Info
+      model: Provider.Model
+      session: Session.Info
+      user: MessageV2.User
+      permission?: Permission.Ruleset
+      system: string[]
+      messages: ModelMessage[]
+      tools: Record<string, AITool>
+      usableToolIDs?: readonly string[]
+    }) {
+      const requestContext = LLM.prepareRequestContext({
+        tools: input.tools,
+        usableToolIDs: input.usableToolIDs,
+        agent: input.agent,
+        permission: input.permission,
+        user: input.user,
+        messages: input.messages,
+      })
+      return yield* Effect.tryPromise(() =>
+        estimateContext({
+          basis: input.basis,
+          providerID: input.model.providerID,
+          modelID: input.model.id,
+          system: input.system,
+          messages: requestContext.messages,
+          tools: requestContext.tools,
+        }),
+      ).pipe(
+        Effect.tapError((error) =>
+          elog.warn("context estimate failed", {
+            basis: input.basis,
+            sessionID: input.session.id,
+            error: String(error),
+          }),
+        ),
+        Effect.catch(() => Effect.succeed(undefined)),
+      )
+    })
+
+    const persistBoundaryEstimateUnsafe = Effect.fn("SessionPrompt.persistBoundaryEstimateUnsafe")(function* (input: {
+      sessionID: SessionID
+      part: MessageV2.CheckpointPart | MessageV2.CompactionPart
+      agentID?: string
+    }) {
+      const session = yield* sessions.get(input.sessionID)
+      const msgs = yield* MessageV2.filterCompactedEffect(input.sessionID, {
+        contextFrom: session.contextFrom,
+        contextWatermark: session.contextWatermark,
+        agentID: input.agentID ?? "main",
+      })
+      const userMessage = msgs.findLast((message) => message.info.role === "user")
+      if (!userMessage || userMessage.info.role !== "user") return
+      const agent = yield* agents.get(userMessage.info.agent).pipe(Effect.catch(() => Effect.succeed(undefined)))
+      if (!agent) return
+      const model = yield* provider
+        .getModel(userMessage.info.model.providerID, userMessage.info.model.modelID)
+        .pipe(Effect.catch(() => Effect.succeed(undefined)))
+      if (!model) return
+      const actor = input.agentID
+        ? yield* actorRegistry.get(input.sessionID, input.agentID).pipe(Effect.orElseSucceed(() => undefined))
+        : undefined
+      const toolWhitelist = actor && Array.isArray(actor.tools) ? actor.tools : undefined
+      const forkCtxEffect =
+        input.agentID &&
+        actor?.contextMode === "full" &&
+        (actor.mode === "subagent" || actor.mode === "peer")
+          ? spawnRef.current?.getForkContext(input.agentID)
+          : undefined
+      const forkCtx = forkCtxEffect ? yield* forkCtxEffect : undefined
+      const visibilityPermission = forkCtx?.parentPermission ?? session.permission
+      const [skills, env, instructions] = yield* Effect.all([
+        sys.skills(agent),
+        sys.environment(model, session.time.created),
+        instruction.system().pipe(Effect.orDie),
+      ])
+      const additions = [
+        ...env,
+        ...(skills ? [skills] : []),
+        ...instructions.content,
+        ...(userMessage.info.format?.type === "json_schema" ? [STRUCTURED_OUTPUT_SYSTEM_PROMPT] : []),
+      ]
+      const prefix = yield* buildLLMRequestPrefix({
+        sessionID: input.sessionID,
+        agent,
+        model,
+        msgs,
+        additions,
+        permission: visibilityPermission,
+        toolWhitelist,
+      }).pipe(
+        Effect.provideService(LLM.Service, llm),
+        Effect.provideService(ToolRegistry.Service, registry),
+        Effect.catch(() => Effect.succeed(undefined)),
+      )
+      if (!prefix) return
+      const estimatedTools = yield* estimateTools({
+        agent,
+        model,
+        user: userMessage.info,
+        baseTools: prefix.tools,
+        permission: visibilityPermission,
+        toolWhitelist,
+      })
+      const estimate = yield* calculateContextEstimate({
+        basis: input.part.type === "checkpoint" ? "post-rebuild" : "post-compaction",
+        agent,
+        model,
+        session,
+        user: userMessage.info,
+        permission: visibilityPermission,
+        system: prefix.system,
+        messages: prefix.inheritedMessages,
+        tools: estimatedTools.tools,
+        usableToolIDs: estimatedTools.usableToolIDs,
+      })
+      if (!estimate) return
+      const current = MessageV2.parts(input.part.messageID).find((part) => part.id === input.part.id)
+      if (input.part.type === "checkpoint") {
+        if (!current || current.type !== "checkpoint") return
+        yield* sessions.updatePart({ ...current, context_estimate: estimate })
+        return
+      }
+      if (!current || current.type !== "compaction") return
+      yield* sessions.updatePart({ ...current, context_estimate: estimate })
+    })
+
+    const persistBoundaryEstimate = Effect.fn("SessionPrompt.persistBoundaryEstimate")(function* (input: {
+      sessionID: SessionID
+      part: MessageV2.CheckpointPart | MessageV2.CompactionPart
+      agentID?: string
+    }) {
+      yield* persistBoundaryEstimateUnsafe(input).pipe(
+        Effect.catchCause((cause) =>
+          shouldPropagateEstimateCause(cause)
+            ? Effect.failCause(cause)
+            : elog
+                .warn("context baseline estimate failed", {
+                  sessionID: input.sessionID,
+                  boundary: input.part.type,
+                  error: Cause.pretty(cause),
+                })
+                .pipe(Effect.asVoid),
+        ),
+      )
+    })
+
+    const publishPendingContextEstimate = Effect.fn("SessionPrompt.publishPendingContextEstimate")(function* (input: {
+      messageID: MessageID
+      agent: Agent.Info
+      model: Provider.Model
+      session: Session.Info
+      user: MessageV2.User
+      system: string[]
+      messages: ModelMessage[]
+      tools: Record<string, AITool>
+      usableToolIDs?: readonly string[]
+    }) {
+      if ((input.user.agentID ?? "main") !== "main") return
+      const estimate = yield* calculateContextEstimate({
+        ...input,
+        basis: "pending-request",
+        permission: input.session.permission,
+      })
+      if (!estimate) return
+      yield* status.set(input.session.id, {
+        type: "busy",
+        messageID: input.messageID,
+        contextEstimate: estimate,
+      })
+    })
+
     const cancel = Effect.fn("SessionPrompt.cancel")(function* (sessionID: SessionID) {
       yield* elog.info("cancel", { sessionID })
       yield* state.cancel(sessionID)
@@ -440,7 +660,38 @@ export const layer = Layer.effect(
         })
         .pipe(Effect.catch(() => Effect.succeed(false)))
 
-      if (inserted) yield* prune.markContextReduced(input.sessionID)
+      if (inserted) {
+        yield* prune.markContextReduced(input.sessionID)
+        yield* Effect.gen(function* () {
+          const rebuilt = yield* sessions.messages({
+            sessionID: input.sessionID,
+            agentID: input.agentID ?? "main",
+          })
+          const checkpointPart = rebuilt
+            .flatMap((message) => message.parts)
+            .findLast(
+              (part): part is MessageV2.CheckpointPart =>
+                part.type === "checkpoint" && part.coveredUpTo === boundary,
+            )
+          if (!checkpointPart) return
+          yield* persistBoundaryEstimate({
+            sessionID: input.sessionID,
+            part: checkpointPart,
+            agentID: input.agentID,
+          })
+        }).pipe(
+          Effect.catchCause((cause) =>
+            shouldPropagateEstimateCause(cause)
+              ? Effect.failCause(cause)
+              : elog
+                  .warn("checkpoint context baseline estimate failed", {
+                    sessionID: input.sessionID,
+                    error: Cause.pretty(cause),
+                  })
+                  .pipe(Effect.asVoid),
+          ),
+        )
+      }
       return inserted
     })
 
@@ -3109,6 +3360,13 @@ NOTE: At any point in time through this workflow you should feel free to ask the
               overflow: compactionPart?.overflow,
               agentID: lastUser.agentID,
             })
+            if (result !== "stop" && compactionPart) {
+              yield* persistBoundaryEstimate({
+                sessionID,
+                part: compactionPart,
+                agentID: lastUser.agentID,
+              })
+            }
             // cron-sentinel cache is invalidated via a SessionCompaction.Event
             // .Compacted bus subscription inside cron-bridge — see
             // `compaction.ts:468` publish + `cron-bridge.ts` subscribe pair.
@@ -3742,6 +4000,18 @@ NOTE: At any point in time through this workflow you should feel free to ask the
               )
               return "break" as const
             }
+
+            yield* publishPendingContextEstimate({
+              messageID: handle.message.id,
+              agent,
+              model,
+              session,
+              user: lastUser,
+              system: prebuiltSystem,
+              messages: processArgs.messages,
+              tools,
+              usableToolIDs,
+            })
 
             const stepEffect = useMaxMode
               ? MaxMode.runMaxStep({

@@ -47,8 +47,12 @@ export function SubagentFooter() {
     const pct = context.limit ? `${Math.round((context.tokens / context.limit) * 100)}%` : undefined
     const cost = msg.reduce((sum, item) => sum + (item.role === "assistant" ? item.cost : 0), 0)
     const money = new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" })
+    const prefix = context.kind === "estimated" ? "~" : ""
+    const suffix = context.kind === "estimated" ? " est." : ""
     return {
-      context: pct ? `${Locale.number(context.tokens)} (${pct})` : Locale.number(context.tokens),
+      context: pct
+        ? `${prefix}${Locale.number(context.tokens)} (${pct}${suffix})`
+        : `${prefix}${Locale.number(context.tokens)}${suffix}`,
       cost: cost > 0 ? money.format(cost) : undefined,
     }
   })

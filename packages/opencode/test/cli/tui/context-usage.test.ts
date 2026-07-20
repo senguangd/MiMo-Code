@@ -98,6 +98,63 @@ describe("TUI context usage", () => {
     expect(resolve([user("u1"), message])).toEqual({ kind: "current", tokens: 58_000, limit: 100_000 })
   })
 
+
+  test("shows a persisted post-compaction estimate instead of an empty invalidated state", () => {
+    const boundary = part("u3", "compaction")
+    Object.assign(boundary, {
+      context_estimate: {
+        tokens: 21_400,
+        basis: "post-compaction",
+        providerID: "test",
+        modelID: "main",
+        calculatedAt: 10,
+      },
+    })
+
+    expect(
+      resolve([user("u1"), assistant("a2", 60_000), user("u3"), assistant("a4", 150_000, { summary: true })], {
+        u3: [boundary],
+      }),
+    ).toEqual({ kind: "estimated", tokens: 21_400, basis: "post-compaction", limit: 100_000 })
+  })
+
+  test("shows a persisted post-rebuild estimate after a checkpoint boundary", () => {
+    const boundary = part("u3", "checkpoint")
+    Object.assign(boundary, {
+      context_estimate: {
+        tokens: 18_750,
+        basis: "post-rebuild",
+        providerID: "test",
+        modelID: "main",
+        calculatedAt: 10,
+      },
+    })
+
+    expect(
+      resolve([user("u1"), assistant("a2", 60_000), user("u3")], {
+        u3: [boundary],
+      }),
+    ).toEqual({ kind: "estimated", tokens: 18_750, basis: "post-rebuild", limit: 100_000 })
+  })
+
+  test("pending request estimate takes precedence until provider usage arrives", () => {
+    const pending = {
+      tokens: 22_100,
+      basis: "pending-request" as const,
+      providerID: "test",
+      modelID: "main",
+      calculatedAt: 11,
+    }
+    expect(
+      resolveContextUsage({
+        messages: [user("u1"), assistant("a2", 60_000)],
+        parts: () => [],
+        estimate: pending,
+        contextLimit: () => 100_000,
+      }),
+    ).toEqual({ kind: "estimated", tokens: 22_100, basis: "pending-request", limit: 100_000 })
+  })
+
   test("compaction summary invalidates the pre-compaction request instead of exposing its usage", () => {
     expect(
       resolve([user("u1"), assistant("a2", 60_000), user("u3"), assistant("a4", 150_000, { summary: true })], {

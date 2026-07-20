@@ -770,10 +770,27 @@ export type SessionStatus =
       attempt: number
       message: string
       next: number
+      messageID?: string
+      contextEstimate?: {
+        tokens: number
+        basis: "post-compaction" | "post-rebuild" | "pending-request"
+        providerID: string
+        modelID: string
+        calculatedAt: number
+      }
     }
   | {
       type: "busy"
       message?: string
+      messageID?: string
+      recoveredFromRetry?: boolean
+      contextEstimate?: {
+        tokens: number
+        basis: "post-compaction" | "post-rebuild" | "pending-request"
+        providerID: string
+        modelID: string
+        calculatedAt: number
+      }
     }
 
 export type EventSessionStatus = {
@@ -1317,6 +1334,13 @@ export type CheckpointPart = {
   checkpointDir: string
   checkpointNumber: number
   coveredUpTo: string
+  context_estimate?: {
+    tokens: number
+    basis: "post-compaction" | "post-rebuild" | "pending-request"
+    providerID: string
+    modelID: string
+    calculatedAt: number
+  }
 }
 
 export type CompactionPart = {
@@ -1327,6 +1351,13 @@ export type CompactionPart = {
   auto: boolean
   overflow?: boolean
   tail_start_id?: string
+  context_estimate?: {
+    tokens: number
+    basis: "post-compaction" | "post-rebuild" | "pending-request"
+    providerID: string
+    modelID: string
+    calculatedAt: number
+  }
 }
 
 export type Part =
@@ -1903,6 +1934,12 @@ export type McpLocalConfig = {
    * Timeout in ms for MCP server requests. Defaults to 5000 (5 seconds) if not specified.
    */
   timeout?: number
+  /**
+   * Explicit semantic capabilities by MCP tool name. Names are never inferred.
+   */
+  toolCapabilities?: {
+    [key: string]: Array<"web-search" | "web-fetch" | "code-search">
+  }
 }
 
 export type McpOAuthConfig = {
@@ -1951,6 +1988,12 @@ export type McpRemoteConfig = {
    * Timeout in ms for MCP server requests. Defaults to 5000 (5 seconds) if not specified.
    */
   timeout?: number
+  /**
+   * Explicit semantic capabilities by MCP tool name. Names are never inferred.
+   */
+  toolCapabilities?: {
+    [key: string]: Array<"web-search" | "web-fetch" | "code-search">
+  }
 }
 
 /**
@@ -2187,17 +2230,17 @@ export type Config = {
      */
     preserve_recent_tokens?: number
     /**
-     * Token buffer for compaction. Leaves enough window to avoid overflow during compaction.
+     * Input headroom that automatic context reduction must free for subsequent requests. Default: up to 20000 tokens.
      */
     reserved?: number
   }
   checkpoint?: {
     /**
-     * Context fill thresholds that trigger checkpoint writes. Strings may be percentages ("40%"), absolute tokens ("100K", "1.5M"), or mixed ("100K", "50%"). Each threshold must be <= window - 20K reserved. Default: ["40%", "60%", "80%"].
+     * Context-growth thresholds that trigger background checkpoint writes only; they never trigger context reduction. Strings may be percentages ("40%"), absolute tokens ("100K", "1.5M"), or mixed. Defaults vary by effective input window.
      */
     thresholds?: Array<string>
     /**
-     * Token buffer reserved for checkpoint operations. Default: 20000.
+     * Token buffer reserved for checkpoint writer thresholds. Default: 13000.
      */
     reserved?: number
     /**

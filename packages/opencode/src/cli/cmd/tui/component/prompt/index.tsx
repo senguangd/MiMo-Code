@@ -31,7 +31,7 @@ import * as Editor from "@tui/util/editor"
 import * as Voice from "@tui/util/voice"
 import { useExit } from "../../context/exit"
 import * as Clipboard from "../../util/clipboard"
-import type { FilePart, UserMessage } from "@mimo-ai/sdk/v2"
+import type { FilePart, SessionStatus, UserMessage } from "@mimo-ai/sdk/v2"
 import { TuiEvent } from "../../event"
 import { iife } from "@/util/iife"
 import { Locale } from "@/util"
@@ -465,9 +465,12 @@ export function Prompt(props: PromptProps) {
   const usage = createMemo<{ context?: string; cost?: string } | undefined>(() => {
     if (!props.sessionID) return
     const msg = sync.data.message[props.sessionID]?.["main"] ?? []
+    const current = status() as SessionStatus
+    const estimate = current.type !== "idle" ? current.contextEstimate : undefined
     const context = resolveContextUsage({
       messages: msg,
       parts: (messageID) => sync.data.part[messageID] ?? [],
+      estimate,
       contextLimit: (providerID, modelID) =>
         sync.data.provider.find((item) => item.id === providerID)?.models[modelID]?.limit.context,
     })
@@ -477,8 +480,12 @@ export function Prompt(props: PromptProps) {
         ? t("tui.prompt.context.recalculating")
         : context
           ? [
-              Locale.number(context.tokens),
-              context.limit ? `(${Math.round((context.tokens / context.limit) * 100)}%)` : undefined,
+              `${context.kind === "estimated" ? "~" : ""}${Locale.number(context.tokens)}`,
+              context.limit
+                ? `(${Math.round((context.tokens / context.limit) * 100)}%${context.kind === "estimated" ? " est." : ""})`
+                : context.kind === "estimated"
+                  ? "est."
+                  : undefined,
             ]
               .filter(Boolean)
               .join(" ")

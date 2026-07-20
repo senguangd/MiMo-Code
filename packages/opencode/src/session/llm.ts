@@ -350,11 +350,9 @@ const live: Layer.Layer<
 
       // TODO: move this to a proper hook
       const isOpenaiOauth = item.id === "openai" && info?.type === "oauth"
-      const tools = resolveTools(input)
-      const capabilitySnapshot = ToolCapabilities.snapshot({
-        tools,
-        usableToolIDs: input.usableToolIDs,
-      })
+      const requestContext = prepareRequestContext(input)
+      const tools = requestContext.tools
+      const capabilitySnapshot = requestContext.capabilitySnapshot
 
       const system =
         input.prebuiltSystem ??
@@ -399,14 +397,7 @@ const live: Layer.Layer<
       // to hard-prune the trailing assistant turn(s) so the resend ends with a
       // user/tool message. It should effectively never fire, but keeping it is
       // cheap and safe.
-      const requestMessages = input.dropAssistantPrefill
-        ? ProviderTransform.dropTrailingAssistantPrefill(input.messages)
-        : input.messages
-      const contract =
-        Object.keys(input.tools).length === 0 && input.usableToolIDs === undefined
-          ? undefined
-          : ToolCapabilities.render(capabilitySnapshot)
-      const contractedMessages = contract ? appendToolContract(requestMessages, contract) : requestMessages
+      const contractedMessages = requestContext.messages
       const messages = isOpenaiOauth
         ? contractedMessages
         : isWorkflow
@@ -856,7 +847,31 @@ function appendToolContract(messages: ModelMessage[], contract: string): ModelMe
   return messages.with(index, { ...message, content })
 }
 
-function resolveTools(input: Pick<StreamInput, "tools" | "agent" | "permission" | "user">) {
+export function prepareRequestContext(
+  input: Pick<StreamInput, "tools" | "agent" | "permission" | "user" | "messages" | "usableToolIDs"> & {
+    dropAssistantPrefill?: boolean
+  },
+) {
+  const tools = visibleTools(input)
+  const messages = input.dropAssistantPrefill
+    ? ProviderTransform.dropTrailingAssistantPrefill(input.messages)
+    : input.messages
+  const capabilitySnapshot = ToolCapabilities.snapshot({
+    tools,
+    usableToolIDs: input.usableToolIDs,
+  })
+  const contract =
+    Object.keys(input.tools).length === 0 && input.usableToolIDs === undefined
+      ? undefined
+      : ToolCapabilities.render(capabilitySnapshot)
+  return {
+    tools,
+    messages: contract ? appendToolContract(messages, contract) : messages,
+    capabilitySnapshot,
+  }
+}
+
+export function visibleTools(input: Pick<StreamInput, "tools" | "agent" | "permission" | "user">) {
   const disabled = Permission.disabled(
     Object.keys(input.tools),
     Agent.runtimePermission(input.agent, input.permission),

@@ -5,6 +5,8 @@ import { afterEach, expect } from "bun:test"
 import { dynamicTool, jsonSchema, type Tool as AITool } from "ai"
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js"
 import { Cause, Deferred, Effect, Exit, Fiber, Layer } from "effect"
+import { eq } from "drizzle-orm"
+import fs from "fs/promises"
 import path from "path"
 import { Agent as AgentSvc } from "../../src/agent/agent"
 import { Bus } from "../../src/bus"
@@ -47,6 +49,9 @@ import { Memory } from "../../src/memory"
 import { History } from "../../src/history"
 import { Team } from "../../src/team"
 import { SessionCheckpoint } from "../../src/session/checkpoint"
+import { checkpointPath } from "../../src/session/checkpoint-paths"
+import { SessionTable } from "../../src/session/session.sql"
+import { Database } from "../../src/storage"
 import { TaskRegistry } from "../../src/task/registry"
 import { defaultLayer as SchedulerDefaultLayer } from "../../src/cron/scheduler"
 import { Auth } from "../../src/auth"
@@ -336,6 +341,46 @@ const capabilityIt = testEffect(
     })),
   ),
 )
+const estimateIt = testEffect(
+  makeHttp(
+    mcpLayer(() => ({
+      context_probe: dynamicTool({
+        description: "x".repeat(16_000),
+        inputSchema: jsonSchema({
+          type: "object",
+          properties: { query: { type: "string", description: "y".repeat(4_000) } },
+          required: ["query"],
+          additionalProperties: false,
+        }),
+        execute: async () => ({ content: [{ type: "text" as const, text: "unused" }] }),
+      }),
+    })),
+  ),
+)
+const estimateFailureIt = testEffect(
+  makeHttp(
+    mcpLayer(() => {
+      throw new Error("context estimate dependency unavailable")
+    }),
+  ),
+)
+
+const actorEstimateToolID = `context_probe_${"x".repeat(6_000)}`
+const actorEstimateIt = testEffect(
+  makeHttp(
+    mcpLayer(() => ({
+      [actorEstimateToolID]: ToolCapabilities.annotate(
+        dynamicTool({
+          description: "Actor-scoped context estimate probe",
+          inputSchema: jsonSchema({ type: "object", properties: {}, additionalProperties: false }),
+          execute: async () => ({ content: [{ type: "text" as const, text: "unused" }] }),
+        }),
+        { capabilities: ["web-search"] },
+      ),
+    })),
+  ),
+)
+
 const unix = process.platform !== "win32" ? it.live : it.live.skip
 
 // Config that registers a custom "test" provider with a "test-model" model
@@ -523,6 +568,236 @@ it.live("loop calls LLM and returns assistant message", () =>
       const parts = result.parts.filter((p) => p.type === "text")
       expect(parts.some((p) => p.type === "text" && p.text === "world")).toBe(true)
       expect(yield* llm.hits).toHaveLength(1)
+    }),
+    { git: true, config: providerCfg },
+  ),
+)
+
+it.live("compaction persists a post-compaction context baseline", () =>
+  provideTmpdirServer(
+    Effect.fnUntraced(function* ({ llm }) {
+      const prompt = yield* SessionPrompt.Service
+      const sessions = yield* Session.Service
+      const compaction = yield* SessionCompaction.Service
+      const chat = yield* sessions.create({
+        title: "Pinned",
+        permission: [{ permission: "*", pattern: "*", action: "allow" }],
+      })
+      yield* seed(chat.id, { finish: "stop" })
+      yield* compaction.create({
+        sessionID: chat.id,
+        agent: "build",
+        model: ref,
+        auto: false,
+      })
+      yield* llm.text("## Goal\nContinue the task from the compacted summary.")
+
+      const result = yield* prompt.loop({ sessionID: chat.id })
+      expect(result.info.role).toBe("assistant")
+      if (result.info.role === "assistant") expect(result.info.summary).toBe(true)
+
+      const boundary = (yield* sessions.messages({ sessionID: chat.id }))
+        .flatMap((message) => message.parts)
+        .find((part): part is MessageV2.CompactionPart => part.type === "compaction")
+      expect(boundary?.context_estimate).toMatchObject({
+        basis: "post-compaction",
+        providerID: ref.providerID,
+        modelID: ref.modelID,
+      })
+      expect(boundary?.context_estimate?.tokens).toBeGreaterThan(0)
+    }),
+    { git: true, config: providerCfg },
+  ),
+)
+
+it.live("checkpoint rebuild persists a post-rebuild context baseline", () =>
+  provideTmpdirServer(
+    Effect.fnUntraced(function* () {
+      const prompt = yield* SessionPrompt.Service
+      const sessions = yield* Session.Service
+      const chat = yield* sessions.create({
+        title: "Pinned",
+        permission: [{ permission: "*", pattern: "*", action: "allow" }],
+      })
+      const seeded = yield* seed(chat.id, { finish: "stop" })
+      const file = checkpointPath(chat.id)
+      yield* Effect.promise(() => fs.mkdir(path.dirname(file), { recursive: true }))
+      yield* Effect.promise(() =>
+        fs.writeFile(file, "## §1 Active intent\n\nContinue from the persisted checkpoint.\n"),
+      )
+      yield* Effect.sync(() =>
+        Database.use((db) =>
+          db
+            .update(SessionTable)
+            .set({ last_checkpoint_message_id: seeded.assistant.id })
+            .where(eq(SessionTable.id, chat.id))
+            .run(),
+        ),
+      )
+
+      const result = yield* prompt.command({
+        sessionID: chat.id,
+        agent: "build",
+        command: Command.Default.REBUILD,
+        arguments: "",
+      })
+      expect(result.info.role).toBe("user")
+
+      const boundary = (yield* sessions.messages({ sessionID: chat.id }))
+        .flatMap((message) => message.parts)
+        .find((part): part is MessageV2.CheckpointPart => part.type === "checkpoint")
+      expect(boundary?.context_estimate).toMatchObject({
+        basis: "post-rebuild",
+        providerID: ref.providerID,
+        modelID: ref.modelID,
+      })
+      expect(boundary?.context_estimate?.tokens).toBeGreaterThan(0)
+    }),
+    { git: true, config: providerCfg },
+  ),
+)
+
+estimateFailureIt.live("compaction remains successful when baseline estimation fails", () =>
+  provideTmpdirServer(
+    Effect.fnUntraced(function* ({ llm }) {
+      const prompt = yield* SessionPrompt.Service
+      const sessions = yield* Session.Service
+      const compaction = yield* SessionCompaction.Service
+      const chat = yield* sessions.create({
+        title: "Pinned",
+        permission: [{ permission: "*", pattern: "*", action: "allow" }],
+      })
+      yield* seed(chat.id, { finish: "stop" })
+      yield* compaction.create({
+        sessionID: chat.id,
+        agent: "build",
+        model: ref,
+        auto: false,
+      })
+      yield* llm.text("## Goal\nCompaction completed despite the estimate dependency failure.")
+
+      const result = yield* prompt.loop({ sessionID: chat.id })
+      expect(result.info.role).toBe("assistant")
+      if (result.info.role === "assistant") expect(result.info.summary).toBe(true)
+      const boundary = (yield* sessions.messages({ sessionID: chat.id }))
+        .flatMap((message) => message.parts)
+        .find((part): part is MessageV2.CompactionPart => part.type === "compaction")
+      expect(boundary).toBeDefined()
+      expect(boundary?.context_estimate).toBeUndefined()
+    }),
+    { git: true, config: providerCfg },
+  ),
+)
+
+actorEstimateIt.live("subagent baseline uses the Actor Registry tool whitelist", () =>
+  provideTmpdirServer(
+    Effect.fnUntraced(function* ({ llm }) {
+      const prompt = yield* SessionPrompt.Service
+      const sessions = yield* Session.Service
+      const actors = yield* ActorRegistry.Service
+      const compaction = yield* SessionCompaction.Service
+
+      const measure = Effect.fnUntraced(function* (tools: readonly string[] | "INHERIT") {
+        const chat = yield* sessions.create({
+          title: "Pinned",
+          permission: [{ permission: "*", pattern: "*", action: "allow" }],
+        })
+        const actorID = `actor-${tools === "INHERIT" ? "inherit" : "restricted"}`
+        yield* actors.register({
+          sessionID: chat.id,
+          actorID,
+          mode: "subagent",
+          agent: "build",
+          description: "context estimate actor",
+          contextMode: "state",
+          background: true,
+          lifecycle: "persistent",
+          tools,
+        })
+        const userMessage = yield* prompt.prompt({
+          sessionID: chat.id,
+          agent: "build",
+          agentID: actorID,
+          model: ref,
+          noReply: true,
+          parts: [{ type: "text", text: "Summarize this actor context." }],
+        })
+        const assistant: MessageV2.Assistant = {
+          id: MessageID.ascending(),
+          role: "assistant",
+          parentID: userMessage.info.id,
+          sessionID: chat.id,
+          agentID: actorID,
+          mode: "build",
+          agent: "build",
+          cost: 0,
+          path: { cwd: "/tmp", root: "/tmp" },
+          tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+          modelID: ref.modelID,
+          providerID: ref.providerID,
+          time: { created: Date.now(), completed: Date.now() },
+          finish: "stop",
+        }
+        yield* sessions.updateMessage(assistant)
+        yield* sessions.updatePart({
+          id: PartID.ascending(),
+          messageID: assistant.id,
+          sessionID: chat.id,
+          type: "text",
+          text: "Actor response",
+        })
+        yield* compaction.create({
+          sessionID: chat.id,
+          agent: "build",
+          model: ref,
+          auto: false,
+          agentID: actorID,
+        })
+        yield* llm.text("## Goal\nContinue the actor task from its compacted summary.")
+        const result = yield* prompt.loop({ sessionID: chat.id, agentID: actorID })
+        expect(result.info.role).toBe("assistant")
+        const boundary = (yield* sessions.messages({ sessionID: chat.id, agentID: actorID }))
+          .flatMap((message) => message.parts)
+          .find((part): part is MessageV2.CompactionPart => part.type === "compaction")
+        expect(boundary?.context_estimate?.basis).toBe("post-compaction")
+        return boundary?.context_estimate?.tokens ?? 0
+      })
+
+      const restricted = yield* measure([])
+      const inherited = yield* measure("INHERIT")
+      expect(restricted).toBeGreaterThan(0)
+      expect(inherited).toBeGreaterThan(restricted + 1_000)
+    }),
+    { git: true, config: providerCfg },
+  ),
+  30_000,
+)
+
+it.live("provider completion replaces the estimate with measured usage", () =>
+  provideTmpdirServer(
+    Effect.fnUntraced(function* ({ llm }) {
+      const prompt = yield* SessionPrompt.Service
+      const sessions = yield* Session.Service
+      const status = yield* SessionStatus.Service
+      const chat = yield* sessions.create({
+        title: "Pinned",
+        permission: [{ permission: "*", pattern: "*", action: "allow" }],
+      })
+      yield* prompt.prompt({
+        sessionID: chat.id,
+        agent: "build",
+        noReply: true,
+        parts: [{ type: "text", text: "hello" }],
+      })
+      yield* llm.text("measured", { usage: { input: 1_200, output: 50 } })
+
+      const result = yield* prompt.loop({ sessionID: chat.id })
+      expect(yield* status.get(chat.id)).toEqual({ type: "idle" })
+      expect(result.info.role).toBe("assistant")
+      if (result.info.role === "assistant") {
+        expect(result.info.tokens).toMatchObject({ input: 1_200, output: 50, total: 1_250 })
+        expect("contextEstimate" in result.info.tokens).toBe(false)
+      }
     }),
     { git: true, config: providerCfg },
   ),
@@ -1049,6 +1324,42 @@ it.live(
       { git: true, config: providerCfg },
     ),
   3_000,
+)
+
+estimateIt.live(
+  "publishes a tool-aware pending context estimate before the provider responds",
+  () =>
+    provideTmpdirServer(
+      Effect.fnUntraced(function* ({ llm }) {
+        const prompt = yield* SessionPrompt.Service
+        const sessions = yield* Session.Service
+        const status = yield* SessionStatus.Service
+        yield* llm.hang
+
+        const chat = yield* sessions.create({
+          title: "Pinned",
+          permission: [{ permission: "*", pattern: "*", action: "allow" }],
+        })
+        yield* user(chat.id, "hello")
+
+        const fiber = yield* prompt.loop({ sessionID: chat.id }).pipe(Effect.forkChild)
+        yield* llm.wait(1)
+        const current = yield* status.get(chat.id)
+        expect(current.type).toBe("busy")
+        if (current.type === "busy") {
+          expect(current.contextEstimate).toMatchObject({
+            basis: "pending-request",
+            providerID: ref.providerID,
+            modelID: ref.modelID,
+          })
+          expect(current.contextEstimate?.tokens).toBeGreaterThan(4_000)
+        }
+        yield* prompt.cancel(chat.id)
+        yield* Fiber.await(fiber)
+      }),
+      { git: true, config: providerCfg },
+    ),
+  30_000,
 )
 
 // Cancel semantics

@@ -52,7 +52,13 @@ export function SessionContextUsage(props: SessionContextUsageProps) {
       }),
   )
 
-  const metrics = createMemo(() => getSessionContextMetrics(messages(), providers.all()))
+  const metrics = createMemo(() => {
+    const id = params.id
+    return getSessionContextMetrics(messages(), providers.all(), {
+      parts: sync.data.part,
+      status: id ? sync.data.session_status[id] : undefined,
+    })
+  })
   const context = createMemo(() => metrics().context)
   const cost = createMemo(() => {
     return usd().format(metrics().totalCost)
@@ -84,11 +90,17 @@ export function SessionContextUsage(props: SessionContextUsageProps) {
         {(ctx) => (
           <>
             <div class="flex items-center gap-2">
-              <span class="text-text-invert-strong">{ctx().total.toLocaleString(language.intl())}</span>
+              <span class="text-text-invert-strong">
+                {ctx().kind === "estimated" ? "~" : ""}
+                {ctx().total.toLocaleString(language.intl())}
+              </span>
               <span class="text-text-invert-base">{language.t("context.usage.tokens")}</span>
             </div>
             <div class="flex items-center gap-2">
-              <span class="text-text-invert-strong">{ctx().usage ?? 0}%</span>
+              <span class="text-text-invert-strong">
+                {ctx().kind === "estimated" ? "~" : ""}
+                {ctx().usage ?? 0}%
+              </span>
               <span class="text-text-invert-base">{language.t("context.usage.usage")}</span>
             </div>
           </>
