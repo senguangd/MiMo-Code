@@ -4,7 +4,7 @@ import { recallHintLines } from "../../src/session/prompt"
 describe("recallHintLines", () => {
   test("json mode (no tool config): task and actor use JSON form", () => {
     const lines = recallHintLines(undefined)
-    expect(lines).toContain(`- task({ operation: "list" })`)
+    expect(lines).toContain(`- task({ operation: { action: "list" } })`)
     expect(lines).toContain(`- actor({ operation: "status", actor_id: "<id>" })`)
     expect(lines.some((l) => l.includes(`memory({ operation: "search"`))).toBe(true)
   })

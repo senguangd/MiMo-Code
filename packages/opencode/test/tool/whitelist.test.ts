@@ -4,6 +4,7 @@ import { FetchHttpClient } from "effect/unstable/http"
 import { afterEach, describe, expect, test } from "bun:test"
 import { Effect, Layer } from "effect"
 import { Agent as AgentSvc } from "../../src/agent/agent"
+import { CHECKPOINT_WRITER_TOOL_ALLOWLIST } from "../../src/agent/config"
 import { Bus } from "../../src/bus"
 import { Command } from "../../src/command"
 import { Config } from "../../src/config"
@@ -255,7 +256,7 @@ function providerCfg(url: string) {
 }
 
 describe("Tool whitelist (Task 14)", () => {
-  it.live("rejects bash when actor.tools = ['read'] and tool is not in whitelist", () =>
+  it.live("converts bash to tool_unavailable when actor.tools = ['read']", () =>
     provideTmpdirServer(
       Effect.fnUntraced(function* ({ llm }) {
         const prompt = yield* SessionPrompt.Service
@@ -268,8 +269,8 @@ describe("Tool whitelist (Task 14)", () => {
         })
 
         // Register a subagent actor on this session with a tools whitelist
-        // that excludes "bash". The runtime guard should reject the bash
-        // call below and the model should still finish via the second turn.
+        // that excludes "bash". The request-scoped tool contract omits bash,
+        // so the SDK repair path should persist an internal invalid-tool result.
         const actorID = "build-1"
         yield* reg.register({
           sessionID: session.id,
@@ -295,7 +296,6 @@ describe("Tool whitelist (Task 14)", () => {
           parts: [{ type: "text", text: "please run echo" }],
         })
 
-        // Locate the bash tool part in the persisted message stream.
         // Use agentID="*" to include the subagent slice (actorID="build-1"),
         // since filterCompactedEffect defaults to the "main" slice only.
         const msgs = yield* MessageV2.filterCompactedEffect(session.id, { agentID: "*" })
@@ -303,17 +303,18 @@ describe("Tool whitelist (Task 14)", () => {
           .flatMap((msg) => msg.parts)
           .find(
             (part): part is MessageV2.ToolPart & { state: MessageV2.ToolStateCompleted } =>
-              part.type === "tool" && part.tool === "bash" && part.state.status === "completed",
+              part.type === "tool" && part.tool === "invalid" && part.state.status === "completed",
           )
 
         expect(tool).toBeDefined()
         if (!tool) return
-        // The rejection branch routes through completeToolCall with our
-        // rejection metadata. The body must mention the tool is not permitted.
-        expect(tool.state.metadata?.rejected).toBe(true)
-        expect(tool.state.metadata?.reason).toBe("tool-whitelist")
-        expect(tool.state.output).toContain("not in this actor's whitelist")
-        expect(tool.state.output.toLowerCase()).toContain("bash")
+        expect(tool.state.input).toEqual({
+          kind: "tool_unavailable",
+          tool: "bash",
+          error: "No tool with that ID is runtime-usable in the current request.",
+        })
+        expect(tool.state.metadata?.reason).toBe("tool_unavailable")
+        expect(tool.state.output).toContain("Tool unavailable: bash")
       }),
       { git: true, config: providerCfg },
     ),
@@ -368,14 +369,18 @@ describe("Tool whitelist (Task 14)", () => {
     ),
   )
 
-  test("checkpoint-writer config has toolAllowlist [read, write, edit, glob, grep] (F3a)", async () => {
+  test("checkpoint-writer config uses the shared runtime allowlist", async () => {
+    expect(CHECKPOINT_WRITER_TOOL_ALLOWLIST).toEqual([
+      "read",
+      "write",
+      "edit",
+      "apply_patch",
+      "glob",
+      "grep",
+      "task",
+    ])
+
     const src = await Bun.file(`${import.meta.dir}/../../src/agent/agent.ts`).text()
-    const checkpointWriterBlock = src.match(/"checkpoint-writer":\s*\{[\s\S]*?toolAllowlist:\s*\[[^\]]*\]/)
-    expect(checkpointWriterBlock).toBeTruthy()
-    expect(checkpointWriterBlock![0]).toContain('"read"')
-    expect(checkpointWriterBlock![0]).toContain('"write"')
-    expect(checkpointWriterBlock![0]).toContain('"edit"')
-    expect(checkpointWriterBlock![0]).toContain('"glob"')
-    expect(checkpointWriterBlock![0]).toContain('"grep"')
+    expect(src).toContain("toolAllowlist: [...CHECKPOINT_WRITER_TOOL_ALLOWLIST]")
   })
 })

@@ -47,6 +47,36 @@ function run<A, E>(fx: Effect.Effect<A, E, SessionPrompt.Service | Session.Servi
   )
 }
 
+const TOOL_CONTRACT_START = "<system-reminder>\n<tool-contract>"
+
+function stripRequestToolContract(messages: Array<{ role: string; content: unknown }>) {
+  const strip = (text: string) => {
+    const index = text.indexOf(TOOL_CONTRACT_START)
+    return index === -1 ? text : text.slice(0, index).trimEnd()
+  }
+
+  return messages.flatMap((message) => {
+    if (message.role !== "user") return [message]
+    if (typeof message.content === "string") {
+      const content = strip(message.content)
+      return content ? [{ ...message, content }] : []
+    }
+    if (!Array.isArray(message.content)) return [message]
+
+    const content = message.content.flatMap((part) => {
+      if (!part || typeof part !== "object") return [part]
+      const item = part as { type?: unknown; text?: unknown }
+      if (item.type !== "text" || typeof item.text !== "string") return [part]
+      const text = strip(item.text)
+      return text ? [{ ...item, text }] : []
+    })
+    if (!content.length) return []
+
+    const only = content.length === 1 ? (content[0] as { type?: unknown; text?: unknown }) : undefined
+    return [{ ...message, content: only?.type === "text" && typeof only.text === "string" ? only.text : content }]
+  })
+}
+
 describe("main runLoop history monotonic-growth invariant", () => {
   test("each step's /chat/completions request strictly contains previous step's messages", async () => {
     // Create the tmp dir first (without init) so we know the real path before
@@ -106,14 +136,17 @@ describe("main runLoop history monotonic-growth invariant", () => {
               // Verify the invariant: at least 2 LLM calls were made.
               expect(stub.captures.length).toBeGreaterThanOrEqual(2)
 
-              const cap0 = stub.captures[0].messages
-              const cap1 = stub.captures[1].messages
+              // The active-tool contract is intentionally attached to the latest
+              // user turn for each request, so remove that request-scoped decoration
+              // before checking the persisted-history prefix invariant.
+              const cap0 = stripRequestToolContract(stub.captures[0].messages)
+              const cap1 = stripRequestToolContract(stub.captures[1].messages)
 
               // Step 1's message list must be strictly longer (tool result was appended).
               expect(cap1.length).toBeGreaterThan(cap0.length)
 
-              // Every message from step 0 must appear at the same index in step 1
-              // (prefix is preserved, not rebuilt from scratch).
+              // Every persisted message from step 0 must appear at the same index in
+              // step 1 (the history prefix is preserved, not rebuilt from scratch).
               for (let i = 0; i < cap0.length; i++) {
                 expect(cap1[i]).toEqual(cap0[i])
               }

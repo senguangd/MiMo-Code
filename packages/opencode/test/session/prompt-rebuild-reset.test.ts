@@ -3,7 +3,7 @@ import { describe, expect, test } from "bun:test"
 describe("checkpoint reduction separation", () => {
   test("successful rebuild starts a new checkpoint epoch", async () => {
     const prompt = await Bun.file(`${import.meta.dir}/../../src/session/prompt.ts`).text()
-    expect(prompt).toMatch(/if\s*\(inserted\)\s+yield\*\s+prune\.markContextReduced\(input\.sessionID\)/)
+    expect(prompt).toMatch(/if\s*\(inserted\)\s*\{\s*yield\*\s+prune\.markContextReduced\(input\.sessionID\)/)
   })
 
   test("checkpoint thresholds never directly trigger context reduction", async () => {

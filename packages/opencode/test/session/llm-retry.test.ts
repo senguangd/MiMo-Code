@@ -6,11 +6,14 @@ describe("isTransientCapacityError", () => {
     expect(isTransientCapacityError(new Error("boom"))).toBe(false)
   })
 
-  test("returns false for non-Error inputs", () => {
+  test("returns false for primitive inputs", () => {
     expect(isTransientCapacityError(undefined)).toBe(false)
     expect(isTransientCapacityError(null)).toBe(false)
     expect(isTransientCapacityError("oops")).toBe(false)
-    expect(isTransientCapacityError({ status: 503 })).toBe(false)
+  })
+
+  test("returns true for raw SDK-shaped status objects", () => {
+    expect(isTransientCapacityError({ status: 503 })).toBe(true)
   })
 
   test("returns true for retryable HTTP statuses on a top-level Error", () => {
