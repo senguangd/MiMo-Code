@@ -90,6 +90,13 @@ describe("formatServerError", () => {
     expect(formatServerError("Failed to connect to server", language.t)).toBe("Failed to connect to server")
   })
 
+  test("returns structured server error messages", () => {
+    expect(formatServerError({ error: "Access denied" }, language.t)).toBe("Access denied")
+    expect(formatServerError({ message: "Directory unavailable" }, language.t)).toBe("Directory unavailable")
+    expect(formatServerError({ error: { message: "Nested failure" } }, language.t)).toBe("Nested failure")
+    expect(formatServerError({ data: { message: "Request rejected" } }, language.t)).toBe("Request rejected")
+  })
+
   test("uses translated unknown fallback", () => {
     expect(formatServerError(0, language.t)).toBe("Erro desconhecido")
   })

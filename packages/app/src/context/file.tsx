@@ -23,6 +23,7 @@ import {
 import { createFileViewCache } from "./file/view-cache"
 import { createFileTreeStore } from "./file/tree-store"
 import { invalidateFromWatcher } from "./file/watcher"
+import { formatServerError } from "@/utils/server-errors"
 import {
   selectionFromLines,
   type FileState,
@@ -41,12 +42,6 @@ export {
   resetFileContentLru,
   setFileContentBytes,
   touchFileContent,
-}
-
-function errorMessage(error: unknown, fallback: string) {
-  if (error instanceof Error && error.message) return error.message
-  if (typeof error === "string" && error) return error
-  return fallback
 }
 
 export const { use: useFile, provider: FileProvider } = createSimpleContext({
@@ -74,6 +69,7 @@ export const { use: useFile, provider: FileProvider } = createSimpleContext({
       scope,
       normalizeDir: path.normalizeDir,
       list: (dir) => sdk.client.file.list({ path: dir }).then((x) => x.data ?? []),
+      formatError: (error) => formatServerError(error, language.t),
       onError: (message) => {
         showToast({
           variant: "error",
@@ -184,7 +180,7 @@ export const { use: useFile, provider: FileProvider } = createSimpleContext({
         })
         .catch((e) => {
           if (scope() !== directory) return
-          setLoadError(file, errorMessage(e, language.t("error.chain.unknown")))
+          setLoadError(file, formatServerError(e, language.t))
         })
         .finally(() => {
           inflight.delete(key)

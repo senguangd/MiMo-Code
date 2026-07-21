@@ -12,10 +12,17 @@ import { Instance } from "../../project/instance"
 import { Installation } from "@/installation"
 import { InstallationVersion } from "@/installation/version"
 import { Log } from "../../util"
-import { lazy } from "../../util/lazy"
 import { Config } from "../../config"
 import { ExternalImport } from "../../session/external-import"
 import { errors } from "../error"
+import { readdir, stat } from "node:fs/promises"
+import path from "node:path"
+import {
+  DIRECTORY_ACCESS_DENIED,
+  isDirectoryAllowed,
+  resolveDirectory,
+  type DirectoryAccessPolicy,
+} from "../directory-access"
 
 const log = Log.create({ service: "server" })
 
@@ -81,8 +88,8 @@ async function streamEvents(c: Context, subscribe: (q: AsyncQueue<string | null>
   })
 }
 
-export const GlobalRoutes = lazy(() =>
-  new Hono()
+export function GlobalRoutes(directoryAccess?: DirectoryAccessPolicy) {
+  return new Hono()
     .get(
       "/health",
       describeRoute({
@@ -102,6 +109,89 @@ export const GlobalRoutes = lazy(() =>
       }),
       async (c) => {
         return c.json({ healthy: true, version: InstallationVersion })
+      },
+    )
+    .get(
+      "/directory",
+      describeRoute({
+        summary: "List directories",
+        description: "List immediate child directories available to the current server entry point.",
+        operationId: "global.directory.list",
+        responses: {
+          200: {
+            description: "Directory entries",
+            content: {
+              "application/json": {
+                schema: resolver(z.array(z.object({ name: z.string(), absolute: z.string() }))),
+              },
+            },
+          },
+          400: {
+            description: "Invalid directory",
+            content: { "application/json": { schema: resolver(z.object({ error: z.string() })) } },
+          },
+          403: {
+            description: "Directory access denied",
+            content: { "application/json": { schema: resolver(z.object({ error: z.string() })) } },
+          },
+          404: {
+            description: "Directory not found",
+            content: { "application/json": { schema: resolver(z.object({ error: z.string() })) } },
+          },
+          500: {
+            description: "Directory listing failed",
+            content: { "application/json": { schema: resolver(z.object({ error: z.string() })) } },
+          },
+        },
+      }),
+      validator("query", z.object({ path: z.string().min(1) })),
+      async (c) => {
+        const input = c.req.valid("query").path
+        let directory: string
+        try {
+          directory = resolveDirectory(input)
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error)
+          return c.json({ error: `Unable to resolve directory: ${message}` }, 400)
+        }
+
+        if (!isDirectoryAllowed(directory, directoryAccess)) {
+          return c.json({ error: DIRECTORY_ACCESS_DENIED }, 403)
+        }
+
+        try {
+          const entries = await Promise.all(
+            (await readdir(directory, { withFileTypes: true })).map(async (entry) => {
+              const absolute = path.resolve(directory, entry.name)
+              const directoryEntry =
+                entry.isDirectory() ||
+                (entry.isSymbolicLink() &&
+                  (await stat(absolute)
+                    .then((value) => value.isDirectory())
+                    .catch(() => false)))
+              if (!directoryEntry) return
+              if (!isDirectoryAllowed(absolute, directoryAccess)) return
+              return { name: entry.name, absolute }
+            }),
+          )
+          return c.json(
+            entries
+              .filter((entry): entry is { name: string; absolute: string } => !!entry)
+              .sort((a, b) => a.name.localeCompare(b.name)),
+          )
+        } catch (error) {
+          const code =
+            typeof error === "object" && error !== null && "code" in error
+              ? String((error as { code?: unknown }).code)
+              : ""
+          if (code === "ENOENT") return c.json({ error: `Directory not found: ${directory}` }, 404)
+          if (code === "ENOTDIR") return c.json({ error: `Path is not a directory: ${directory}` }, 400)
+          if (code === "EACCES" || code === "EPERM") {
+            return c.json({ error: `Access denied: unable to read directory ${directory}` }, 403)
+          }
+          const message = error instanceof Error ? error.message : String(error)
+          return c.json({ error: `Failed to list directory: ${message}` }, 500)
+        }
       },
     )
     .get(
@@ -363,5 +453,5 @@ export const GlobalRoutes = lazy(() =>
         const { sources, force } = c.req.valid("json")
         return c.json(await ExternalImport.runAll({ sources, force }))
       },
-    ),
-)
+    )
+}

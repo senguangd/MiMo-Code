@@ -3016,6 +3016,56 @@ export type GlobalHealthResponses = {
 
 export type GlobalHealthResponse = GlobalHealthResponses[keyof GlobalHealthResponses]
 
+export type GlobalDirectoryListData = {
+  body?: never
+  path?: never
+  query: {
+    path: string
+  }
+  url: "/global/directory"
+}
+
+export type GlobalDirectoryListErrors = {
+  /**
+   * Invalid directory
+   */
+  400: {
+    error: string
+  }
+  /**
+   * Directory access denied
+   */
+  403: {
+    error: string
+  }
+  /**
+   * Directory not found
+   */
+  404: {
+    error: string
+  }
+  /**
+   * Directory listing failed
+   */
+  500: {
+    error: string
+  }
+}
+
+export type GlobalDirectoryListError = GlobalDirectoryListErrors[keyof GlobalDirectoryListErrors]
+
+export type GlobalDirectoryListResponses = {
+  /**
+   * Directory entries
+   */
+  200: Array<{
+    name: string
+    absolute: string
+  }>
+}
+
+export type GlobalDirectoryListResponse = GlobalDirectoryListResponses[keyof GlobalDirectoryListResponses]
+
 export type GlobalEventData = {
   body?: never
   path?: never

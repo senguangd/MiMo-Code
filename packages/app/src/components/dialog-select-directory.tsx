@@ -2,14 +2,16 @@ import { useDialog } from "@mimo-ai/ui/context/dialog"
 import { Dialog } from "@mimo-ai/ui/dialog"
 import { FileIcon } from "@mimo-ai/ui/file-icon"
 import { List } from "@mimo-ai/ui/list"
+import { showToast } from "@mimo-ai/ui/toast"
 import type { ListRef } from "@mimo-ai/ui/list"
 import { getDirectory, getFilename } from "@mimo-ai/shared/util/path"
 import fuzzysort from "fuzzysort"
-import { createMemo, createResource, createSignal } from "solid-js"
+import { createMemo, createResource, createSignal, onCleanup } from "solid-js"
 import { useGlobalSDK } from "@/context/global-sdk"
 import { useGlobalSync } from "@/context/global-sync"
 import { useLayout } from "@/context/layout"
 import { useLanguage } from "@/context/language"
+import { formatServerError } from "@/utils/server-errors"
 
 interface DialogSelectDirectoryProps {
   title?: string
@@ -112,8 +114,27 @@ function toRow(absolute: string, home: string, group: Row["group"]): Row {
     return value + "/"
   }
 
+  const windows = full.replaceAll("/", "\\")
+  const tildeWindows = tilde.replaceAll("/", "\\")
+  const withBackslash = (value: string) => {
+    if (!value) return ""
+    if (value.endsWith("\\")) return value
+    return value + "\\"
+  }
   const search = Array.from(
-    new Set([full, withSlash(full), tilde, withSlash(tilde), getFilename(full)].filter(Boolean)),
+    new Set(
+      [
+        full,
+        withSlash(full),
+        windows,
+        withBackslash(windows),
+        tilde,
+        withSlash(tilde),
+        tildeWindows,
+        withBackslash(tildeWindows),
+        getFilename(full),
+      ].filter(Boolean),
+    ),
   ).join("\n")
   return { absolute: full, search, group }
 }
@@ -131,6 +152,7 @@ function useDirectorySearch(args: {
   sdk: ReturnType<typeof useGlobalSDK>
   start: () => string | undefined
   home: () => string
+  onError: (error: unknown) => void
 }) {
   const cache = new Map<string, Promise<Array<{ name: string; absolute: string }>>>()
   let current = 0
@@ -156,18 +178,36 @@ function useDirectorySearch(args: {
     const existing = cache.get(key)
     if (existing) return existing
 
-    const request = args.sdk.client.file
-      .list({ directory: key, path: "" })
-      .then((x) => x.data ?? [])
-      .catch(() => [])
-      .then((nodes) =>
-        nodes
-          .filter((n) => n.type === "directory")
-          .map((n) => ({
-            name: n.name,
-            absolute: trimTrailing(normalizeDriveRoot(n.absolute)),
-          })),
+    const legacy = () =>
+      args.sdk.client.file
+        .list({ directory: key, path: "" })
+        .then((x) => x.data ?? [])
+        .then((nodes) =>
+          nodes
+            .filter((node) => node.type === "directory")
+            .map((node) => ({
+              name: node.name,
+              absolute: trimTrailing(normalizeDriveRoot(node.absolute)),
+            })),
+        )
+
+    const request = args.sdk.client.global.directory
+      .list({ path: key })
+      .then((x) =>
+        (x.data ?? []).map((item) => ({
+          name: item.name,
+          absolute: trimTrailing(normalizeDriveRoot(item.absolute)),
+        })),
       )
+      .catch((error) => {
+        if (error instanceof Error && error.message.includes("not supported by this version")) return legacy()
+        throw error
+      })
+      .catch((error) => {
+        cache.delete(key)
+        args.onError(error)
+        return []
+      })
 
     cache.set(key, request)
     return request
@@ -195,7 +235,10 @@ function useDirectorySearch(args: {
       args.sdk.client.find
         .files({ directory: scopedInput.directory, query, type: "directory", limit: 50 })
         .then((x) => x.data ?? [])
-        .catch(() => [])
+        .catch((error) => {
+          args.onError(error)
+          return []
+        })
 
     if (!isPath) {
       const results = await find()
@@ -272,10 +315,30 @@ export function DialogSelectDirectory(props: DialogSelectDirectoryProps) {
     () => sync.data.path.home || sync.data.path.directory || fallbackPath()?.home || fallbackPath()?.directory,
   )
 
+  let lastError = ""
+  let errorTimer: number | undefined
+  onCleanup(() => {
+    if (errorTimer !== undefined) clearTimeout(errorTimer)
+  })
   const directories = useDirectorySearch({
     sdk,
     home,
     start,
+    onError(error) {
+      const message = formatServerError(error, language.t)
+      if (message === lastError) return
+      lastError = message
+      showToast({
+        variant: "error",
+        title: language.t("toast.file.listFailed.title"),
+        description: message,
+      })
+      if (errorTimer !== undefined) clearTimeout(errorTimer)
+      errorTimer = window.setTimeout(() => {
+        if (lastError === message) lastError = ""
+        errorTimer = undefined
+      }, 2_000)
+    },
   })
 
   const recentProjects = createMemo(() => {

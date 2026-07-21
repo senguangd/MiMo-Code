@@ -41,9 +41,7 @@ export const WebCommand = cmd({
         UI.Style.TEXT_DANGER_BOLD +
           "ERROR: Binding to non-loopback address without MIMOCODE_SERVER_PASSWORD is not allowed.",
       )
-      UI.println(
-        UI.Style.TEXT_DANGER_BOLD + "Set MIMOCODE_SERVER_PASSWORD or pass --no-auth to override (DANGEROUS).",
-      )
+      UI.println(UI.Style.TEXT_DANGER_BOLD + "Set MIMOCODE_SERVER_PASSWORD or pass --no-auth to override (DANGEROUS).")
       process.exit(1)
     }
 
@@ -51,7 +49,7 @@ export const WebCommand = cmd({
       UI.println(UI.Style.TEXT_WARNING_BOLD + "!  MIMOCODE_SERVER_PASSWORD is not set; server is unsecured.")
     }
 
-    const server = await Server.listen(opts)
+    const server = await Server.listen({ ...opts, directoryAccess: "host" })
     UI.empty()
     UI.println(UI.logo("  "))
     UI.empty()

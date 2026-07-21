@@ -30,12 +30,13 @@ import { EventRoutes } from "./event"
 import { SyncRoutes } from "./sync"
 import { InstanceMiddleware } from "./middleware"
 import { jsonRequest } from "./trace"
+import type { DirectoryAccessPolicy } from "@/server/directory-access"
 
-export const InstanceRoutes = (upgrade: UpgradeWebSocket): Hono => {
+export const InstanceRoutes = (upgrade: UpgradeWebSocket, directoryAccess?: DirectoryAccessPolicy): Hono => {
   const app = new Hono()
 
   if (Flag.MIMOCODE_EXPERIMENTAL_HTTPAPI) {
-    const handler = ExperimentalHttpApiServer.webHandler().handler
+    const handler = ExperimentalHttpApiServer.webHandler(directoryAccess).handler
     const context = Context.empty() as Context.Context<unknown>
     app.get("/question", (c) => handler(c.req.raw, context))
     app.post("/question/:requestID/reply", (c) => handler(c.req.raw, context))

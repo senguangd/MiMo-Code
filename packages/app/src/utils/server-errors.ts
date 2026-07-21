@@ -25,11 +25,28 @@ function tr(translator: Translator | undefined, key: string, text: string, vars?
   return out
 }
 
+function genericMessage(error: unknown) {
+  if (error instanceof Error && error.message) return error.message
+  if (typeof error === "string" && error) return error
+  if (typeof error !== "object" || error === null) return
+
+  const value = error as Record<string, unknown>
+  if (typeof value.message === "string" && value.message) return value.message
+  if (typeof value.error === "string" && value.error) return value.error
+
+  for (const nested of [value.error, value.data]) {
+    if (typeof nested !== "object" || nested === null) continue
+    const item = nested as Record<string, unknown>
+    if (typeof item.message === "string" && item.message) return item.message
+    if (typeof item.error === "string" && item.error) return item.error
+  }
+}
+
 export function formatServerError(error: unknown, translate?: Translator, fallback?: string) {
   if (isConfigInvalidErrorLike(error)) return parseReadableConfigInvalidError(error, translate)
   if (isProviderModelNotFoundErrorLike(error)) return parseReadableProviderModelNotFoundError(error, translate)
-  if (error instanceof Error && error.message) return error.message
-  if (typeof error === "string" && error) return error
+  const message = genericMessage(error)
+  if (message) return message
   if (fallback) return fallback
   return tr(translate, "error.chain.unknown", "Unknown error")
 }

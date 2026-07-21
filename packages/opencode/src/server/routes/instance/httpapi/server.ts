@@ -8,13 +8,18 @@ import { Flag } from "@/flag/flag"
 import { InstanceBootstrap } from "@/project/bootstrap"
 import { Instance } from "@/project/instance"
 import { lazy } from "@/util/lazy"
-import { Filesystem } from "@/util"
 import { ConfigApi, configHandlers } from "./config"
 import { PermissionApi, permissionHandlers } from "./permission"
 import { ProjectApi, projectHandlers } from "./project"
 import { ProviderApi, providerHandlers } from "./provider"
 import { QuestionApi, questionHandlers } from "./question"
 import { memoMap } from "@/effect/memo-map"
+import {
+  DIRECTORY_ACCESS_DENIED,
+  isDirectoryAllowed,
+  resolveDirectory,
+  type DirectoryAccessPolicy,
+} from "@/server/directory-access"
 
 const Query = Schema.Struct({
   directory: Schema.optional(Schema.String),
@@ -26,14 +31,6 @@ const Headers = Schema.Struct({
   authorization: Schema.optional(Schema.String),
   "x-mimocode-directory": Schema.optional(Schema.String),
 })
-
-function decode(input: string) {
-  try {
-    return decodeURIComponent(input)
-  } catch {
-    return input
-  }
-}
 
 class Unauthorized extends Schema.TaggedErrorClass<Unauthorized>()(
   "Unauthorized",
@@ -91,38 +88,34 @@ class DirectoryAccessDenied extends Schema.TaggedErrorClass<DirectoryAccessDenie
   { httpApiStatus: 403 },
 ) {}
 
-const instance = HttpRouter.middleware()(
-  Effect.gen(function* () {
-    return (effect) =>
-      Effect.gen(function* () {
-        const query = yield* HttpServerRequest.schemaSearchParams(Query)
-        const headers = yield* HttpServerRequest.schemaHeaders(Headers)
-        const raw = query.directory || headers["x-mimocode-directory"] || process.cwd()
-        const workspace = query.workspace || undefined
-        const directory = Filesystem.resolve(decode(raw))
+const instance = (directoryAccess?: DirectoryAccessPolicy) =>
+  HttpRouter.middleware()(
+    Effect.gen(function* () {
+      return (effect) =>
+        Effect.gen(function* () {
+          const query = yield* HttpServerRequest.schemaSearchParams(Query)
+          const headers = yield* HttpServerRequest.schemaHeaders(Headers)
+          const raw = query.directory || headers["x-mimocode-directory"] || process.cwd()
+          const workspace = query.workspace || undefined
+          const directory = resolveDirectory(raw)
 
-        if (!Flag.MIMOCODE_SERVER_PASSWORD) {
-          const cwd = Filesystem.resolve(process.cwd())
-          if (!Filesystem.contains(cwd, directory)) {
-            return yield* new DirectoryAccessDenied({
-              message: "Access denied: directory must be within the server's working directory",
-            })
+          if (!isDirectoryAllowed(directory, directoryAccess)) {
+            return yield* new DirectoryAccessDenied({ message: DIRECTORY_ACCESS_DENIED })
           }
-        }
 
-        const ctx = yield* Effect.promise(() =>
-          Instance.provide({
-            directory,
-            init: () => AppRuntime.runPromise(InstanceBootstrap),
-            fn: () => Instance.current,
-          }),
-        )
+          const ctx = yield* Effect.promise(() =>
+            Instance.provide({
+              directory,
+              init: () => AppRuntime.runPromise(InstanceBootstrap),
+              fn: () => Instance.current,
+            }),
+          )
 
-        const next = workspace ? effect.pipe(Effect.provideService(WorkspaceRef, workspace)) : effect
-        return yield* next.pipe(Effect.provideService(InstanceRef, ctx))
-      })
-  }),
-).layer
+          const next = workspace ? effect.pipe(Effect.provideService(WorkspaceRef, workspace)) : effect
+          return yield* next.pipe(Effect.provideService(InstanceRef, ctx))
+        })
+    }),
+  ).layer
 
 const QuestionSecured = QuestionApi.middleware(Authorization)
 const PermissionSecured = PermissionApi.middleware(Authorization)
@@ -130,24 +123,30 @@ const ProjectSecured = ProjectApi.middleware(Authorization)
 const ProviderSecured = ProviderApi.middleware(Authorization)
 const ConfigSecured = ConfigApi.middleware(Authorization)
 
-export const routes = Layer.mergeAll(
-  HttpApiBuilder.layer(ConfigSecured).pipe(Layer.provide(configHandlers)),
-  HttpApiBuilder.layer(ProjectSecured).pipe(Layer.provide(projectHandlers)),
-  HttpApiBuilder.layer(QuestionSecured).pipe(Layer.provide(questionHandlers)),
-  HttpApiBuilder.layer(PermissionSecured).pipe(Layer.provide(permissionHandlers)),
-  HttpApiBuilder.layer(ProviderSecured).pipe(Layer.provide(providerHandlers)),
-).pipe(
-  Layer.provide(auth),
-  Layer.provide(normalize),
-  Layer.provide(instance),
-  Layer.provide(HttpServer.layerServices),
-  Layer.provideMerge(Observability.layer),
-)
+export const routes = (directoryAccess?: DirectoryAccessPolicy) =>
+  Layer.mergeAll(
+    HttpApiBuilder.layer(ConfigSecured).pipe(Layer.provide(configHandlers)),
+    HttpApiBuilder.layer(ProjectSecured).pipe(Layer.provide(projectHandlers)),
+    HttpApiBuilder.layer(QuestionSecured).pipe(Layer.provide(questionHandlers)),
+    HttpApiBuilder.layer(PermissionSecured).pipe(Layer.provide(permissionHandlers)),
+    HttpApiBuilder.layer(ProviderSecured).pipe(Layer.provide(providerHandlers)),
+  ).pipe(
+    Layer.provide(auth),
+    Layer.provide(normalize),
+    Layer.provide(instance(directoryAccess)),
+    Layer.provide(HttpServer.layerServices),
+    Layer.provideMerge(Observability.layer),
+  )
 
-export const webHandler = lazy(() =>
-  HttpRouter.toWebHandler(routes, {
-    memoMap,
-  }),
-)
+const handlers = {
+  default: lazy(() => HttpRouter.toWebHandler(routes(), { memoMap })),
+  cwd: lazy(() => HttpRouter.toWebHandler(routes("cwd"), { memoMap })),
+  host: lazy(() => HttpRouter.toWebHandler(routes("host"), { memoMap })),
+}
+
+export function webHandler(directoryAccess?: DirectoryAccessPolicy) {
+  if (!directoryAccess) return handlers.default()
+  return handlers[directoryAccess]()
+}
 
 export * as ExperimentalHttpApiServer from "./server"

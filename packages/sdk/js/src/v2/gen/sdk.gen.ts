@@ -54,6 +54,8 @@ import type {
   GlobalConfigGetResponses,
   GlobalConfigUpdateErrors,
   GlobalConfigUpdateResponses,
+  GlobalDirectoryListErrors,
+  GlobalDirectoryListResponses,
   GlobalDisposeResponses,
   GlobalEventResponses,
   GlobalHealthResponses,
@@ -271,6 +273,27 @@ class HeyApiRegistry<T> {
   }
 }
 
+export class Directory extends HeyApiClient {
+  /**
+   * List directories
+   *
+   * List immediate child directories available to the current server entry point.
+   */
+  public list<ThrowOnError extends boolean = false>(
+    parameters: {
+      path: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams([parameters], [{ args: [{ in: "query", key: "path" }] }])
+    return (options?.client ?? this.client).get<GlobalDirectoryListResponses, GlobalDirectoryListErrors, ThrowOnError>({
+      url: "/global/directory",
+      ...options,
+      ...params,
+    })
+  }
+}
+
 export class Config extends HeyApiClient {
   /**
    * Get global configuration
@@ -417,6 +440,11 @@ export class Global extends HeyApiClient {
         ...params.headers,
       },
     })
+  }
+
+  private _directory?: Directory
+  get directory(): Directory {
+    return (this._directory ??= new Directory({ client: this.client }))
   }
 
   private _config?: Config
