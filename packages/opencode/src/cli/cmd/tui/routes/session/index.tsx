@@ -96,6 +96,12 @@ import { DialogGoUpsell } from "../../component/dialog-go-upsell"
 import { DialogTokenPlan } from "../../component/dialog-token-plan"
 import { SessionRetry } from "@/session/retry"
 import { getRevertDiffFiles } from "../../util/revert-diff"
+import {
+  AssistantFooterMetadata,
+  DEFAULT_TIMESTAMP_VISIBILITY,
+  UserMessageMetadata,
+  formatSessionTimestamp,
+} from "./timestamp"
 
 addDefaultParsers(parsers.parsers)
 
@@ -193,7 +199,7 @@ export function Session() {
   const thinking = useThinkingMode()
   const thinkingMode = thinking.mode
   const showThinking = createMemo(() => true)
-  const [timestamps, setTimestamps] = kv.signal<"hide" | "show">("timestamps", "hide")
+  const [timestamps, setTimestamps] = kv.signal<"hide" | "show">("timestamps", DEFAULT_TIMESTAMP_VISIBILITY)
   const [showDetails, setShowDetails] = kv.signal("tool_details_visibility", true)
   const [showAssistantMetadata, _setShowAssistantMetadata] = kv.signal("assistant_metadata_visibility", true)
   const [showScrollbar, setShowScrollbar] = kv.signal("scrollbar_visible", false)
@@ -1503,7 +1509,7 @@ function UserMessage(props: {
             // ISO ends with `Z` (UTC). Show local HH:MM:SS for TUI readability,
             // matching how `ctx.showTimestamps()` renders user-message times.
             const date = new Date(iso)
-            return Number.isNaN(date.getTime()) ? iso : Locale.todayTimeOrDateTime(date.getTime())
+            return Number.isNaN(date.getTime()) ? iso : formatSessionTimestamp(date.getTime())
           })
           return (
             <box id={props.message.id} marginTop={props.index === 0 ? 0 : 1} paddingLeft={2} flexDirection="row" gap={1}>
@@ -1539,6 +1545,9 @@ function UserMessage(props: {
                 <span style={{ fg: theme.text }}> {note().description}</span>
                 <Show when={note().summary}>
                   <span style={{ fg: theme.textMuted }}> — {note().summary}</span>
+                </Show>
+                <Show when={ctx.showTimestamps()}>
+                  <span style={{ fg: theme.textMuted }}> · {formatSessionTimestamp(props.message.time.created)}</span>
                 </Show>
               </text>
             </box>
@@ -1587,22 +1596,14 @@ function UserMessage(props: {
                 </For>
               </box>
             </Show>
-            <Show
-              when={queued()}
-              fallback={
-                <Show when={ctx.showTimestamps()}>
-                  <text fg={theme.textMuted}>
-                    <span style={{ fg: theme.textMuted }}>
-                      {Locale.todayTimeOrDateTime(props.message.time.created)}
-                    </span>
-                  </text>
-                </Show>
-              }
-            >
-              <text fg={theme.textMuted}>
-                <span style={{ bg: color(), fg: queuedFg(), bold: true }}> QUEUED </span>
-              </text>
-            </Show>
+            <UserMessageMetadata
+              queued={!!queued()}
+              showTimestamp={ctx.showTimestamps()}
+              timestamp={props.message.time.created}
+              queuedBackground={color()}
+              queuedForeground={queuedFg()}
+              muted={theme.textMuted}
+            />
           </box>
         </box>
       </Show>
@@ -1749,15 +1750,15 @@ function AssistantMessage(props: { message: AssistantMessage; parts: Part[]; las
                 <span style={{ fg: theme.textMuted }}> · interrupted</span>
               </Show>
             </text>
-            <Show when={props.message.time.completed}>
-              <box
-                onMouseOver={() => setCopyHover(true)}
-                onMouseOut={() => setCopyHover(false)}
-                onMouseUp={handleCopy}
-              >
-                <text fg={copyHover() ? theme.text : theme.textMuted}>⎘ copy</text>
-              </box>
-            </Show>
+            <AssistantFooterMetadata
+              showTimestamp={ctx.showTimestamps()}
+              completedAt={props.message.time.completed}
+              copyHover={copyHover()}
+              muted={theme.textMuted}
+              text={theme.text}
+              onCopy={handleCopy}
+              onHoverChange={(hover) => setCopyHover(hover)}
+            />
           </box>
         </Match>
       </Switch>

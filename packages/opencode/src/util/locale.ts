@@ -2,29 +2,35 @@ export function titlecase(str: string) {
   return str.replace(/\b\w/g, (c) => c.toUpperCase())
 }
 
-export function time(input: number): string {
+type TimePrecision = "minute" | "second"
+
+export function time(input: number, precision: TimePrecision = "minute"): string {
   const date = new Date(input)
+  if (precision === "second") {
+    return date.toLocaleTimeString(undefined, {
+      hour: "numeric",
+      minute: "2-digit",
+      second: "2-digit",
+    })
+  }
   return date.toLocaleTimeString(undefined, { timeStyle: "short" })
 }
 
-export function datetime(input: number): string {
+export function datetime(input: number, precision: TimePrecision = "minute"): string {
   const date = new Date(input)
-  const localTime = time(input)
+  const localTime = time(input, precision)
   const localDate = date.toLocaleDateString()
   return `${localTime} · ${localDate}`
 }
 
-export function todayTimeOrDateTime(input: number): string {
+export function todayTimeOrDateTime(input: number, precision: TimePrecision = "minute"): string {
   const date = new Date(input)
   const now = new Date()
   const isToday =
     date.getFullYear() === now.getFullYear() && date.getMonth() === now.getMonth() && date.getDate() === now.getDate()
 
-  if (isToday) {
-    return time(input)
-  } else {
-    return datetime(input)
-  }
+  if (isToday) return time(input, precision)
+  return datetime(input, precision)
 }
 
 export function number(num: number): string {
