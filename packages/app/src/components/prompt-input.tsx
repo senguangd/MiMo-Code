@@ -1073,6 +1073,11 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
   })
 
   const variants = createMemo(() => ["default", ...local.model.variant.list()])
+  const variantTooltip = createMemo(() =>
+    language.t("prompt.model.variant.tooltip", {
+      effort: local.model.variant.current() ?? language.t("common.default"),
+    }),
+  )
   const accepting = createMemo(() => {
     const id = params.id
     if (!id) return permission.isAutoAcceptingDirectory(sdk.directory)
@@ -1584,7 +1589,7 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
                       <TooltipKeybind
                         placement="top"
                         gutter={4}
-                        title={language.t("command.model.variant.cycle")}
+                        title={variantTooltip()}
                         keybind={command.keybind("model.variant.cycle")}
                       >
                         <Select

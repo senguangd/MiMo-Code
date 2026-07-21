@@ -70,6 +70,31 @@
     font-weight: var(--font-weight-regular);
   }
 
+  [data-slot="session-turn-reasoning-status"] {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-top: 8px;
+    color: var(--text-weaker);
+    font-family: var(--font-family-sans);
+    font-size: var(--font-size-small);
+    line-height: var(--line-height-large);
+
+    button {
+      appearance: none;
+      border: 0;
+      padding: 0;
+      background: transparent;
+      color: var(--text-interactive-base);
+      font: inherit;
+      cursor: pointer;
+
+      &:hover {
+        text-decoration: underline;
+      }
+    }
+  }
+
   .error-card {
     color: var(--text-on-critical-base);
     max-height: 240px;

@@ -73,6 +73,8 @@ export const dict = {
   "command.agent.cycle.reverse.description": "切換到上一個代理程式",
   "command.model.variant.cycle": "循環思考強度",
   "command.model.variant.cycle.description": "切換到下一個強度等級",
+  "prompt.model.variant.tooltip":
+    "推理強度：{{effort}}。它控制模型的推理預算；推理摘要是否顯示由設定中的獨立開關控制。",
   "command.prompt.mode.shell": "Shell",
   "command.prompt.mode.normal": "Prompt",
   "command.permissions.autoaccept.enable": "自動接受權限",

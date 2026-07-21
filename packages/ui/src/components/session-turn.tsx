@@ -25,6 +25,7 @@ import { TextReveal } from "./text-reveal"
 import { createAutoScroll } from "../hooks"
 import { useI18n } from "../context/i18n"
 import { normalize } from "./session-diff"
+import { reasoningDisplayState } from "./reasoning-status"
 
 function record(value: unknown): value is Record<string, unknown> {
   return !!value && typeof value === "object" && !Array.isArray(value)
@@ -150,6 +151,7 @@ export function SessionTurn(
     messages?: MessageType[]
     actions?: UserActions
     showReasoningSummaries?: boolean
+    onShowReasoningSummaries?: () => void
     shellToolDefaultOpen?: boolean
     editToolDefaultOpen?: boolean
     active?: boolean
@@ -345,22 +347,33 @@ export function SessionTurn(
   const assistantDerived = createMemo(() => {
     let visible = 0
     let reason: string | undefined
+    let hasReasoningSummary = false
+    let reasoningTokens = 0
     const show = showReasoningSummaries()
     for (const message of assistantMessages()) {
+      reasoningTokens += message.tokens.reasoning
       for (const part of list(data.store.part?.[message.id], emptyParts)) {
         if (partState(part, show) === "visible") {
           visible++
         }
         if (part.type === "reasoning" && part.text) {
+          if (part.text.trim()) hasReasoningSummary = true
           const h = heading(part.text)
           if (h) reason = h
         }
       }
     }
-    return { visible, reason }
+    return { visible, reason, hasReasoningSummary, reasoningTokens }
   })
   const assistantVisible = createMemo(() => assistantDerived().visible)
   const reasoningHeading = createMemo(() => assistantDerived().reason)
+  const reasoningState = createMemo(() =>
+    reasoningDisplayState({
+      showSummaries: showReasoningSummaries(),
+      hasSummary: assistantDerived().hasReasoningSummary,
+      reasoningTokens: assistantDerived().reasoningTokens,
+    }),
+  )
   const showThinking = createMemo(() => {
     if (!working() || !!error()) return false
     if (status().type === "retry") return false
@@ -409,6 +422,25 @@ export function SessionTurn(
                     shellToolDefaultOpen={props.shellToolDefaultOpen}
                     editToolDefaultOpen={props.editToolDefaultOpen}
                   />
+                </div>
+              </Show>
+              <Show when={reasoningState() === "hidden"}>
+                <div data-slot="session-turn-reasoning-status">
+                  <span>{i18n.t("ui.sessionTurn.reasoning.summaryHidden")}</span>
+                  <Show when={props.onShowReasoningSummaries}>
+                    <button
+                      type="button"
+                      data-action="show-reasoning-summaries"
+                      onClick={() => props.onShowReasoningSummaries?.()}
+                    >
+                      {i18n.t("ui.sessionTurn.reasoning.showSummary")}
+                    </button>
+                  </Show>
+                </div>
+              </Show>
+              <Show when={!working() && reasoningState() === "unavailable"}>
+                <div data-slot="session-turn-reasoning-status">
+                  {i18n.t("ui.sessionTurn.reasoning.summaryUnavailable")}
                 </div>
               </Show>
               <Show when={showThinking()}>

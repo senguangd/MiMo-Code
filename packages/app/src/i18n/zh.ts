@@ -92,6 +92,8 @@ export const dict = {
 
   "command.model.variant.cycle": "切换思考强度",
   "command.model.variant.cycle.description": "切换到下一个强度等级",
+  "prompt.model.variant.tooltip":
+    "推理强度：{{effort}}。它控制模型的推理预算；推理摘要是否显示由设置中的独立开关控制。",
 
   "command.prompt.mode.shell": "Shell",
   "command.prompt.mode.normal": "Prompt",
