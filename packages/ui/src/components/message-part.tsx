@@ -55,6 +55,7 @@ import { ToolStatusTitle } from "./tool-status-title"
 import { patchFiles } from "./apply-patch-file"
 import { animate } from "motion"
 import { attached, inline, kind } from "./message-file"
+import { editNewString, editOldString, toolFileLabel, toolFilePath } from "./tool-input"
 
 function ShellSubmessage(props: { text: string; animate?: boolean }) {
   let widthRef: HTMLSpanElement | undefined
@@ -297,12 +298,13 @@ function tone(name: string) {
 
 export function getToolInfo(tool: string, input: any = {}): ToolInfo {
   const i18n = useI18n()
+  const filePath = toolFilePath(input)
   switch (tool) {
     case "read":
       return {
         icon: "glasses",
         title: i18n.t("ui.tool.read"),
-        subtitle: input.filePath ? getFilename(input.filePath) : undefined,
+        subtitle: filePath ? getFilename(filePath) : undefined,
       }
     case "list":
       return {
@@ -362,13 +364,13 @@ export function getToolInfo(tool: string, input: any = {}): ToolInfo {
       return {
         icon: "code-lines",
         title: i18n.t("ui.messagePart.title.edit"),
-        subtitle: input.filePath ? getFilename(input.filePath) : undefined,
+        subtitle: filePath ? getFilename(filePath) : undefined,
       }
     case "write":
       return {
         icon: "code-lines",
         title: i18n.t("ui.messagePart.title.write"),
-        subtitle: input.filePath ? getFilename(input.filePath) : undefined,
+        subtitle: filePath ? getFilename(filePath) : undefined,
       }
     case "apply_patch":
       return {
@@ -655,10 +657,9 @@ function contextToolDetail(part: ToolPart): string | undefined {
   return undefined
 }
 
-function contextToolTrigger(part: ToolPart, i18n: ReturnType<typeof useI18n>) {
+function contextToolTrigger(part: ToolPart, i18n: ReturnType<typeof useI18n>, directory?: string) {
   const input = (part.state.input ?? {}) as Record<string, unknown>
   const path = typeof input.path === "string" ? input.path : "/"
-  const filePath = typeof input.filePath === "string" ? input.filePath : undefined
   const pattern = typeof input.pattern === "string" ? input.pattern : undefined
   const include = typeof input.include === "string" ? input.include : undefined
   const offset = typeof input.offset === "number" ? input.offset : undefined
@@ -671,7 +672,7 @@ function contextToolTrigger(part: ToolPart, i18n: ReturnType<typeof useI18n>) {
       if (limit !== undefined) args.push("limit=" + limit)
       return {
         title: i18n.t("ui.tool.read"),
-        subtitle: filePath ? getFilename(filePath) : "",
+        subtitle: toolFileLabel(input, directory),
         args,
       }
     }
@@ -843,6 +844,7 @@ export function AssistantMessageDisplay(props: {
 }
 
 function ContextToolGroup(props: { parts: ToolPart[]; busy?: boolean }) {
+  const data = useData()
   const i18n = useI18n()
   const [open, setOpen] = createSignal(false)
   const pending = createMemo(
@@ -903,7 +905,7 @@ function ContextToolGroup(props: { parts: ToolPart[]; busy?: boolean }) {
         <div data-component="context-tool-group-list">
           <Index each={props.parts}>
             {(partAccessor) => {
-              const trigger = createMemo(() => contextToolTrigger(partAccessor(), i18n))
+              const trigger = createMemo(() => contextToolTrigger(partAccessor(), i18n, data.directory))
               const running = createMemo(
                 () => partAccessor().state.status === "pending" || partAccessor().state.status === "running",
               )
@@ -1463,8 +1465,8 @@ ToolRegistry.register({
     const data = useData()
     const i18n = useI18n()
     const args: string[] = []
-    if (props.input.offset) args.push("offset=" + props.input.offset)
-    if (props.input.limit) args.push("limit=" + props.input.limit)
+    if (props.input.offset !== undefined) args.push("offset=" + props.input.offset)
+    if (props.input.limit !== undefined) args.push("limit=" + props.input.limit)
     const loaded = createMemo(() => {
       if (props.status !== "completed") return []
       const value = props.metadata.loaded
@@ -1478,7 +1480,7 @@ ToolRegistry.register({
           icon="glasses"
           trigger={{
             title: i18n.t("ui.tool.read"),
-            subtitle: props.input.filePath ? getFilename(props.input.filePath) : "",
+            subtitle: toolFileLabel(props.input, data.directory),
             args,
           }}
         />
@@ -1780,9 +1782,10 @@ ToolRegistry.register({
   render(props) {
     const i18n = useI18n()
     const fileComponent = useFileComponent()
-    const diagnostics = createMemo(() => getDiagnostics(props.metadata.diagnostics, props.input.filePath))
-    const path = createMemo(() => props.metadata?.filediff?.file || props.input.filePath || "")
-    const filename = () => getFilename(props.input.filePath ?? "")
+    const inputPath = createMemo(() => toolFilePath(props.input))
+    const diagnostics = createMemo(() => getDiagnostics(props.metadata.diagnostics, inputPath()))
+    const path = createMemo(() => props.metadata?.filediff?.file || inputPath() || "")
+    const filename = () => getFilename(inputPath() ?? "")
     const pending = () => props.status === "pending" || props.status === "running"
     return (
       <div data-component="edit-tool">
@@ -1801,9 +1804,9 @@ ToolRegistry.register({
                     <span data-slot="message-part-title-filename">{filename()}</span>
                   </Show>
                 </div>
-                <Show when={!pending() && props.input.filePath?.includes("/")}>
+                <Show when={!pending() && /[\\/]/.test(inputPath() ?? "")}>
                   <div data-slot="message-part-path">
-                    <span data-slot="message-part-directory">{getDirectory(props.input.filePath!)}</span>
+                    <span data-slot="message-part-directory">{getDirectory(inputPath())}</span>
                   </div>
                 </Show>
               </div>
@@ -1829,12 +1832,12 @@ ToolRegistry.register({
                   component={fileComponent}
                   mode="diff"
                   before={{
-                    name: props.metadata?.filediff?.file || props.input.filePath,
-                    contents: props.metadata?.filediff?.before || props.input.oldString,
+                    name: props.metadata?.filediff?.file || inputPath(),
+                    contents: props.metadata?.filediff?.before || editOldString(props.input),
                   }}
                   after={{
-                    name: props.metadata?.filediff?.file || props.input.filePath,
-                    contents: props.metadata?.filediff?.after || props.input.newString,
+                    name: props.metadata?.filediff?.file || inputPath(),
+                    contents: props.metadata?.filediff?.after || editNewString(props.input),
                   }}
                 />
               </div>
@@ -1852,9 +1855,10 @@ ToolRegistry.register({
   render(props) {
     const i18n = useI18n()
     const fileComponent = useFileComponent()
-    const diagnostics = createMemo(() => getDiagnostics(props.metadata.diagnostics, props.input.filePath))
-    const path = createMemo(() => props.input.filePath || "")
-    const filename = () => getFilename(props.input.filePath ?? "")
+    const inputPath = createMemo(() => toolFilePath(props.input))
+    const diagnostics = createMemo(() => getDiagnostics(props.metadata.diagnostics, inputPath()))
+    const path = createMemo(() => inputPath() || "")
+    const filename = () => getFilename(inputPath() ?? "")
     const pending = () => props.status === "pending" || props.status === "running"
     return (
       <div data-component="write-tool">
@@ -1873,9 +1877,9 @@ ToolRegistry.register({
                     <span data-slot="message-part-title-filename">{filename()}</span>
                   </Show>
                 </div>
-                <Show when={!pending() && props.input.filePath?.includes("/")}>
+                <Show when={!pending() && /[\\/]/.test(inputPath() ?? "")}>
                   <div data-slot="message-part-path">
-                    <span data-slot="message-part-directory">{getDirectory(props.input.filePath!)}</span>
+                    <span data-slot="message-part-directory">{getDirectory(inputPath())}</span>
                   </div>
                 </Show>
               </div>
@@ -1890,7 +1894,7 @@ ToolRegistry.register({
                   component={fileComponent}
                   mode="text"
                   file={{
-                    name: props.input.filePath,
+                    name: inputPath(),
                     contents: props.input.content,
                     cacheKey: checksum(props.input.content),
                   }}

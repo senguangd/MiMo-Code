@@ -295,7 +295,7 @@ This should be straightforward given the existing component architecture.`,
 const TOOL_SAMPLES = {
   read: {
     tool: "read",
-    input: { filePath: "src/components/session-turn.tsx", offset: 1, limit: 50 },
+    input: { file_path: "src/components/session-turn.tsx", offset: 1, limit: 50 },
     output: "export function SessionTurn(props) {\n  // component implementation\n  return <div>...</div>\n}",
     title: "Read src/components/session-turn.tsx",
     metadata: {},
@@ -325,9 +325,9 @@ const TOOL_SAMPLES = {
   edit: {
     tool: "edit",
     input: {
-      filePath: "src/components/session-turn.tsx",
-      oldString: "gap: 12px",
-      newString: "gap: 18px",
+      file_path: "src/components/session-turn.tsx",
+      old_string: "gap: 12px",
+      new_string: "gap: 18px",
     },
     output: "File edited successfully",
     title: "Edit src/components/session-turn.tsx",
@@ -344,7 +344,7 @@ const TOOL_SAMPLES = {
   write: {
     tool: "write",
     input: {
-      filePath: "src/utils/helpers.ts",
+      file_path: "src/utils/helpers.ts",
       content:
         "export function clamp(value: number, min: number, max: number) {\n  return Math.min(Math.max(value, min), max)\n}\n",
     },
