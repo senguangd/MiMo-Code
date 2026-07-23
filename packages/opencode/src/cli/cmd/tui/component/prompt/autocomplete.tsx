@@ -11,7 +11,7 @@ import { getScrollAcceleration } from "../../util/scroll"
 import { useTuiConfig } from "../../context/tui-config"
 import { useTheme, selectedForeground } from "@tui/context/theme"
 import { SplitBorder } from "@tui/component/border"
-import { useCommandDialog } from "@tui/component/dialog-command"
+import { slashCandidates, useCommandDialog } from "@tui/component/dialog-command"
 import { useLanguage } from "@tui/context/language"
 import { slashCommandDescription } from "@tui/i18n/slash-command"
 import { skillDescription } from "@tui/i18n/skill"
@@ -423,7 +423,7 @@ export function Autocomplete(props: {
   )
 
   const commands = createMemo((): AutocompleteOption[] => {
-    const results: AutocompleteOption[] = command.slashes().map((item) => ({
+    const results: AutocompleteOption[] = slashCandidates(command.slashes(), search()).map((item) => ({
       ...item,
       onSelect: () => {
         replaceTrigger("")

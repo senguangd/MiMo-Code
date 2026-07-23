@@ -34,6 +34,31 @@ export type Slash = {
   aliases?: string[]
 }
 
+export type SlashEntry = {
+  display: string
+  description: string
+  onSelect: () => void
+  alias?: boolean
+}
+
+export function slashEntries(slash: Slash, description: string, onSelect: () => void): SlashEntry[] {
+  return [
+    { display: "/" + slash.name, description, onSelect },
+    ...(slash.aliases ?? []).map((alias) => ({
+      display: "/" + alias,
+      description,
+      onSelect,
+      alias: true,
+    })),
+  ]
+}
+
+export function slashCandidates(entries: SlashEntry[], search: string) {
+  const query = search.replace(/^\/+/, "").toLowerCase()
+  if (!query) return entries.filter((entry) => !entry.alias)
+  return entries.filter((entry) => !entry.alias || entry.display.slice(1).toLowerCase().startsWith(query))
+}
+
 export type CommandOption = DialogSelectOption<string> & {
   keybind?: string
   suggested?: boolean
@@ -155,7 +180,15 @@ function init() {
 
   useBindings(() => ({
     mode: OPENCODE_BASE_MODE,
-    commands: [{ namespace: "palette", name: "command.palette.show", title: lang.t("tui.command.palette.title"), hidden: true, run: showCommandPalette }],
+    commands: [
+      {
+        namespace: "palette",
+        name: "command.palette.show",
+        title: lang.t("tui.command.palette.title"),
+        hidden: true,
+        run: showCommandPalette,
+      },
+    ],
     bindings: suspended() || dialog.stack.length > 0 ? [] : bindingLookup().get(commandForKeybind("command_list")),
   }))
 
@@ -173,16 +206,7 @@ function init() {
       return visibleOptions().flatMap((option) => {
         const slash = option.slash
         if (!slash) return []
-        const description = option.description ?? option.title
-        const onSelect = () => result.trigger(option.value)
-        return [
-          { display: "/" + slash.name, description, onSelect },
-          ...(slash.aliases ?? []).map((alias) => ({
-            display: "/" + alias,
-            description,
-            onSelect,
-          })),
-        ]
+        return slashEntries(slash, option.description ?? option.title, () => result.trigger(option.value))
       })
     },
     keybinds(enabled: boolean) {
