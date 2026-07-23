@@ -5,6 +5,7 @@ import { Config } from "@/config"
 import { Provider } from "@/provider"
 import { ModelsDev } from "@/provider"
 import { ProviderAuth } from "@/provider"
+import { ProviderAvailability } from "@/provider"
 import { ProviderID } from "@/provider/schema"
 import { mapValues } from "remeda"
 import { errors } from "../../error"
@@ -78,6 +79,85 @@ export const ProviderRoutes = lazy(() =>
         jsonRequest("ProviderRoutes.auth", c, function* () {
           const svc = yield* ProviderAuth.Service
           return yield* svc.methods()
+        }),
+    )
+    .put(
+      "/default-model",
+      describeRoute({
+        summary: "Set default model",
+        description: "Validate and persist the global default model without returning the full configuration.",
+        operationId: "provider.defaultModel.set",
+        responses: {
+          200: {
+            description: "Default model status",
+            content: {
+              "application/json": {
+                schema: resolver(ProviderAvailability.Status.zod),
+              },
+            },
+          },
+          ...errors(400),
+        },
+      }),
+      validator("json", ProviderAvailability.SetDefaultModelInput),
+      async (c) =>
+        jsonRequest("ProviderRoutes.defaultModel.set", c, function* () {
+          return yield* ProviderAvailability.setDefaultModel(c.req.valid("json").model)
+        }),
+    )
+    .get(
+      "/default-model/status",
+      describeRoute({
+        summary: "Get default model status",
+        description: "Validate the configured default model and its credentials without sending a chat request.",
+        operationId: "provider.defaultModel.status",
+        responses: {
+          200: {
+            description: "Default model status",
+            content: {
+              "application/json": {
+                schema: resolver(ProviderAvailability.Status.zod),
+              },
+            },
+          },
+        },
+      }),
+      async (c) =>
+        jsonRequest("ProviderRoutes.defaultModel.status", c, function* () {
+          return yield* ProviderAvailability.inspectDefaultModel()
+        }),
+    )
+    .put(
+      "/:providerID/api-key",
+      describeRoute({
+        summary: "Set provider API key",
+        description: "Validate and persist a provider API key in the global JSONC configuration.",
+        operationId: "provider.apiKey.set",
+        responses: {
+          200: {
+            description: "API key validation and persistence status",
+            content: {
+              "application/json": {
+                schema: resolver(ProviderAvailability.Status.zod),
+              },
+            },
+          },
+          ...errors(400),
+        },
+      }),
+      validator(
+        "param",
+        z.object({
+          providerID: ProviderID.zod,
+        }),
+      ),
+      validator("json", ProviderAvailability.SetApiKeyInput),
+      async (c) =>
+        jsonRequest("ProviderRoutes.apiKey.set", c, function* () {
+          return yield* ProviderAvailability.setApiKey({
+            providerID: c.req.valid("param").providerID,
+            ...c.req.valid("json"),
+          })
         }),
     )
     .post(

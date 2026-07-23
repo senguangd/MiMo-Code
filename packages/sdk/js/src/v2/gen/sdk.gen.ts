@@ -103,12 +103,19 @@ import type {
   ProjectUpdateErrors,
   ProjectUpdateResponses,
   Provenance,
+  ProviderApiKeySetErrors,
+  ProviderApiKeySetResponses,
   ProviderAuthResponses,
+  ProviderDefaultModelSetErrors,
+  ProviderDefaultModelSetResponses,
+  ProviderDefaultModelStatusResponses,
   ProviderListResponses,
   ProviderOauthAuthorizeErrors,
   ProviderOauthAuthorizeResponses,
   ProviderOauthCallbackErrors,
   ProviderOauthCallbackResponses,
+  ProviderSetApiKeyInput,
+  ProviderSetDefaultModelInput,
   PtyConnectErrors,
   PtyConnectResponses,
   PtyConnectTokenErrors,
@@ -3511,6 +3518,120 @@ export class Bash extends HeyApiClient {
   }
 }
 
+export class DefaultModel extends HeyApiClient {
+  /**
+   * Set default model
+   *
+   * Validate and persist the global default model without returning the full configuration.
+   */
+  public set<ThrowOnError extends boolean = false>(
+    parameters?: {
+      directory?: string
+      workspace?: string
+      providerSetDefaultModelInput?: ProviderSetDefaultModelInput
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+            { key: "providerSetDefaultModelInput", map: "body" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).put<
+      ProviderDefaultModelSetResponses,
+      ProviderDefaultModelSetErrors,
+      ThrowOnError
+    >({
+      url: "/provider/default-model",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+
+  /**
+   * Get default model status
+   *
+   * Validate the configured default model and its credentials without sending a chat request.
+   */
+  public status<ThrowOnError extends boolean = false>(
+    parameters?: {
+      directory?: string
+      workspace?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).get<ProviderDefaultModelStatusResponses, unknown, ThrowOnError>({
+      url: "/provider/default-model/status",
+      ...options,
+      ...params,
+    })
+  }
+}
+
+export class ApiKey extends HeyApiClient {
+  /**
+   * Set provider API key
+   *
+   * Validate and persist a provider API key in the global JSONC configuration.
+   */
+  public set<ThrowOnError extends boolean = false>(
+    parameters: {
+      providerID: string
+      directory?: string
+      workspace?: string
+      providerSetApiKeyInput?: ProviderSetApiKeyInput
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "providerID" },
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+            { key: "providerSetApiKeyInput", map: "body" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).put<ProviderApiKeySetResponses, ProviderApiKeySetErrors, ThrowOnError>({
+      url: "/provider/{providerID}/api-key",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+}
+
 export class Oauth extends HeyApiClient {
   /**
    * OAuth authorize
@@ -3664,6 +3785,16 @@ export class Provider extends HeyApiClient {
       ...options,
       ...params,
     })
+  }
+
+  private _defaultModel?: DefaultModel
+  get defaultModel(): DefaultModel {
+    return (this._defaultModel ??= new DefaultModel({ client: this.client }))
+  }
+
+  private _apiKey?: ApiKey
+  get apiKey(): ApiKey {
+    return (this._apiKey ??= new ApiKey({ client: this.client }))
   }
 
   private _oauth?: Oauth

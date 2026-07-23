@@ -86,33 +86,32 @@ export function DialogMimoLogin() {
             return
           }
 
-          await sdk.client.auth.set({
-            providerID: "anthropic",
-            auth: { type: "api", key },
-          })
-          await sdk.client.global.config.update({
-            config: {
-              provider: {
-                anthropic: { options: { baseURL: baseUrl || "https://api.anthropic.com/v1" } },
+          if (preferredModel) {
+            await sdk.client.global.config.update({
+              config: {
+                provider: {
+                  anthropic: { models: { [preferredModel]: { name: preferredModel } } },
+                },
               },
+            })
+          }
+          const saved = await sdk.client.provider.apiKey.set({
+            providerID: "anthropic",
+            providerSetApiKeyInput: {
+              key,
+              baseURL: baseUrl || "https://api.anthropic.com/v1",
+              persistUnverified: true,
             },
           })
+          if (saved.error || !saved.data || !["ready", "credential_unverified"].includes(saved.data.status)) {
+            toast.show({ message: "Failed to persist the imported Anthropic API key.", variant: "error" })
+            return
+          }
           await sdk.client.instance.dispose()
           await sync.bootstrap()
 
           const anthropic = sync.data.provider.find((p) => p.id === "anthropic")
           if (anthropic) {
-            if (preferredModel && !(preferredModel in anthropic.models)) {
-              await sdk.client.global.config.update({
-                config: {
-                  provider: {
-                    anthropic: { models: { [preferredModel]: { name: preferredModel } } },
-                  },
-                },
-              })
-              await sdk.client.instance.dispose()
-              await sync.bootstrap()
-            }
             const models = Object.keys(anthropic.models).sort()
             const selected = preferredModel
               || models.find((m) => m === "claude-opus-4-6")

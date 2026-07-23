@@ -64,6 +64,10 @@ export function fileInDirectory(dir: string, name: string) {
   return [path.join(dir, `${name}.json`), path.join(dir, `${name}.jsonc`)]
 }
 
+export function lockKey(dir: string, name: string) {
+  return `config:${Filesystem.resolve(path.join(dir, name))}`
+}
+
 /** Read a config file, returning undefined for missing files and throwing JsonError for other failures. */
 export async function readFile(filepath: string) {
   return Filesystem.readText(filepath).catch((err: NodeJS.ErrnoException) => {

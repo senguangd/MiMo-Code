@@ -25,7 +25,11 @@ export function useConnected() {
   )
 }
 
-export function DialogModel(props: { providerID?: string }) {
+export function DialogModel(props: {
+  providerID?: string
+  dismissible?: boolean
+  onSelect?: (model: { providerID: string; modelID: string }) => void | Promise<void>
+}) {
   const local = useLocal()
   const sync = useSync()
   const dialog = useDialog()
@@ -244,6 +248,10 @@ export function DialogModel(props: { providerID?: string }) {
   })
 
   function onSelect(providerID: string, modelID: string) {
+    if (props.onSelect) {
+      void props.onSelect({ providerID, modelID })
+      return
+    }
     local.model.set({ providerID, modelID }, { recent: true })
     const list = local.model.variant.list()
     if (list.length > 0) {
@@ -280,6 +288,7 @@ export function DialogModel(props: { providerID?: string }) {
       title={title()}
       hint={t("tui.dialog.model.login_hint")}
       current={local.model.current()}
+      dismissible={props.dismissible}
     />
   )
 }

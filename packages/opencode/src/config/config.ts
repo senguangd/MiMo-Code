@@ -547,6 +547,7 @@ export const layer = Layer.effect(
   Service,
   Effect.gen(function* () {
     const fs = yield* AppFileSystem.Service
+    const flock = yield* EffectFlock.Service
     const authSvc = yield* Auth.Service
     const accountSvc = yield* Account.Service
     const env = yield* Env.Service
@@ -1048,19 +1049,31 @@ export const layer = Layer.effect(
 
     const updateGlobal = Effect.fn("Config.updateGlobal")(function* (config: Info) {
       const file = globalConfigFile()
-      const before = (yield* readConfigFile(file)) ?? "{}"
-
-      let next: Info
-      if (!file.endsWith(".jsonc")) {
-        const existing = ConfigParse.schema(Info, ConfigParse.jsonc(before, file), file)
-        const merged = mergeDeep(writable(existing), writable(config))
-        yield* fs.writeFileString(file, JSON.stringify(merged, null, 2)).pipe(Effect.orDie)
-        next = merged
-      } else {
-        const updated = patchJsonc(before, writable(config))
-        next = ConfigParse.schema(Info, ConfigParse.jsonc(updated, file), file)
-        yield* fs.writeFileString(file, updated).pipe(Effect.orDie)
-      }
+      const writeSecure = Effect.fnUntraced(function* (content: string) {
+        // Global config may contain provider credentials. Use a restrictive
+        // creation mode and also tighten permissions on pre-existing files.
+        yield* fs.ensureDir(path.dirname(file)).pipe(Effect.orDie)
+        yield* Effect.promise(() => fsNode.writeFile(file, content, { encoding: "utf8", mode: 0o600 }))
+        yield* fs.chmod(file, 0o600).pipe(Effect.orDie)
+      })
+      const next = yield* flock
+        .withLock(
+          Effect.gen(function* () {
+            const before = (yield* readConfigFile(file)) ?? "{}"
+            if (!file.endsWith(".jsonc")) {
+              const existing = ConfigParse.schema(Info, ConfigParse.jsonc(before, file), file)
+              const merged = mergeDeep(writable(existing), writable(config))
+              yield* writeSecure(JSON.stringify(merged, null, 2))
+              return merged
+            }
+            const updated = patchJsonc(before, writable(config))
+            const parsed = ConfigParse.schema(Info, ConfigParse.jsonc(updated, file), file)
+            yield* writeSecure(updated)
+            return parsed
+          }),
+          ConfigPaths.lockKey(Global.Path.config, "mimocode"),
+        )
+        .pipe(Effect.orDie)
 
       yield* invalidate()
       return next

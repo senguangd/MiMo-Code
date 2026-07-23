@@ -628,6 +628,29 @@ test("defaultModel respects config model setting", async () => {
   })
 })
 
+test("defaultModel rejects an invalid configured model instead of silently accepting it", async () => {
+  await using tmp = await tmpdir({
+    init: async (dir) => {
+      await Bun.write(
+        path.join(dir, "mimocode.json"),
+        JSON.stringify({
+          $schema: "https://opencode.ai/config.json",
+          model: "anthropic/not-a-real-model",
+        }),
+      )
+    },
+  })
+  await Instance.provide({
+    directory: tmp.path,
+    init: async () => {
+      set("ANTHROPIC_API_KEY", "test-api-key")
+    },
+    fn: async () => {
+      expect(defaultModel()).rejects.toThrow("ProviderModelNotFoundError")
+    },
+  })
+})
+
 test("provider with baseURL from config", async () => {
   await using tmp = await tmpdir({
     init: async (dir) => {

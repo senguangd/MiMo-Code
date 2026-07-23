@@ -82,6 +82,10 @@ import {
 import type { EventSource } from "./context/sdk"
 import { DialogVariant } from "./component/dialog-variant"
 import { DialogModalities } from "./component/dialog-modalities"
+import {
+  DialogDefaultModelRecovery,
+  isDefaultModelUsable,
+} from "./component/dialog-default-model-recovery"
 import { OpencodeKeymapProvider, registerOpencodeKeymap } from "./keymap"
 
 function rendererConfig(_config: TuiConfig.Info, plainTerminal: boolean): CliRendererConfig {
@@ -275,6 +279,27 @@ function App(props: { onSnapshot?: () => Promise<string[]> }) {
   const SESSION_ERROR_TOAST_DEDUP_MS = 10_000
   const SESSION_ERROR_TOAST_CACHE_LIMIT = 256
   const sessionErrorToastSeen = new Map<string, number>()
+  let defaultModelRecoverySignature: string | undefined
+
+  createEffect(() => {
+    if (sync.status === "loading") return
+    const status = sync.data.default_model_status
+    if (isDefaultModelUsable(status)) {
+      if (defaultModelRecoverySignature && dialog.stack.at(-1)?.dismissible === false) {
+        dialog.clear({ force: true })
+      }
+      defaultModelRecoverySignature = undefined
+      return
+    }
+
+    const signature = [status.status, status.providerID, status.modelID, status.statusCode, status.detail].join(":")
+    if (defaultModelRecoverySignature === signature && dialog.stack.at(-1)?.dismissible === false) return
+    defaultModelRecoverySignature = signature
+    dialog.replace(() => <DialogDefaultModelRecovery />, undefined, {
+      dismissible: false,
+      replaceMandatory: true,
+    })
+  })
 
   function shouldShowSessionErrorToast(input: {
     sessionID?: string

@@ -35,6 +35,7 @@ export interface DialogSelectProps<T> {
   current?: T
   /** Optional muted subtitle shown under the title (e.g. a usage hint). */
   hint?: string
+  dismissible?: boolean
 }
 
 export interface DialogSelectOption<T = any> {
@@ -259,9 +260,11 @@ export function DialogSelect<T>(props: DialogSelectProps<T>) {
           <text fg={theme.text} attributes={TextAttributes.BOLD}>
             {props.title}
           </text>
-          <text fg={theme.textMuted} onMouseUp={() => dialog.clear()}>
-            {t("tui.dialog.close_hint")}
-          </text>
+          <Show when={props.dismissible !== false}>
+            <text fg={theme.textMuted} onMouseUp={() => dialog.dismiss()}>
+              {t("tui.dialog.close_hint")}
+            </text>
+          </Show>
         </box>
         <Show when={props.hint}>
           <box paddingTop={1} alignItems="center">

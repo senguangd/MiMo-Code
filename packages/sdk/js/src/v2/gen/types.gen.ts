@@ -2762,6 +2762,43 @@ export type ProviderAuthMethod = {
   >
 }
 
+export type ProviderDefaultModelStatus = {
+  status:
+    | "ready"
+    | "provider_not_found"
+    | "model_not_found"
+    | "credential_missing"
+    | "credential_unverified"
+    | "authentication_failed"
+    | "permission_denied"
+    | "endpoint_unreachable"
+    | "rate_limited"
+    | "quota_exceeded"
+    | "provider_unavailable"
+    | "unknown"
+  configured: boolean
+  providerID?: string
+  modelID?: string
+  statusCode?: number
+  detail?: string
+  remediation: {
+    login: boolean
+    selectModel: boolean
+    retry: boolean
+  }
+}
+
+export type ProviderSetDefaultModelInput = {
+  model: string
+}
+
+export type ProviderSetApiKeyInput = {
+  key: string
+  modelID?: string
+  baseURL?: string
+  persistUnverified?: boolean
+}
+
 export type ProviderAuthAuthorization = {
   url: string
   method: "auto" | "code"
@@ -5845,6 +5882,84 @@ export type ProviderAuthResponses = {
 }
 
 export type ProviderAuthResponse = ProviderAuthResponses[keyof ProviderAuthResponses]
+
+export type ProviderDefaultModelSetData = {
+  body?: ProviderSetDefaultModelInput
+  path?: never
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/provider/default-model"
+}
+
+export type ProviderDefaultModelSetErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+}
+
+export type ProviderDefaultModelSetError = ProviderDefaultModelSetErrors[keyof ProviderDefaultModelSetErrors]
+
+export type ProviderDefaultModelSetResponses = {
+  /**
+   * Default model status
+   */
+  200: ProviderDefaultModelStatus
+}
+
+export type ProviderDefaultModelSetResponse = ProviderDefaultModelSetResponses[keyof ProviderDefaultModelSetResponses]
+
+export type ProviderDefaultModelStatusData = {
+  body?: never
+  path?: never
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/provider/default-model/status"
+}
+
+export type ProviderDefaultModelStatusResponses = {
+  /**
+   * Default model status
+   */
+  200: ProviderDefaultModelStatus
+}
+
+export type ProviderDefaultModelStatusResponse =
+  ProviderDefaultModelStatusResponses[keyof ProviderDefaultModelStatusResponses]
+
+export type ProviderApiKeySetData = {
+  body?: ProviderSetApiKeyInput
+  path: {
+    providerID: string
+  }
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/provider/{providerID}/api-key"
+}
+
+export type ProviderApiKeySetErrors = {
+  /**
+   * Bad request
+   */
+  400: BadRequestError
+}
+
+export type ProviderApiKeySetError = ProviderApiKeySetErrors[keyof ProviderApiKeySetErrors]
+
+export type ProviderApiKeySetResponses = {
+  /**
+   * API key validation and persistence status
+   */
+  200: ProviderDefaultModelStatus
+}
+
+export type ProviderApiKeySetResponse = ProviderApiKeySetResponses[keyof ProviderApiKeySetResponses]
 
 export type ProviderOauthAuthorizeData = {
   body?: {

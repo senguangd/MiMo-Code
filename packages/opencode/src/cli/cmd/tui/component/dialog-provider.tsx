@@ -5,6 +5,7 @@ import { DialogSelect } from "@tui/ui/dialog-select"
 import { useDialog, type DialogContext } from "@tui/ui/dialog"
 import { useSDK } from "../context/sdk"
 import { DialogPrompt } from "../ui/dialog-prompt"
+import { DialogSecretPrompt } from "../ui/dialog-secret-prompt"
 import { Link } from "../ui/link"
 import { useTheme } from "../context/theme"
 import { TextAttributes } from "@opentui/core"
@@ -183,7 +184,18 @@ export async function runCustomProviderWizard(opts: {
   const baseURL = baseURLRaw.trim()
   if (!baseURL) return
 
-  const apiKeyRaw = await step(4, 6, "API key", "sk-...")
+  const apiKeyRaw = await new Promise<string | null>((resolve) => {
+    dialog.replace(
+      () => (
+        <DialogSecretPrompt
+          title="API key (4/6)"
+          placeholder="sk-..."
+          onConfirm={(value) => resolve(value)}
+        />
+      ),
+      () => resolve(null),
+    )
+  })
   if (apiKeyRaw === null) return
   const apiKey = apiKeyRaw.trim()
   if (!apiKey) return
@@ -223,12 +235,18 @@ export async function runCustomProviderWizard(opts: {
     return
   }
 
-  const authRes = await sdk.client.auth.set({
+  const authRes = await sdk.client.provider.apiKey.set({
     providerID,
-    auth: { type: "api", key: apiKey },
+    providerSetApiKeyInput: {
+      key: apiKey,
+      persistUnverified: true,
+    },
   })
-  if (authRes.error) {
-    toast.show({ variant: "error", message: JSON.stringify(authRes.error) })
+  if (authRes.error || !authRes.data || !["ready", "credential_unverified"].includes(authRes.data.status)) {
+    toast.show({
+      variant: "error",
+      message: authRes.error ? JSON.stringify(authRes.error) : "Failed to persist the provider API key.",
+    })
     return
   }
 
@@ -348,48 +366,69 @@ function ApiMethod(props: ApiMethodProps) {
   const dialog = useDialog()
   const sdk = useSDK()
   const sync = useSync()
+  const toast = useToast()
   const { theme } = useTheme()
 
+  const description = () =>
+    ({
+      opencode: (
+        <box gap={1}>
+          <text fg={theme.textMuted}>
+            OpenCode Zen gives you access to all the best coding models at the cheapest prices with a single API key.
+          </text>
+          <text fg={theme.text}>
+            Go to <span style={{ fg: theme.primary }}>https://opencode.ai/zen</span> to get a key
+          </text>
+        </box>
+      ),
+      "opencode-go": (
+        <box gap={1}>
+          <text fg={theme.textMuted}>
+            OpenCode Go is a $10 per month subscription that provides reliable access to popular coding models with
+            generous usage limits.
+          </text>
+          <text fg={theme.text}>
+            Go to <span style={{ fg: theme.primary }}>https://opencode.ai/zen</span> and enable OpenCode Go
+          </text>
+        </box>
+      ),
+    })[props.providerID]
+
   return (
-    <DialogPrompt
+    <DialogSecretPrompt
       title={props.title}
       placeholder="API key"
-      description={
-        {
-          opencode: (
-            <box gap={1}>
-              <text fg={theme.textMuted}>
-                OpenCode Zen gives you access to all the best coding models at the cheapest prices with a single API
-                key.
-              </text>
-              <text fg={theme.text}>
-                Go to <span style={{ fg: theme.primary }}>https://opencode.ai/zen</span> to get a key
-              </text>
-            </box>
-          ),
-          "opencode-go": (
-            <box gap={1}>
-              <text fg={theme.textMuted}>
-                OpenCode Go is a $10 per month subscription that provides reliable access to popular open coding models
-                with generous usage limits.
-              </text>
-              <text fg={theme.text}>
-                Go to <span style={{ fg: theme.primary }}>https://opencode.ai/zen</span> and enable OpenCode Go
-              </text>
-            </box>
-          ),
-        }[props.providerID] ?? undefined
-      }
+      description={description}
       onConfirm={async (value) => {
-        if (!value) return
-        await sdk.client.auth.set({
-          providerID: props.providerID,
-          auth: {
-            type: "api",
-            key: value,
-            ...(props.metadata ? { metadata: props.metadata } : {}),
-          },
-        })
+        if (props.metadata) {
+          const response = await sdk.client.auth.set({
+            providerID: props.providerID,
+            auth: {
+              type: "api",
+              key: value,
+              metadata: props.metadata,
+            },
+          })
+          if (response.error) {
+            toast.show({ variant: "error", message: JSON.stringify(response.error) })
+            return
+          }
+        } else {
+          const response = await sdk.client.provider.apiKey.set({
+            providerID: props.providerID,
+            providerSetApiKeyInput: {
+              key: value,
+              persistUnverified: true,
+            },
+          })
+          if (response.error || !response.data || !["ready", "credential_unverified"].includes(response.data.status)) {
+            toast.show({
+              variant: "error",
+              message: response.error ? JSON.stringify(response.error) : "Failed to persist the provider API key.",
+            })
+            return
+          }
+        }
         await sdk.client.instance.dispose()
         await sync.bootstrap()
         dialog.replace(() => <DialogModel providerID={props.providerID} />)

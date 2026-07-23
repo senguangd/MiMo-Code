@@ -223,6 +223,7 @@ export const { use: useLocal, provider: LocalProvider } = createSimpleContext({
               modelID,
             }
           }
+          return undefined
         }
 
         for (const item of modelStore.recent) {

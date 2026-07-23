@@ -9,6 +9,20 @@ import * as Selection from "@tui/util/selection"
 import * as Clipboard from "@tui/util/clipboard"
 import { useLanguage } from "@tui/context/language"
 
+type DialogPolicyEntry = { dismissible: boolean }
+
+export function canDismissDialog(stack: readonly DialogPolicyEntry[]) {
+  return stack.at(-1)?.dismissible === true
+}
+
+export function canClearDialog(stack: readonly DialogPolicyEntry[], force = false) {
+  return force || stack.at(-1)?.dismissible !== false
+}
+
+export function canReplaceDialog(stack: readonly DialogPolicyEntry[], replaceMandatory = false) {
+  return replaceMandatory || stack.at(-1)?.dismissible !== false
+}
+
 export function Dialog(
   props: ParentProps<{
     size?: "medium" | "large" | "xlarge"
@@ -79,6 +93,8 @@ function init() {
     stack: [] as {
       element: JSX.Element
       onClose?: () => void
+      onBack?: () => void
+      dismissible: boolean
     }[],
     size: "medium" as "medium" | "large" | "xlarge",
   })
@@ -93,12 +109,9 @@ function init() {
       if (renderer.getSelection()) {
         renderer.clearSelection()
       }
-      const current = store.stack.at(-1)!
-      current.onClose?.()
-      setStore("stack", store.stack.slice(0, -1))
+      dismiss()
       evt.preventDefault()
       evt.stopPropagation()
-      refocus()
     }
   })
 
@@ -120,8 +133,21 @@ function init() {
     }, 1)
   }
 
+  function dismiss() {
+    const current = store.stack.at(-1)
+    if (!current) return
+    if (!canDismissDialog(store.stack)) {
+      current.onBack?.()
+      return
+    }
+    current.onClose?.()
+    setStore("stack", store.stack.slice(0, -1))
+    refocus()
+  }
+
   return {
-    clear() {
+    clear(options?: { force?: boolean }) {
+      if (!canClearDialog(store.stack, options?.force)) return
       for (const item of store.stack) {
         if (item.onClose) item.onClose()
       }
@@ -131,7 +157,12 @@ function init() {
       })
       refocus()
     },
-    replace(input: any, onClose?: () => void) {
+    replace(
+      input: any,
+      onClose?: () => void,
+      options?: { dismissible?: boolean; replaceMandatory?: boolean; onBack?: () => void },
+    ) {
+      if (!canReplaceDialog(store.stack, options?.replaceMandatory)) return
       if (store.stack.length === 0) {
         focus = renderer.currentFocusedRenderable
         focus?.blur()
@@ -144,9 +175,12 @@ function init() {
         {
           element: input,
           onClose,
+          onBack: options?.onBack,
+          dismissible: options?.dismissible ?? true,
         },
       ])
     },
+    dismiss,
     get stack() {
       return store.stack
     },
@@ -189,7 +223,7 @@ export function DialogProvider(props: ParentProps) {
         }
       >
         <Show when={value.stack.length}>
-          <Dialog onClose={() => value.clear()} size={value.size}>
+          <Dialog onClose={() => value.dismiss()} size={value.size}>
             {value.stack.at(-1)!.element}
           </Dialog>
         </Show>

@@ -17,6 +17,7 @@ import type {
   SessionStatus,
   ProviderListResponse,
   ProviderAuthMethod,
+  ProviderDefaultModelStatus,
   VcsInfo,
 } from "@mimo-ai/sdk/v2"
 import { createStore, produce, reconcile } from "solid-js/store"
@@ -165,6 +166,7 @@ export const { use: useSync, provider: SyncProvider } = createSimpleContext({
       provider_next: ProviderListResponse
       console_state: ConsoleState
       provider_auth: Record<string, ProviderAuthMethod[]>
+      default_model_status: ProviderDefaultModelStatus
       agent: Agent[]
       command: Command[]
       permission: {
@@ -231,6 +233,15 @@ export const { use: useSync, provider: SyncProvider } = createSimpleContext({
       },
       console_state: emptyConsoleState,
       provider_auth: {},
+      default_model_status: {
+        status: "ready",
+        configured: false,
+        remediation: {
+          login: false,
+          selectModel: false,
+          retry: false,
+        },
+      },
       config: {},
       status: "loading",
       agent: [],
@@ -725,6 +736,7 @@ export const { use: useSync, provider: SyncProvider } = createSimpleContext({
         .get({ workspace }, { throwOnError: true })
         .then((x) => x.data)
         .catch(() => emptyConsoleState)
+      const defaultModelStatusPromise = sdk.client.provider.defaultModel.status({ workspace }, { throwOnError: true })
       const agentsPromise = sdk.client.app.agents({ workspace }, { throwOnError: true })
       const configPromise = sdk.client.config.get({ workspace }, { throwOnError: true })
       const projectPromise = project.sync()
@@ -733,6 +745,7 @@ export const { use: useSync, provider: SyncProvider } = createSimpleContext({
         providerListPromise,
         agentsPromise,
         configPromise,
+        defaultModelStatusPromise,
         projectPromise,
         ...(args.continue ? [sessionListPromise] : []),
       ]
@@ -744,6 +757,7 @@ export const { use: useSync, provider: SyncProvider } = createSimpleContext({
           const consoleStateResponse = consoleStatePromise
           const agentsResponse = agentsPromise.then((x) => x.data ?? [])
           const configResponse = configPromise.then((x) => x.data!)
+          const defaultModelStatusResponse = defaultModelStatusPromise.then((x) => x.data!)
           const sessionListResponse = args.continue ? sessionListPromise : undefined
 
           return Promise.all([
@@ -752,6 +766,7 @@ export const { use: useSync, provider: SyncProvider } = createSimpleContext({
             consoleStateResponse,
             agentsResponse,
             configResponse,
+            defaultModelStatusResponse,
             ...(sessionListResponse ? [sessionListResponse] : []),
           ]).then((responses) => {
             const providers = responses[0]
@@ -759,7 +774,8 @@ export const { use: useSync, provider: SyncProvider } = createSimpleContext({
             const consoleState = responses[2]
             const agents = responses[3]
             const config = responses[4]
-            const sessions = responses[5]
+            const defaultModelStatus = responses[5]
+            const sessions = responses[6]
 
             batch(() => {
               setStore("provider", reconcile(providers.providers))
@@ -768,6 +784,7 @@ export const { use: useSync, provider: SyncProvider } = createSimpleContext({
               setStore("console_state", reconcile(consoleState))
               setStore("agent", reconcile(agents))
               setStore("config", reconcile(config))
+              setStore("default_model_status", reconcile(defaultModelStatus))
               if (sessions !== undefined) setStore("session", reconcile(sessions))
             })
           })
