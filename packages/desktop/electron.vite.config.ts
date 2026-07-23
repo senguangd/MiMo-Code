@@ -1,6 +1,7 @@
 import { defineConfig } from "electron-vite"
 import appPlugin from "@mimo-ai/app/vite"
 import * as fs from "node:fs/promises"
+import { electronViteEsmShimPlugin } from "./scripts/electron-vite-esm-shim"
 
 const channel = (() => {
   const raw = process.env.OPENCODE_CHANNEL
@@ -47,6 +48,7 @@ export default defineConfig({
           }
         },
       },
+      electronViteEsmShimPlugin(),
     ],
   },
   preload: {

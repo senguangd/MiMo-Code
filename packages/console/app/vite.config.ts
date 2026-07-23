@@ -12,6 +12,9 @@ export default defineConfig({
       preset: "cloudflare_module",
       cloudflare: {
         nodeCompat: true,
+        wrangler: {
+          name: "mimo-ai-console-app",
+        },
       },
     }),
   ],

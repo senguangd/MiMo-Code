@@ -5,7 +5,6 @@ import { Database } from "./drizzle"
 import { UserRole, UserTable } from "./schema/user.sql"
 import { Actor } from "./actor"
 import { Identifier } from "./identifier"
-import { render } from "@jsx-email/render"
 import { AWS } from "./aws"
 import { Key } from "./key"
 import { KeyTable } from "./schema/key.sql"
@@ -138,7 +137,10 @@ export namespace User {
             .then((rows) => rows[0]),
         )
 
-        const { InviteEmail } = await import("@mimo-ai/console-mail/InviteEmail.jsx")
+        const [{ InviteEmail }, { render }] = await Promise.all([
+          import("@mimo-ai/console-mail/InviteEmail.jsx"),
+          import("@jsx-email/render"),
+        ])
         await AWS.sendEmail({
           to: email,
           subject: `You've been invited to join the ${emailInfo.workspaceName} workspace on OpenCode`,

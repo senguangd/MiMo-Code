@@ -11,6 +11,9 @@ const nitroConfig: any = (() => {
       preset: "cloudflare_module",
       cloudflare: {
         nodeCompat: true,
+        wrangler: {
+          name: "mimo-ai-enterprise",
+        },
       },
     }
   }
@@ -23,6 +26,8 @@ export default defineConfig({
     solidStart() as PluginOption,
     nitro({
       ...nitroConfig,
+      // Shiki already provides an inlined Oniguruma loader; Nitro raw-WASM parsing cannot bind its Emscripten env imports.
+      wasm: false,
       baseURL: process.env.OPENCODE_BASE_URL,
     }),
   ],
