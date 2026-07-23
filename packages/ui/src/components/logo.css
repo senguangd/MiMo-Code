@@ -1,4 +1,8 @@
 [data-component="logo-mark"] {
-  width: 16px;
-  aspect-ratio: 4/5;
+  width: 20px;
+  aspect-ratio: 1;
+}
+
+[data-component="logo-splash"] {
+  aspect-ratio: 1;
 }

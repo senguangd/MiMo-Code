@@ -28,4 +28,4 @@
 
 ## 当前消费者
 
-`packages/opencode/script/build.ts` 仅在构建 Windows target 时引用 `platform/windows/icon.ico`。Web favicon、Desktop 图标和 README 展示资源尚未与本目录同步。
+`packages/opencode/script/build.ts` 在构建 Windows target 时引用 `platform/windows/icon.ico`；Web UI 使用本目录的正式 SVG、ICO 和 PNG 资产生成浏览器 favicon、PWA 图标以及页面内品牌标识。Desktop 图标和 README 展示资源仍需单独同步。
