@@ -3065,6 +3065,30 @@ function WebSearch(props: ToolProps<typeof WebSearchTool>) {
   )
 }
 
+export function actorToolActivity(input: {
+  action?: string
+  actorStatus?: string
+  partStatus: string
+  tools: Array<{ tool: string; state: ToolPart["state"] }>
+}) {
+  const running = input.tools.findLast((item) => item.state.status === "running" && item.state.title)
+  const completed = input.tools.findLast((item) => item.state.status === "completed" && item.state.title)
+  if (input.action === "status") {
+    return {
+      running: input.partStatus === "running",
+      current: undefined,
+      lastCompleted: completed,
+    }
+  }
+  return {
+    running:
+      input.partStatus === "running" ||
+      (input.partStatus === "completed" && (input.actorStatus === "running" || input.actorStatus === "pending")),
+    current: running,
+    lastCompleted: completed,
+  }
+}
+
 function Task(props: ToolProps<typeof ActorTool>) {
   const route = useRoute()
   const sync = useSync()
@@ -3133,18 +3157,16 @@ function Task(props: ToolProps<typeof ActorTool>) {
     )
   })
 
-  const current = createMemo(() =>
-    tools().findLast((x) => (x.state.status === "running" || x.state.status === "completed") && x.state.title),
+  const activity = createMemo(() =>
+    actorToolActivity({
+      action: inputAction(),
+      actorStatus: actorStatus(),
+      partStatus: props.part.state.status,
+      tools: tools(),
+    }),
   )
 
-  const isRunning = createMemo(() => {
-    if (props.part.state.status === "running") return true
-    if (props.part.state.status === "completed") {
-      const status = actorStatus()
-      return status === "running" || status === "pending"
-    }
-    return false
-  })
+  const isRunning = createMemo(() => activity().running)
 
   const duration = createMemo(() => {
     const first = messages().find((x) => x.role === "user")?.time.created
@@ -3180,15 +3202,21 @@ function Task(props: ToolProps<typeof ActorTool>) {
 
     let content = [header]
 
-    if (isRunning() && tools().length > 0) {
-      if (current()) {
-        const state = current()!.state
-        const title = state.status === "running" || state.status === "completed" ? state.title : undefined
-        content.push(`↳ ${Locale.titlecase(current()!.tool)} ${title}`)
-      } else content.push(`↳ ${tools().length} toolcalls`)
+    if (action === "status" && props.part.state.status === "completed") {
+      content.push(`Status: ${status ?? "unknown"}`)
+    } else if (isRunning()) {
+      const current = activity().current
+      const last = activity().lastCompleted
+      if (current && current.state.status === "running") {
+        content.push(`↳ Current: ${Locale.titlecase(current.tool)} ${current.state.title ?? ""}`.trim())
+      } else {
+        content.push("↳ Waiting for next step")
+        if (last && last.state.status === "completed")
+          content.push(`↳ Last completed: ${Locale.titlecase(last.tool)} ${last.state.title}`)
+      }
     }
 
-    if (props.part.state.status === "completed" && !isRunning()) {
+    if (props.part.state.status === "completed" && !isRunning() && action !== "status") {
       content.push(`└ ${tools().length} toolcalls · ${Locale.duration(duration())}`)
     }
 

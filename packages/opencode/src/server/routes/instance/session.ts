@@ -908,12 +908,17 @@ export const SessionRoutes = lazy(() =>
           const params = c.req.valid("param")
           const state = yield* SessionRunState.Service
           const session = yield* Session.Service
-          yield* state.assertNotBusy(params.sessionID)
-          yield* session.removeMessage({
-            sessionID: params.sessionID,
-            messageID: params.messageID,
-          })
-          return true
+          return yield* state.withExclusive(
+            params.sessionID,
+            "main",
+            Effect.gen(function* () {
+              yield* session.removeMessage({
+                sessionID: params.sessionID,
+                messageID: params.messageID,
+              })
+              return true
+            }),
+          )
         }),
     )
     .delete(
@@ -944,13 +949,20 @@ export const SessionRoutes = lazy(() =>
       async (c) =>
         jsonRequest("SessionRoutes.deletePart", c, function* () {
           const params = c.req.valid("param")
+          const state = yield* SessionRunState.Service
           const svc = yield* Session.Service
-          yield* svc.removePart({
-            sessionID: params.sessionID,
-            messageID: params.messageID,
-            partID: params.partID,
-          })
-          return true
+          return yield* state.withExclusive(
+            params.sessionID,
+            "main",
+            Effect.gen(function* () {
+              yield* svc.removePart({
+                sessionID: params.sessionID,
+                messageID: params.messageID,
+                partID: params.partID,
+              })
+              return true
+            }),
+          )
         }),
     )
     .patch(

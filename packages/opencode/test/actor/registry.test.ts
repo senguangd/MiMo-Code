@@ -418,7 +418,7 @@ describe("ActorRegistry", () => {
   })
 
   describe("orphan recovery", () => {
-    test("marks previously pending/running tasks as idle+failure on new layer init", async () => {
+    test("does not orphan a recent actor merely because instance_id differs", async () => {
       // First, create a task in "running" state
       await using tmp = await tmpdir({ git: true })
 
@@ -471,14 +471,15 @@ describe("ActorRegistry", () => {
         },
       })
 
-      // Second runtime (simulates restart): orphan recovery should mark it idle+failure
+      // A different instance id is not proof that the owner died. Recent work is
+      // preserved unless its execution lease is absent for longer than the grace.
       await withRegistry(tmp.path, async (rt) => {
         const recovered = await rt.runPromise(
           ActorRegistry.Service.use((svc) => svc.get(parentId!, taskId!)),
         )
-        expect(recovered!.status).toBe("idle")
-        expect(recovered!.lastOutcome).toBe("failure")
-        expect(recovered!.lastError).toBe("orphaned: process restarted")
+        expect(recovered!.status).toBe("running")
+        expect(recovered!.lastOutcome).toBeUndefined()
+        expect(recovered!.lastError).toBeUndefined()
       })
     })
 
@@ -566,7 +567,7 @@ describe("ActorRegistry", () => {
       })
     })
 
-    test("row from a different instanceID IS orphaned", async () => {
+    test("stale actor without an execution lease is orphaned", async () => {
       await using tmp = await tmpdir({ git: true })
 
       // First runtime: register an actor
@@ -607,7 +608,10 @@ describe("ActorRegistry", () => {
           await Database.use((db) =>
             db
               .update(ActorRegistryTable)
-              .set({ instance_id: "different-process-id" })
+              .set({
+                instance_id: "different-process-id",
+                last_turn_time: Date.now() - 60_000,
+              })
               .where(
                 and(
                   eq(ActorRegistryTable.session_id, parentId!),
@@ -619,14 +623,15 @@ describe("ActorRegistry", () => {
         },
       })
 
-      // Second runtime: should orphan the row with different instance_id
+      // Recovery is based on stale activity plus absence of an execution lease,
+      // not on process identity alone.
       await withRegistry(tmp.path, async (rt) => {
         const recovered = await rt.runPromise(
           ActorRegistry.Service.use((svc) => svc.get(parentId!, taskId!)),
         )
         expect(recovered!.status).toBe("idle")
         expect(recovered!.lastOutcome).toBe("failure")
-        expect(recovered!.lastError).toBe("orphaned: process restarted")
+        expect(recovered!.lastError).toBe("orphaned: execution lease expired")
       })
     })
   })

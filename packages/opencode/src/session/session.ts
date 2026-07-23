@@ -30,6 +30,7 @@ import { Permission } from "@/permission"
 import { forwardRef } from "@/permission/permission-forward-ref"
 import { Global } from "@/global"
 import { ActorRegistry } from "@/actor/registry"
+import { RuntimeLease } from "@/runtime/lease"
 import { Effect, Layer, Option, Context } from "effect"
 
 const log = Log.create({ service: "session" })
@@ -371,6 +372,16 @@ export class BusyError extends Error {
   }
 }
 
+export class DirectoryMismatchError extends Error {
+  constructor(
+    public readonly sessionID: string,
+    public readonly expected: string,
+    public readonly actual: string,
+  ) {
+    super(`Session ${sessionID} belongs to ${expected}, but the current client is running in ${actual}`)
+  }
+}
+
 export interface Interface {
   readonly create: (input?: {
     parentID?: SessionID
@@ -577,12 +588,14 @@ export const layer: Layer.Layer<Service, never, Bus.Service | Storage.Service | 
 
     const updateMessage = <T extends MessageV2.Info>(msg: T): Effect.Effect<T> =>
       Effect.gen(function* () {
+        yield* RuntimeLease.assertCurrent().pipe(Effect.orDie)
         yield* Effect.sync(() => SyncEvent.run(MessageV2.Event.Updated, { sessionID: msg.sessionID, info: msg }))
         return msg
       }).pipe(Effect.withSpan("Session.updateMessage"))
 
     const updatePart = <T extends MessageV2.Part>(part: T): Effect.Effect<T> =>
       Effect.gen(function* () {
+        yield* RuntimeLease.assertCurrent().pipe(Effect.orDie)
         yield* Effect.sync(() =>
           SyncEvent.run(MessageV2.Event.PartUpdated, {
             sessionID: part.sessionID,
@@ -745,6 +758,7 @@ export const layer: Layer.Layer<Service, never, Bus.Service | Storage.Service | 
       sessionID: SessionID
       messageID: MessageID
     }) {
+      yield* RuntimeLease.assertCurrent().pipe(Effect.orDie)
       yield* Effect.sync(() =>
         SyncEvent.run(MessageV2.Event.Removed, {
           sessionID: input.sessionID,
@@ -759,6 +773,7 @@ export const layer: Layer.Layer<Service, never, Bus.Service | Storage.Service | 
       messageID: MessageID
       partID: PartID
     }) {
+      yield* RuntimeLease.assertCurrent().pipe(Effect.orDie)
       yield* Effect.sync(() =>
         SyncEvent.run(MessageV2.Event.PartRemoved, {
           sessionID: input.sessionID,
@@ -776,6 +791,7 @@ export const layer: Layer.Layer<Service, never, Bus.Service | Storage.Service | 
       field: string
       delta: string
     }) {
+      yield* RuntimeLease.assertCurrent().pipe(Effect.orDie)
       yield* bus.publish(MessageV2.Event.PartDelta, input)
     })
 

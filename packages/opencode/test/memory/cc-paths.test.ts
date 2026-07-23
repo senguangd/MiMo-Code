@@ -37,6 +37,15 @@ describe("parseCcPath", () => {
     })
   })
 
+  test("Windows path separators are normalized", () => {
+    expect(parseCcPath(String.raw`C:\Users\u\.claude\projects\-foo\memory\sub\file.md`)).toEqual({
+      scope: "cc",
+      scope_id: "-foo",
+      type: "free",
+      key: "sub/file",
+    })
+  })
+
   test("nested key under memory dir is allowed", () => {
     expect(parseCcPath("/home/u/.claude/projects/-foo/memory/sub/file.md")).toEqual({
       scope: "cc",

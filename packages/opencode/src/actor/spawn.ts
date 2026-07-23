@@ -837,12 +837,19 @@ export const layer = Layer.effect(
         // Snapshot the actor row before cancelActor tears state down — we need
         // its mode/agent/background/parentActorID to decide + address the notify.
         const actor = yield* actorReg.get(sessionID, actorID)
-        yield* state.cancelActor(sessionID, actorID)
+        const cancellation = yield* state.cancelActor(sessionID, actorID)
+        if (cancellation === "remote") {
+          yield* Effect.sync(() => cancelling.delete(cancelKey(sessionID, actorID)))
+          return
+        }
         yield* actorReg
           .updateStatus(sessionID, actorID, { status: "idle", lastOutcome: "cancelled" })
           .pipe(Effect.ignore)
         yield* notifyTerminal(sessionID, actorID, actor, "cancelled")
-        yield* Effect.sync(() => forkContexts.delete(actorID))
+        yield* Effect.sync(() => {
+          cancelling.delete(cancelKey(sessionID, actorID))
+          forkContexts.delete(actorID)
+        })
       })
 
     const getForkContext = Effect.fn("Actor.getForkContext")(function* (actorID: string) {

@@ -16,6 +16,7 @@ import DESCRIPTION from "./apply_patch.txt"
 import { File } from "../file"
 import { Format } from "../format"
 import { Global } from "../global"
+import { AtomicWrite } from "./atomic-write"
 
 const PatchParams = z.object({
   patch_text: z.string().describe("The full patch text that describes all changes to be made"),
@@ -221,12 +222,12 @@ export const ApplyPatchTool = Tool.define(
           case "add":
             // Create parent directories (recursive: true is safe on existing/root dirs)
 
-            yield* afs.writeWithDirs(change.filePath, change.newContent)
+            yield* AtomicWrite.write(afs, change.filePath, change.newContent)
             updates.push({ file: change.filePath, event: "add" })
             break
 
           case "update":
-            yield* afs.writeWithDirs(change.filePath, change.newContent)
+            yield* AtomicWrite.write(afs, change.filePath, change.newContent)
             updates.push({ file: change.filePath, event: "change" })
             break
 
@@ -234,7 +235,7 @@ export const ApplyPatchTool = Tool.define(
             if (change.movePath) {
               // Create parent directories (recursive: true is safe on existing/root dirs)
 
-              yield* afs.writeWithDirs(change.movePath!, change.newContent)
+              yield* AtomicWrite.write(afs, change.movePath!, change.newContent)
               yield* afs.remove(change.filePath)
               updates.push({ file: change.filePath, event: "unlink" })
               updates.push({ file: change.movePath, event: "add" })

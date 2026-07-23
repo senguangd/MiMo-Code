@@ -7,6 +7,7 @@ import * as Truncate from "./truncate"
 import { RecoverableError } from "./recoverable"
 import { Agent } from "@/agent/agent"
 import type { ToolCapability } from "@mimo-ai/plugin/tool"
+import { RuntimeLease } from "@/runtime/lease"
 
 export interface Metadata {
   [key: string]: any
@@ -110,6 +111,7 @@ function wrap<Parameters extends z.ZodType, Result extends Metadata>(
           ...(ctx.callID ? { "tool.call_id": ctx.callID } : {}),
         }
         return Effect.gen(function* () {
+          yield* RuntimeLease.assertCurrent()
           yield* Effect.try({
             try: () => toolInfo.parameters.parse(args),
             catch: (error) => {
@@ -123,6 +125,7 @@ function wrap<Parameters extends z.ZodType, Result extends Metadata>(
             },
           })
           const result = yield* execute(args, ctx)
+          yield* RuntimeLease.assertCurrent()
           if (result.metadata.truncated !== undefined) {
             return result
           }

@@ -11,6 +11,8 @@ import type { AgentOutcome, ForkContext } from "@/actor/spawn"
 import { spawnRef } from "@/actor/spawn-ref"
 import { prefixCaptureRef } from "./prefix-capture-ref"
 import { Database, and, eq, or } from "@/storage"
+import { RuntimeLease } from "@/runtime/lease"
+import { AtomicWrite } from "@/tool/atomic-write"
 import { Instance } from "@/project/instance"
 import { ProjectID } from "@/project/schema"
 import { SessionTable } from "./session.sql"
@@ -131,26 +133,16 @@ function toolResultContinueReminder(): string {
   ].join("\n")
 }
 
-async function ensureCheckpointTemplate(checkpointFile: string): Promise<void> {
-  if (!(await Bun.file(checkpointFile).exists())) {
-    await fs.mkdir(path.dirname(checkpointFile), { recursive: true })
-    await Bun.write(checkpointFile, CHECKPOINT_TEMPLATE)
-  }
+function ensureTemplate(file: string, content: string) {
+  return Effect.gen(function* () {
+    if (yield* Effect.promise(() => Bun.file(file).exists())) return
+    yield* AtomicWrite.atomic(file, content).pipe(Effect.orDie)
+  })
 }
 
-async function ensureMemoryTemplate(memoryFile: string): Promise<void> {
-  if (!(await Bun.file(memoryFile).exists())) {
-    await fs.mkdir(path.dirname(memoryFile), { recursive: true })
-    await Bun.write(memoryFile, MEMORY_TEMPLATE)
-  }
-}
-
-async function ensureNotesTemplate(notesFile: string): Promise<void> {
-  if (!(await Bun.file(notesFile).exists())) {
-    await fs.mkdir(path.dirname(notesFile), { recursive: true })
-    await Bun.write(notesFile, NOTES_TEMPLATE)
-  }
-}
+const ensureCheckpointTemplate = (file: string) => ensureTemplate(file, CHECKPOINT_TEMPLATE)
+const ensureMemoryTemplate = (file: string) => ensureTemplate(file, MEMORY_TEMPLATE)
+const ensureNotesTemplate = (file: string) => ensureTemplate(file, NOTES_TEMPLATE)
 
 // Tail preservation budget (token-budgeted boundary).
 // Session-memory compact: minimum guarantees the LLM has enough
@@ -174,7 +166,7 @@ const TAIL_MIN_TEXT_BLOCK_MESSAGES = 5
 // agent appear hung — the failure mode that led to manual aborts + worker
 // teardown that killed the writer. Paired with a visible "Preparing
 // conversation context…" busy status during the wait.
-const REBUILD_WAIT_MS = "30 seconds"
+const REBUILD_WAIT_MS = 30_000
 
 // Safety bound for awaiting the FIRST checkpoint writer when no usable
 // checkpoint exists yet (no watermark). Unlike REBUILD_WAIT_MS this is not a
@@ -182,7 +174,7 @@ const REBUILD_WAIT_MS = "30 seconds"
 // the writer proper. The bound only guards the pathological case where the
 // writer's Deferred never resolves (e.g. its process died); on timeout we
 // defer to compaction. A normal writer settles well inside this.
-const FIRST_CHECKPOINT_WAIT_MS = "5 minutes"
+const FIRST_CHECKPOINT_WAIT_MS = 300_000
 
 
 // Rebuild-time microcompact (see
@@ -659,20 +651,6 @@ export const layer: Layer.Layer<
       const taskMemDir = path.join(sessMemDir, "tasks")
       const notesFile = notesPath(input.sessionID)
 
-      // Ensure dirs exist before writer fires
-      yield* Effect.promise(() => fs.mkdir(sessMemDir, { recursive: true }))
-      yield* Effect.promise(() => fs.mkdir(taskMemDir, { recursive: true }))
-      yield* Effect.promise(() => fs.mkdir(projectMemDir, { recursive: true }))
-
-      // Migrate legacy lowercase memory.md → MEMORY.md before templating/reading.
-      yield* Effect.promise(() => migrateProjectMemory(projectID))
-
-      // Bootstrap checkpoint.md, memory.md, and notes.md from templates if missing.
-      // Self-contained helpers also mkdir parent so they're safe in isolation.
-      yield* Effect.promise(() => ensureCheckpointTemplate(checkpointFile))
-      yield* Effect.promise(() => ensureMemoryTemplate(memoryFile))
-      yield* Effect.promise(() => ensureNotesTemplate(notesFile))
-
       // v5: single-file checkpoint, check if prior content exists
       const checkpointExists = yield* Effect.promise(() => Bun.file(checkpointFile).exists())
       const memoryExists = yield* Effect.promise(() => Bun.file(memoryFile).exists())
@@ -855,6 +833,31 @@ export const layer: Layer.Layer<
           })
         : Effect.succeed(undefined as ForkContext | undefined))
 
+      const leases = yield* RuntimeLease.acquireMany([
+        { resourceType: "checkpoint", resourceID: input.sessionID },
+        { resourceType: "project-memory", resourceID: projectID },
+      ])
+      if (!leases) {
+        log.info("checkpoint writer already owned by another process", { sessionID: input.sessionID })
+        return "skipped" as const
+      }
+      const releaseLeases = Effect.forEach([...leases].reverse(), RuntimeLease.release, { discard: true })
+
+      yield* Effect.gen(function* () {
+        yield* Effect.promise(() => fs.mkdir(sessMemDir, { recursive: true }))
+        yield* Effect.promise(() => fs.mkdir(taskMemDir, { recursive: true }))
+        yield* Effect.promise(() => fs.mkdir(projectMemDir, { recursive: true }))
+        yield* RuntimeLease.assertCurrent().pipe(Effect.orDie)
+        yield* Effect.promise(() => migrateProjectMemory(projectID))
+        yield* RuntimeLease.assertCurrent().pipe(Effect.orDie)
+        yield* ensureCheckpointTemplate(checkpointFile)
+        yield* ensureMemoryTemplate(memoryFile)
+        yield* ensureNotesTemplate(notesFile)
+      }).pipe(
+        Effect.provideService(RuntimeLease.Current, leases),
+        Effect.onError(() => releaseLeases),
+      )
+
       // Axis A: writer always runs in a fresh child session. This isolates the
       // writer's messages and actor registration from the parent so:
       //   - parent's message table sees zero new rows,
@@ -865,10 +868,12 @@ export const layer: Layer.Layer<
       // computed from input.sessionID (parent) above, so file writes still target
       // the parent's artifacts. Settle watcher below also targets parent.
       // See spec 2026-06-09-checkpoint-writer-child-session-and-no-fork-fallback-design.md §2.
-      const writerChildSession = yield* session.create({
-        parentID: input.sessionID,
-        title: `checkpoint-writer: ${rangeDesc}`,
-      })
+      const writerChildSession = yield* session
+        .create({
+          parentID: input.sessionID,
+          title: `checkpoint-writer: ${rangeDesc}`,
+        })
+        .pipe(Effect.onError(() => releaseLeases))
 
       // Estimate delta tokens for observability. forkCtx.inheritedMessages is
       // ModelMessage[]; an exact count requires the tokenizer, but a rough
@@ -904,7 +909,10 @@ export const layer: Layer.Layer<
         },
         background: true,
         forkContext: forkCtx,
-      })
+      }).pipe(
+        Effect.provideService(RuntimeLease.Current, leases),
+        Effect.onError(() => releaseLeases),
+      )
 
       const actorID = result.actorID
 
@@ -913,7 +921,9 @@ export const layer: Layer.Layer<
       // turn so the splitover plugin's preStop hook can read it. The set
       // runs in microseconds; the writer's first LLM round-trip takes
       // seconds — no race in practice. See spec §6.1.
-      const priorTitles = yield* Effect.promise(() => loadPriorDiscoveredTitles(input.sessionID))
+      const priorTitles = yield* Effect.promise(() => loadPriorDiscoveredTitles(input.sessionID)).pipe(
+        Effect.onError(() => releaseLeases),
+      )
       CheckpointContext.set(input.sessionID, actorID, {
         priorTitles,
         expectedRevisions: [],
@@ -933,9 +943,12 @@ export const layer: Layer.Layer<
       // delta, so nothing is lost. Fork into the layer's scope so the watcher
       // survives tryStartCheckpointWriter returning (background: true) but stays
       // tied to the layer's lifetime — no orphan fiber on shutdown.
-      yield* Effect.gen(function* () {
-        const outcome = yield* Deferred.await(result.outcome)
+      yield* RuntimeLease.hold(
+        leases,
+        Effect.gen(function* () {
+          const outcome = yield* Deferred.await(result.outcome)
         if (outcome.status === "success") {
+          yield* RuntimeLease.assertCurrent().pipe(Effect.orDie)
           yield* Effect.sync(() =>
             Database.use((d) =>
               d.update(SessionTable)
@@ -982,11 +995,12 @@ export const layer: Layer.Layer<
         // F40: drain pending. If a queued request exists, fire a fresh writer
         // for it. Errors are swallowed — the queued writer's failure should
         // not interrupt the original writer's settlement watcher.
-        if (pending) {
-          log.info("draining pending writer", { sessionID: input.sessionID })
-          yield* tryStartCheckpointWriter(pending).pipe(Effect.ignore)
-        }
-      }).pipe(
+          if (pending) {
+            log.info("draining pending writer", { sessionID: input.sessionID })
+            yield* tryStartCheckpointWriter(pending).pipe(Effect.ignore)
+          }
+        }),
+      ).pipe(
         Effect.ensuring(
           Effect.sync(() => CheckpointContext.remove(input.sessionID, actorID)),
         ),
@@ -996,19 +1010,36 @@ export const layer: Layer.Layer<
       return "started" as const
     })
 
+    const waitForRemoteWriter = Effect.fn("SessionCheckpoint.waitForRemoteWriter")(function* (
+      sessionID: SessionID,
+      timeoutMs: number,
+    ) {
+      const deadline = Date.now() + timeoutMs
+      while (Date.now() < deadline) {
+        const held = yield* RuntimeLease.isHeld({ resourceType: "checkpoint", resourceID: sessionID })
+        if (!held) return true
+        yield* Effect.sleep(250)
+      }
+      return !(yield* RuntimeLease.isHeld({ resourceType: "checkpoint", resourceID: sessionID }))
+    })
+
     const waitForWriter = Effect.fn("SessionCheckpoint.waitForWriter")(function* (sessionID: SessionID) {
       const state = writers.get(sessionID)
-      if (!state) return "no-writer" as const
+      if (state) {
+        const outcome = yield* Deferred.await(state.writing).pipe(
+          Effect.timeout(300_000),
+          Effect.catch(() => Effect.succeed<AgentOutcome>({ status: "failure", error: "timeout" })),
+        )
+        return outcome.status === "success" ? ("success" as const) : ("failure" as const)
+      }
 
-      // v2 writers manage 3 file types and frequently take 60-180s; pad to
-      // 5min so a long-but-honest writer is not mistaken for a failure by
-      // the prune retry watcher. AgentOutcome → WriterOutcome translation:
-      // success → "success", failure / cancelled → "failure".
-      const outcome = yield* Deferred.await(state.writing).pipe(
-        Effect.timeout(300_000),
-        Effect.catch(() => Effect.succeed<AgentOutcome>({ status: "failure", error: "timeout" })),
-      )
-      return outcome.status === "success" ? ("success" as const) : ("failure" as const)
+      const held = yield* RuntimeLease.isHeld({ resourceType: "checkpoint", resourceID: sessionID })
+      if (!held) return "no-writer" as const
+      const settled = yield* waitForRemoteWriter(sessionID, 300_000)
+      if (!settled) return "failure" as const
+      return (yield* lastBoundary(sessionID).pipe(Effect.catch(() => Effect.succeed(undefined))))
+        ? ("success" as const)
+        : ("failure" as const)
     })
 
     const drainWriters = Effect.fn("SessionCheckpoint.drainWriters")(function* (input?: { timeoutMs?: number }) {
@@ -1045,13 +1076,8 @@ export const layer: Layer.Layer<
     })
 
     const hasMemoryOrTasks = Effect.fn("SessionCheckpoint.hasMemoryOrTasks")(function* (sessionID: SessionID) {
-      const memoryRoot = yield* memory.root()
-      const sessMemDir = path.join(memoryRoot, "sessions", sessionID)
-      const memEntries = yield* Effect.promise(() =>
-        fs.readdir(sessMemDir).catch(() => [] as string[]),
-      )
-      if (memEntries.length > 0) return true
-      const tasks = yield* taskRegistry.list({ session_id: sessionID, include_terminal: true })
+      if (yield* lastBoundary(sessionID)) return true
+      const tasks = yield* taskRegistry.list({ session_id: sessionID, include_terminal: false })
       return tasks.length > 0
     })
 
@@ -1138,7 +1164,10 @@ export const layer: Layer.Layer<
       //                       caller compacts. We do NOT force "" on failure here
       //                       — that would suppress valid non-checkpoint context.
       const inFlight = writers.get(sessionID)
-      if (inFlight) {
+      const remoteInFlight = inFlight
+        ? false
+        : yield* RuntimeLease.isHeld({ resourceType: "checkpoint", resourceID: sessionID })
+      if (inFlight || remoteInFlight) {
         const watermarkBefore = yield* lastBoundary(sessionID).pipe(Effect.catch(() => Effect.succeed(undefined)))
         // Visible busy status so the wait shows progress, never a silent hang
         // (the historical trigger for a manual abort → worker teardown wedge).
@@ -1156,10 +1185,14 @@ export const layer: Layer.Layer<
         // (FIRST_CHECKPOINT_WAIT_MS) since there's nothing else to rebuild from,
         // bounded only to survive a writer whose Deferred never resolves.
         const bound = watermarkBefore ? REBUILD_WAIT_MS : FIRST_CHECKPOINT_WAIT_MS
-        const waited = yield* Effect.race(
-          Deferred.await(inFlight.writing).pipe(Effect.as("settled" as const)),
-          Effect.sleep(bound).pipe(Effect.as("timeout" as const)),
-        ).pipe(Effect.catch(() => Effect.succeed("settled" as const)))
+        const waited = inFlight
+          ? yield* Effect.race(
+              Deferred.await(inFlight.writing).pipe(Effect.as("settled" as const)),
+              Effect.sleep(bound).pipe(Effect.as("timeout" as const)),
+            ).pipe(Effect.catch(() => Effect.succeed("settled" as const)))
+          : (yield* waitForRemoteWriter(sessionID, bound))
+            ? ("settled" as const)
+            : ("timeout" as const)
         log.info("rebuild proceeding after writer wait", { sessionID, waited, hadCheckpoint: !!watermarkBefore })
       }
 
@@ -1454,7 +1487,8 @@ export const layer: Layer.Layer<
     })
 
     const isWriterRunning = Effect.fn("SessionCheckpoint.isWriterRunning")(function* (sessionID: SessionID) {
-      return writers.has(sessionID)
+      if (writers.has(sessionID)) return true
+      return yield* RuntimeLease.isHeld({ resourceType: "checkpoint", resourceID: sessionID })
     })
 
     const insertRebuildBoundary = Effect.fn("SessionCheckpoint.insertRebuildBoundary")(function* (input: {

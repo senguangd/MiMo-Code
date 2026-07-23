@@ -69,6 +69,11 @@ const PS = new Set(["pwsh", "powershell"])
 const ps = shells.filter((item) => PS.has(item.label))
 
 const sh = () => Shell.name(Shell.acceptable())
+const timeoutCommand = () => {
+  if (PS.has(sh())) return "Write-Output started; Start-Sleep -Seconds 60"
+  if (sh() === "cmd") return "echo started & ping -n 61 127.0.0.1 >nul"
+  return "echo started && sleep 60"
+}
 const evalarg = (text: string) => (sh() === "cmd" ? quote(text) : squote(text))
 
 const fill = (mode: "lines" | "bytes", n: number) => {
@@ -1179,7 +1184,7 @@ describe("tool.bash abort", () => {
         const result = await Effect.runPromise(
           bash.execute(
             {
-              command: `echo started && sleep 60`,
+              command: timeoutCommand(),
               description: "Timeout test",
               timeout: 500,
             },

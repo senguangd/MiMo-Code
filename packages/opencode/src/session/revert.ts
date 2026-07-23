@@ -39,7 +39,10 @@ export const layer = Layer.effect(
     const state = yield* SessionRunState.Service
 
     const revert = Effect.fn("SessionRevert.revert")(function* (input: RevertInput) {
-      yield* state.assertNotBusy(input.sessionID)
+      return yield* state.withExclusive(
+        input.sessionID,
+        "main",
+        Effect.gen(function* () {
       const all = yield* sessions.messages({ sessionID: input.sessionID, agentID: "*" })
       let lastUser: MessageV2.User | undefined
       const session = yield* sessions.get(input.sessionID)
@@ -88,16 +91,23 @@ export const layer = Layer.effect(
         },
       })
       return yield* sessions.get(input.sessionID)
+        }),
+      )
     })
 
     const unrevert = Effect.fn("SessionRevert.unrevert")(function* (input: { sessionID: SessionID }) {
       log.info("unreverting", input)
-      yield* state.assertNotBusy(input.sessionID)
+      return yield* state.withExclusive(
+        input.sessionID,
+        "main",
+        Effect.gen(function* () {
       const session = yield* sessions.get(input.sessionID)
       if (!session.revert) return session
       if (session.revert.snapshot) yield* snap.restore(session.revert!.snapshot!)
       yield* sessions.clearRevert(input.sessionID)
       return yield* sessions.get(input.sessionID)
+        }),
+      )
     })
 
     const cleanup = Effect.fn("SessionRevert.cleanup")(function* (session: Session.Info) {

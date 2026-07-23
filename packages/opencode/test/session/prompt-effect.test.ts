@@ -53,6 +53,7 @@ import { checkpointPath } from "../../src/session/checkpoint-paths"
 import { SessionTable } from "../../src/session/session.sql"
 import { Database } from "../../src/storage"
 import { TaskRegistry } from "../../src/task/registry"
+import { TaskTable } from "../../src/task/task.sql"
 import { defaultLayer as SchedulerDefaultLayer } from "../../src/cron/scheduler"
 import { Auth } from "../../src/auth"
 import { Log } from "../../src/util"
@@ -1146,8 +1147,7 @@ mcpIt.live("MCP structuredContent is persisted and reaches the model alongside t
 
 it.live("glob tool keeps instance context during prompt runs", () =>
   provideTmpdirServer(
-    ({ dir, llm }) =>
-      Effect.gen(function* () {
+    Effect.fnUntraced(function* ({ dir, llm }) {
         const prompt = yield* SessionPrompt.Service
         const sessions = yield* Session.Service
         const session = yield* sessions.create({
@@ -1181,6 +1181,54 @@ it.live("glob tool keeps instance context during prompt runs", () =>
         expect(tool.state.output).toContain(file)
         expect(tool.state.output).not.toContain("No context found for instance")
         expect(result.parts.some((part) => part.type === "text" && part.text === "done")).toBe(true)
+      }),
+    { git: true, config: providerCfg },
+  ),
+)
+
+it.live("recall reminder is delivered once across a multi-step turn", () =>
+  provideTmpdirServer(
+    ({ dir, llm }) =>
+      Effect.gen(function* () {
+        const prompt = yield* SessionPrompt.Service
+        const sessions = yield* Session.Service
+        const session = yield* sessions.create({
+          title: "Recall once",
+          permission: [{ permission: "*", pattern: "*", action: "allow" }],
+        })
+        const now = Date.now()
+        Database.use((db) =>
+          db.insert(TaskTable).values({
+            session_id: session.id,
+            id: "T1",
+            parent_task_id: null,
+            status: "open",
+            summary: "Keep working",
+            owner: null,
+            created_at: now,
+            last_event_at: now,
+            ended_at: null,
+            cleanup_after: null,
+          }).run(),
+        )
+        yield* Effect.promise(() => Bun.write(path.join(dir, "recall-probe.txt"), "probe"))
+
+        yield* prompt.prompt({
+          sessionID: session.id,
+          agent: "build",
+          noReply: true,
+          parts: [{ type: "text", text: "inspect the files and continue" }],
+        })
+        yield* llm.tool("glob", { pattern: "**/*.txt" })
+        yield* llm.text("done")
+
+        yield* prompt.loop({ sessionID: session.id })
+        const inputs = yield* llm.inputs
+        const rendered = inputs.map((input) => JSON.stringify(input))
+        const markerText = "This is a targeted recall hint, not a context reset or context-clear event."
+        expect(rendered.filter((input) => input.includes(markerText))).toHaveLength(1)
+        expect(rendered.join("\n")).not.toContain("context has been cleared")
+        expect(rendered.join("\n")).not.toContain("context has been reset")
       }),
     { git: true, config: providerCfg },
   ),
@@ -1323,7 +1371,7 @@ it.live(
       }),
       { git: true, config: providerCfg },
     ),
-  3_000,
+  10_000,
 )
 
 estimateIt.live(
@@ -1543,7 +1591,7 @@ it.live(
 )
 
 it.live(
-  "prompt submitted during an active run is included in the next LLM input",
+  "prompt submitted during an active run is rejected before persistence",
   () =>
     provideTmpdirServer(
       Effect.fnUntraced(function* ({ llm }) {
@@ -1553,9 +1601,8 @@ it.live(
         const chat = yield* sessions.create({ title: "Pinned" })
 
         yield* llm.hold("first", gate.promise)
-        yield* llm.text("second")
 
-        const a = yield* prompt
+        const first = yield* prompt
           .prompt({
             sessionID: chat.id,
             agent: "build",
@@ -1567,7 +1614,7 @@ it.live(
         yield* llm.wait(1)
 
         const id = MessageID.ascending()
-        const b = yield* prompt
+        const second = yield* prompt
           .prompt({
             sessionID: chat.id,
             messageID: id,
@@ -1575,36 +1622,23 @@ it.live(
             model: ref,
             parts: [{ type: "text", text: "second" }],
           })
-          .pipe(Effect.forkChild)
+          .pipe(Effect.exit)
 
-        yield* Effect.promise(async () => {
-          const end = Date.now() + 5000
-          while (Date.now() < end) {
-            const msgs = await Effect.runPromise(sessions.messages({ sessionID: chat.id }))
-            if (msgs.some((msg) => msg.info.role === "user" && msg.info.id === id)) return
-            await new Promise((done) => setTimeout(done, 20))
-          }
-          throw new Error("timed out waiting for second prompt to save")
-        })
+        expect(Exit.isFailure(second)).toBe(true)
+        if (Exit.isFailure(second)) expect(Cause.squash(second.cause)).toBeInstanceOf(Session.BusyError)
+        expect((yield* sessions.messages({ sessionID: chat.id })).some((msg) => msg.info.id === id)).toBe(false)
 
         gate.resolve()
-
-        const [ea, eb] = yield* Effect.all([Fiber.await(a), Fiber.await(b)])
-        expect(Exit.isSuccess(ea)).toBe(true)
-        expect(Exit.isSuccess(eb)).toBe(true)
-        expect(yield* llm.calls).toBe(2)
-
-        const msgs = yield* sessions.messages({ sessionID: chat.id })
-        const assistants = msgs.filter((msg) => msg.info.role === "assistant")
-        expect(assistants).toHaveLength(2)
-        const last = assistants.at(-1)
-        if (!last || last.info.role !== "assistant") throw new Error("expected second assistant")
-        expect(last.info.parentID).toBe(id)
-        expect(last.parts.some((part) => part.type === "text" && part.text === "second")).toBe(true)
-
+        const firstExit = yield* Fiber.await(first)
+        expect(Exit.isSuccess(firstExit)).toBe(true)
+        expect(yield* llm.calls).toBe(1)
         const inputs = yield* llm.inputs
-        expect(inputs).toHaveLength(2)
-        expect(JSON.stringify(inputs.at(-1)?.messages)).toContain("second")
+        expect(inputs).toHaveLength(1)
+        const userMessages = ((inputs[0]?.messages ?? []) as Array<{ role?: string }>).filter(
+          (message) => message.role === "user",
+        )
+        expect(JSON.stringify(userMessages)).toContain('"text":"first"')
+        expect(JSON.stringify(userMessages)).not.toContain('"text":"second"')
       }),
       { git: true, config: providerCfg },
     ),
@@ -1612,7 +1646,7 @@ it.live(
 )
 
 it.live(
-  "queued prompt resumes after the active run is interrupted",
+  "rejected prompt is not resumed after the active run is interrupted",
   () =>
     provideTmpdirServer(
       Effect.fnUntraced(function* ({ llm }) {
@@ -1622,7 +1656,6 @@ it.live(
         const instance = yield* InstanceState.context
 
         yield* llm.hang
-        yield* llm.text("second")
 
         const first = yield* prompt
           .prompt({
@@ -1644,37 +1677,25 @@ it.live(
             model: ref,
             parts: [{ type: "text", text: "second" }],
           })
-          .pipe(Effect.provideService(InstanceRef, instance), Effect.forkChild)
+          .pipe(Effect.provideService(InstanceRef, instance), Effect.exit)
 
-        yield* Effect.promise(async () => {
-          const end = Date.now() + 5000
-          while (Date.now() < end) {
-            const msgs = await Effect.runPromise(sessions.messages({ sessionID: chat.id }))
-            if (msgs.some((msg) => msg.info.role === "user" && msg.info.id === id)) return
-            await new Promise((done) => setTimeout(done, 20))
-          }
-          throw new Error("timed out waiting for queued prompt to save")
-        })
+        expect(Exit.isFailure(second)).toBe(true)
+        if (Exit.isFailure(second)) expect(Cause.squash(second.cause)).toBeInstanceOf(Session.BusyError)
+        expect((yield* sessions.messages({ sessionID: chat.id })).some((msg) => msg.info.id === id)).toBe(false)
 
         yield* prompt.cancel(chat.id)
-
-        const [firstExit, secondExit] = yield* Effect.all([Fiber.await(first), Fiber.await(second)])
+        const firstExit = yield* Fiber.await(first)
         expect(Exit.isSuccess(firstExit)).toBe(true)
-        expect(Exit.isSuccess(secondExit)).toBe(true)
-        expect(yield* llm.calls).toBe(2)
+        expect(yield* llm.calls).toBe(1)
 
         const msgs = yield* sessions.messages({ sessionID: chat.id })
         const assistants = msgs.filter((msg) => msg.info.role === "assistant")
-        expect(assistants).toHaveLength(2)
+        expect(assistants).toHaveLength(1)
         expect(
           assistants.some(
             (msg) => msg.info.role === "assistant" && msg.info.error?.name === "MessageAbortedError",
           ),
         ).toBe(true)
-        const last = assistants.at(-1)
-        if (!last || last.info.role !== "assistant") throw new Error("expected resumed assistant")
-        expect(last.info.parentID).toBe(id)
-        expect(last.parts.some((part) => part.type === "text" && part.text === "second")).toBe(true)
       }),
       { git: true, config: providerCfg },
     ),

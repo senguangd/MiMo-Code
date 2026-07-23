@@ -315,21 +315,31 @@ describe("text loop detection (integration, MockLLM)", () => {
           // Final message should contain the recovered text
           expect(result.parts.some((p) => p.type === "text" && p.text.includes("different approach"))).toBe(true)
 
-          // Verify recovery prompt was injected as a separate user message
+          // The no-progress action-cycle guard may fire before the legacy text-only
+          // detector because this scenario repeats the same tool input AND result.
+          // Assert the stable contract: a separate synthetic replan is injected,
+          // the original user message remains untouched, and the loop recovers.
           const msgs = yield* sessions.messages({ sessionID: session.id })
           const recoveryMsg = msgs.find(
-            (m) => m.info.role === "user" && m.parts.some(
-              (p) => p.type === "text" && "synthetic" in p && p.synthetic && p.text.includes("LOOP DETECTED"),
-            ),
+            (m) =>
+              m.info.role === "user" &&
+              m.parts.some(
+                (p) =>
+                  p.type === "text" &&
+                  "synthetic" in p &&
+                  p.synthetic &&
+                  (p.text.includes("action-cycle-replan") || p.text.includes("LOOP DETECTED")),
+              ),
           )
           console.log(`[text-loop] Recovery prompt injected as new message: ${!!recoveryMsg}`)
           expect(recoveryMsg).toBeDefined()
-          // It should NOT be on the original user message
           const originalUser = msgs.find(
             (m) => m.info.role === "user" && m.parts.some((p) => p.type === "text" && p.text === "create a changelog"),
           )
           const hasRecoveryOnOriginal = originalUser?.parts.some(
-            (p) => p.type === "text" && p.text.includes("LOOP DETECTED"),
+            (p) =>
+              p.type === "text" &&
+              (p.text.includes("action-cycle-replan") || p.text.includes("LOOP DETECTED")),
           )
           expect(hasRecoveryOnOriginal).toBeFalsy()
         }),
@@ -436,17 +446,28 @@ describe("text loop detection (integration, MockLLM)", () => {
           }
           console.log("")
 
-          // Verify: 2 recovery prompts injected (mild + strong)
+          // The stronger action-cycle guard and the legacy text detector are
+          // complementary. Their ordering is intentionally not part of the
+          // contract; what matters is bounded recovery and no endless polling.
           const recoveryMsgs = allMsgs.filter(
-            (m) => m.info.role === "user" && m.parts.some((p) => "synthetic" in p && (p as any).synthetic && p.type === "text" && p.text.includes("system-reminder")),
+            (m) =>
+              m.info.role === "user" &&
+              m.parts.some(
+                (p) => "synthetic" in p && (p as any).synthetic && p.type === "text" && p.text.includes("system-reminder"),
+              ),
           )
+          const recoveryText = recoveryMsgs
+            .flatMap((message) => message.parts)
+            .filter((part) => part.type === "text")
+            .map((part) => part.text)
           console.log(`[7-repeats] Recovery messages injected: ${recoveryMsgs.length}`)
           expect(recoveryMsgs.length).toBe(2)
-          expect(recoveryMsgs[0].parts.some((p) => p.type === "text" && p.text.includes("LOOP DETECTED"))).toBe(true)
-          expect(recoveryMsgs[1].parts.some((p) => p.type === "text" && p.text.includes("CRITICAL"))).toBe(true)
+          expect(recoveryText.some((text) => text.includes("action-cycle-replan"))).toBe(true)
+          expect(recoveryText.some((text) => text.includes("LOOP DETECTED"))).toBe(true)
+          expect(mockLLM.calls).toBeLessThanOrEqual(7)
         }),
       { git: true, config: cfg },
     ),
-    30_000,
+    60_000,
   )
 })

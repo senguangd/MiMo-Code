@@ -14,6 +14,7 @@ import { Instance } from "../project/instance"
 import { SessionCwd } from "./session-cwd"
 import { trimDiff } from "./edit"
 import { assertWriteAllowed, askEditUnlessMemory } from "./external-directory"
+import { AtomicWrite } from "./atomic-write"
 
 const MAX_PROJECT_DIAGNOSTICS_FILES = 5
 
@@ -47,7 +48,7 @@ export const WriteTool = Tool.define(
             diff,
           })
 
-          yield* fs.writeWithDirs(filepath, params.content)
+          yield* AtomicWrite.write(fs, filepath, params.content)
           yield* format.file(filepath)
           yield* bus.publish(File.Event.Edited, { file: filepath })
           yield* bus.publish(FileWatcher.Event.Updated, {

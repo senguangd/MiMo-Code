@@ -111,6 +111,7 @@ import { InstanceState } from "@/effect"
 import { ActorTool, type ActorPromptOps } from "@/tool/actor"
 import { SessionRunState } from "./run-state"
 import { Goal } from "./goal"
+import { SessionPromptState } from "./prompt-state"
 import { TaskRegistry } from "@/task/registry"
 import { EffectBridge } from "@/effect"
 import { Team } from "@/team"
@@ -167,13 +168,6 @@ export function stableRootTitle(input: { agent: string | undefined; parentID: st
 const MAX_GOAL_REACT = 12
 
 /**
- * Number of consecutive finished assistant steps with an identical action
- * signature that trips the repeated-step nudge. Three in a row is a strong
- * signal the model is stuck repeating itself rather than making progress.
- */
-const REPEATED_STEP_THRESHOLD = 3
-
-/**
  * Deterministic JSON serialization with sorted object keys, so that two
  * semantically-identical tool inputs produce the same string regardless of the
  * order the model happened to emit the keys in. `JSON.stringify` preserves
@@ -192,52 +186,32 @@ function stableStringify(value: unknown): string {
   )
 }
 
-/**
- * Stable signature for an assistant step's *action* — the tool calls it made
- * (name + key-order-independent input). Text and reasoning are excluded on
- * purpose: in a ReAct loop the model narrates each step in slightly different
- * words while taking the exact same action, and some models emit their
- * reasoning as plain text parts — counting either would mask the repeated
- * action we want to catch. Returns undefined when a step makes no tool calls
- * (e.g. a pure-text turn), since there is no repeated *action* to compare.
- */
-function stepSignature(parts: MessageV2.Part[]): string | undefined {
-  const segments: string[] = []
-  for (const part of parts) {
-    if (part.type === "tool") {
-      segments.push("tool:" + part.tool + ":" + stableStringify(part.state.input ?? {}))
-    }
-  }
+export function actionFingerprint(parts: MessageV2.Part[]): string | undefined {
+  const segments = parts.flatMap((part) => {
+    if (part.type !== "tool") return []
+    const result = (() => {
+      if (part.state.status === "completed")
+        return `completed:${Bun.hash(part.state.output).toString(16)}`
+      if (part.state.status === "error") return `error:${Bun.hash(part.state.error).toString(16)}`
+      return part.state.status
+    })()
+    return [`${part.tool}:${stableStringify(part.state.input ?? {})}:${result}`]
+  })
   if (segments.length === 0) return undefined
   return segments.join("\n")
 }
 
-/**
- * Debounce decision for the high-context-pressure memory-flush nudge.
- *
- * Returns true if a nudge (a text part containing `marker`) has already been
- * injected within the *current high-pressure episode*, where the episode is the
- * message window since the last checkpoint boundary.
- *
- * Keying off the checkpoint boundary rather than a fixed message count is
- * deliberate: a single sustained high-pressure turn can emit many tool-call
- * steps — each its own message — so a fixed-size tail would let the
- * already-nudged message slide out of the window and re-fire the nudge
- * mid-turn. The boundary only advances when a checkpoint/rebuild actually
- * discards context, which is exactly when a fresh nudge becomes useful again.
- *
- * When `boundaryID` is undefined (no checkpoint yet) or is not found in `msgs`,
- * the whole conversation is treated as the current episode.
- */
-export function nudgedSinceBoundary(
-  msgs: readonly MessageV2.WithParts[],
-  boundaryID: string | undefined,
-  marker: string,
-): boolean {
-  const boundaryIdx = boundaryID ? msgs.findIndex((m) => m.info.id === boundaryID) : -1
-  const episode = boundaryIdx >= 0 ? msgs.slice(boundaryIdx) : msgs
-  return episode.some((m) => m.parts.some((p) => p.type === "text" && p.text?.includes(marker)))
+export function detectActionCycle(buffer: readonly string[], repeats = 3, maxPeriod = 3) {
+  for (let period = 1; period <= maxPeriod; period++) {
+    const size = period * repeats
+    if (buffer.length < size) continue
+    const tail = buffer.slice(-size)
+    if (tail.every((value, index) => value === tail[index % period])) return period
+  }
+  return undefined
 }
+
+const ACTION_CYCLE_RECOVERY_MARKER = "action-cycle-replan"
 
 const STRUCTURED_OUTPUT_DESCRIPTION = `Use this tool to return your final response in the requested structured format.
 
@@ -313,6 +287,13 @@ export const layer = Layer.effect(
     const llm = yield* LLM.Service
     const actorRegistry = yield* ActorRegistry.Service
     const inbox = yield* Inbox.Service
+
+    const assertDirectory = Effect.fn("SessionPrompt.assertDirectory")(function* (sessionID: SessionID) {
+      const session = yield* sessions.get(sessionID)
+      const actual = (yield* InstanceState.context).directory
+      if (AppFileSystem.normalizePath(session.directory) === AppFileSystem.normalizePath(actual)) return
+      throw new Session.DirectoryMismatchError(sessionID, session.directory, actual)
+    })
 
     // Track sessions that have already shown the "loaded instructions" toast so we
     // surface it once per primary session rather than on every run-loop turn.
@@ -2429,35 +2410,36 @@ NOTE: At any point in time through this workflow you should feel free to ask the
 
     const prompt: (input: PromptInput) => Effect.Effect<MessageV2.WithParts> = Effect.fn("SessionPrompt.prompt")(
       function* (input: PromptInput) {
-        const session = yield* sessions.get(input.sessionID)
-        if (input.source !== "spawn" && input.source !== "hook") {
-          yield* revert.cleanup(session)
-          // An idle session has no active runner, so any dangling assistant is a
-          // true orphan from a hard interruption — sweep it now (age-independent)
-          // so a fresh message is not rendered as stuck QUEUED behind it.
-          const idle = (yield* status.get(input.sessionID)).type === "idle"
-          yield* sweepOrphanAssistants(input.sessionID, idle)
-        }
-        const message = yield* createUserMessage(input)
-        yield* sessions.touch(input.sessionID)
+        yield* assertDirectory(input.sessionID)
+        const agentID = input.agentID ?? "main"
+        return yield* state.startExclusive(
+          input.sessionID,
+          agentID,
+          lastAssistant(input.sessionID, agentID),
+          Effect.gen(function* () {
+            const session = yield* sessions.get(input.sessionID)
+            if (input.source !== "spawn" && input.source !== "hook") {
+              yield* revert.cleanup(session)
+              yield* sweepOrphanAssistants(input.sessionID, true)
+            }
+            const message = yield* createUserMessage(input)
+            yield* sessions.touch(input.sessionID)
 
-        const permissions: Permission.Ruleset = []
-        for (const [t, enabled] of Object.entries(input.tools ?? {})) {
-          permissions.push({ permission: t, action: enabled ? "allow" : "deny", pattern: "*" })
-        }
-        if (permissions.length > 0) {
-          session.permission = permissions
-          yield* sessions.setPermission({ sessionID: session.id, permission: permissions })
-        }
+            const permissions: Permission.Ruleset = []
+            for (const [t, enabled] of Object.entries(input.tools ?? {})) {
+              permissions.push({ permission: t, action: enabled ? "allow" : "deny", pattern: "*" })
+            }
+            if (permissions.length > 0) {
+              session.permission = permissions
+              yield* sessions.setPermission({ sessionID: session.id, permission: permissions })
+            }
 
-        if (input.noReply === true) return message
-        const next = { sessionID: input.sessionID, agentID: input.agentID ?? "main", task_id: input.task_id }
-        const result = yield* loop(next)
-        // A prompt submitted while the runner is busy initially joins that in-flight run.
-        // If its result predates this user message, the accepted message has not been
-        // consumed yet; the runner is now free, so start one fresh drain pass.
-        if (result.info.role === "assistant" && message.info.id < result.info.id) return result
-        return yield* loop(next)
+            if (input.noReply === true) return message
+            const result = yield* runLoop(input.sessionID, agentID, input.task_id)
+            if (result.info.role === "assistant" && message.info.id < result.info.id) return result
+            return yield* runLoop(input.sessionID, agentID, input.task_id)
+          }),
+        )
       },
     )
 
@@ -2625,6 +2607,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
         let skipOverflowCheck = false
 
         const textLoopBuffer: string[] = []
+        const actionCycleBuffer: string[] = []
         let textLoopRecoveryAttempts = 0
         let textNgramRecoveryAttempts = 0
 
@@ -3178,39 +3161,27 @@ NOTE: At any point in time through this workflow you should feel free to ask the
 
           if (!lastUser) throw new Error("No user message found in stream. This should never happen.")
 
-          // Per-user-message active recall reminder. Once the session has
-          // any memory artifacts (memory dir populated OR tasks recorded),
-          // append a brief recall protocol so the agent's reflex to query
-          // memory.search / task / actor / Read stays warm across many
-          // post-rebuild turns. Cost ~120 tokens per turn, conditional on
-          // hasMemoryOrTasks.
-          const lastUserMsgForRecall = msgs.findLast((m) => m.info.role === "user")
-          if (lastUserMsgForRecall) {
-            const hasRecallTarget = yield* checkpoint
-              .hasMemoryOrTasks(sessionID)
-              .pipe(Effect.catch(() => Effect.succeed(false)))
-            if (hasRecallTarget) {
+          const stepSystemReminders: string[] = []
+          const servesCheckpoint = yield* actorRegistry.servesCheckpoint(sessionID, lastUser.agentID)
+          if (servesCheckpoint && (yield* checkpoint.hasMemoryOrTasks(sessionID))) {
+            const claimed = yield* SessionPromptState.claimRecall(sessionID, lastUser.id)
+            if (claimed) {
               const sessMemDir = path.join(Global.Path.data, "memory", "sessions", sessionID)
               const hints = recallHintLines((yield* config.get()).tool)
-              lastUserMsgForRecall.parts.push({
-                id: PartID.ascending(),
-                messageID: lastUserMsgForRecall.info.id,
-                sessionID,
-                type: "text" as const,
-                synthetic: true,
-                text: [
-                  "<system-reminder>",
-                  `This session has memory at ${sessMemDir}/. Recall content`,
-                  "not in your context with:",
+              stepSystemReminders.push(
+                [
+                  "This is a targeted recall hint, not a context reset or context-clear event.",
+                  "Continue from the visible conversation. Only look up memory when a specific",
+                  "required fact is missing; do not perform a broad context-recovery pass and",
+                  "do not reread whole files already represented in the current context.",
+                  `Session memory path: ${sessMemDir}/`,
                   hints[0],
-                  `- Read(file_path="${sessMemDir}/...")`,
+                  `- Read(file_path=\"${sessMemDir}/...\")`,
                   hints[1],
                   hints[2],
-                  "",
-                  "Don't ask the user about something memory may already record.",
-                  "</system-reminder>",
+                  "Do not ask the user for information that targeted memory already records.",
                 ].join("\n"),
-              })
+              )
             }
           }
 
@@ -3376,100 +3347,26 @@ NOTE: At any point in time through this workflow you should feel free to ask the
             continue
           }
 
-          // Memory flush nudge at high context pressure.
-          //
-          // Purpose: at high context fill, the session may soon checkpoint and
-          // discard old context, so remind the model to externalize durable
-          // learnings to memory BEFORE that happens. This is a *save-your-work*
-          // reminder, NOT a signal to wrap up.
-          //
-          // Two failure modes this guards against (both observed in prod):
-          //   1. Wording that reads as "we're about to reset — wind down" made
-          //      models prematurely end their turn and hand control back to the
-          //      user mid-task. The text below is explicit: persist memory, then
-          //      KEEP GOING; do not end the turn.
-          //   2. Re-injecting the nudge on every user turn while pressure stays
-          //      high turned a one-time heads-up into per-turn nagging. We now
-          //      dedup across the recent conversation window, not just the
-          //      current user message.
+          // Memory flush nudge at high context pressure. Persist the episode
+          // marker so process restarts and concurrent runtimes cannot re-inject it.
           if (lastFinished && lastFinished.summary !== true && model) {
             const cfg = yield* config.get()
             const pressure = pressureLevel({ cfg, tokens: lastFinished.tokens, model })
             if (pressure >= 2) {
-              // De-bounce: nudge at most once per high-pressure episode (the
-              // window since the last checkpoint boundary). See
-              // nudgedSinceBoundary for why the boundary — not a fixed message
-              // count — is the right anchor.
-              const NUDGE_MARKER = "Context is filling up"
               const boundaryID = yield* checkpoint
                 .lastBoundary(sessionID)
                 .pipe(Effect.catch(() => Effect.succeed(undefined)))
-              const alreadyNudged = nudgedSinceBoundary(msgs, boundaryID, NUDGE_MARKER)
-              const lastUserMsg = msgs.findLast((m) => m.info.role === "user")
-              if (lastUserMsg && !alreadyNudged) {
-                lastUserMsg.parts.push({
-                  id: PartID.ascending(),
-                  messageID: lastUserMsg.info.id,
-                  sessionID,
-                  type: "text",
-                  synthetic: true,
-                  text: [
-                    "<system-reminder>",
-                    `Context is filling up (${pressure >= 3 ? ">85%" : ">70%"}).`,
-                    "If you have important learnings or decisions from this session that are",
-                    "not yet in memory, write them now (they may be summarized on the next",
-                    "checkpoint). This is a save-your-work reminder only.",
-                    "IMPORTANT: After writing to memory, CONTINUE with the current task in the",
-                    "same turn. Do NOT stop, wrap up, or hand control back to the user because",
-                    "of this reminder — only finish when the actual work is done.",
-                    "</system-reminder>",
+              const claimed = yield* SessionPromptState.claimPressure(sessionID, boundaryID ?? "root")
+              if (claimed) {
+                stepSystemReminders.push(
+                  [
+                    `Context pressure is ${pressure >= 3 ? ">85%" : ">70%"}.`,
+                    "This is only a save-your-work reminder, not a context reset.",
+                    "Persist important new decisions that are not already in memory, then",
+                    "continue the current task in the same turn. Do not stop or broadly",
+                    "reread history because of this reminder.",
                   ].join("\n"),
-                })
-              }
-            }
-          }
-
-          // Repeated-step nudge: if the last REPEATED_STEP_THRESHOLD finished
-          // assistant steps made an identical tool call, the model is likely
-          // stuck looping. Inject a reminder on the last user message asking it
-          // to change approach. Mirrors the memory-flush nudge above (synthetic
-          // text part, deduped per build).
-          if (lastFinished) {
-            const recentSignatures: string[] = []
-            for (let i = msgs.length - 1; i >= 0 && recentSignatures.length < REPEATED_STEP_THRESHOLD; i--) {
-              const m = msgs[i]
-              if (m.info.role !== "assistant" || !m.info.finish) continue
-              const sig = stepSignature(m.parts)
-              if (sig === undefined) break
-              recentSignatures.push(sig)
-            }
-            const repeating =
-              recentSignatures.length === REPEATED_STEP_THRESHOLD &&
-              recentSignatures.every((sig) => sig === recentSignatures[0])
-            if (repeating) {
-              const lastUserMsg = msgs.findLast((m) => m.info.role === "user")
-              if (
-                lastUserMsg &&
-                !lastUserMsg.parts.some(
-                  (p) => p.type === "text" && p.text?.includes("repeating the same action"),
                 )
-              ) {
-                lastUserMsg.parts.push({
-                  id: PartID.ascending(),
-                  messageID: lastUserMsg.info.id,
-                  sessionID,
-                  type: "text",
-                  synthetic: true,
-                  text: [
-                    "<system-reminder>",
-                    `Your last ${REPEATED_STEP_THRESHOLD} steps have been identical — you appear to be`,
-                    "repeating the same action without making progress. Stop and reconsider:",
-                    "the current approach is not working. Try a different strategy, use a",
-                    "different tool, or if you are blocked, explain the blocker to the user",
-                    "instead of repeating the same step again.",
-                    "</system-reminder>",
-                  ].join("\n"),
-                })
               }
             }
           }
@@ -3702,7 +3599,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
                 (m) => m.info.id > forkCtx.watermarkMsgID && m.info.agentID === lastUser.agentID,
               )
               const ownNewModelMsgs = yield* MessageV2.toModelMessagesEffect(ownNew, model)
-              const prebuiltSystem = forkCtx.system
+              const prebuiltSystem = [...forkCtx.system, ...stepSystemReminders]
               lastSystemPrompt = prebuiltSystem
               const modelMsgs: ModelMessage[] = [...forkCtx.inheritedMessages, ...ownNewModelMsgs]
               // additions is empty for fork agents: system is taken verbatim from
@@ -3913,6 +3810,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
               ...env,
               ...(skills ? [skills] : []),
               ...instructions.content,
+              ...stepSystemReminders,
               ...(format.type === "json_schema" ? [STRUCTURED_OUTPUT_SYSTEM_PROMPT] : []),
             ]
             // Note: `buildLLMRequestPrefix` also returns a `tools` field, but we
@@ -4224,6 +4122,56 @@ NOTE: At any point in time through this workflow you should feel free to ask the
 
           // --- Text Loop Detection (cross-step) ---
           const completedParts = MessageV2.parts(handle.message.id)
+          const fingerprint = actionFingerprint(completedParts)
+          if (fingerprint) {
+            actionCycleBuffer.push(fingerprint)
+            if (actionCycleBuffer.length > 12) actionCycleBuffer.shift()
+            const period = detectActionCycle(actionCycleBuffer)
+            if (period) {
+              const recoveries = msgs.reduce(
+                (count, message) =>
+                  count +
+                  message.parts.filter(
+                    (part) => part.type === "text" && part.synthetic && part.text.includes(ACTION_CYCLE_RECOVERY_MARKER),
+                  ).length,
+                0,
+              )
+              if (recoveries > 0) {
+                hardHalt = true
+                handle.message.error = new NamedError.Unknown({
+                  message: `Repeated no-progress action cycle detected (period ${period}). The turn was stopped to prevent further duplicate actions.`,
+                }).toObject()
+                yield* sessions.updateMessage(handle.message)
+                yield* bus.publish(Session.Event.Error, {
+                  sessionID,
+                  messageID: handle.message.id,
+                  error: handle.message.error,
+                })
+                break
+              }
+              const reentry = yield* sessions.updateMessage({
+                id: MessageID.ascending(),
+                role: "user" as const,
+                sessionID,
+                agentID: lastUser.agentID,
+                agent: lastUser.agent,
+                model: lastUser.model,
+                tools: lastUser.tools,
+                format: lastUser.format,
+                time: { created: Date.now() },
+              })
+              yield* sessions.updatePart({
+                id: PartID.ascending(),
+                messageID: reentry.id,
+                sessionID,
+                type: "text",
+                synthetic: true,
+                text: `<system-reminder marker="${ACTION_CYCLE_RECOVERY_MARKER}">Your recent tool actions form a repeated no-progress cycle of period ${period}. Stop polling and rereading the same state. Replan from the actual task objective, choose a materially different action, or report the blocker.</system-reminder>`,
+              } satisfies MessageV2.TextPart)
+              actionCycleBuffer.length = 0
+              continue
+            }
+          }
           const stepText = completedParts
             .filter((p): p is MessageV2.TextPart => p.type === "text" && !p.synthetic)
             .map((p) => p.text)
@@ -4366,6 +4314,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
     const loop: (input: z.infer<typeof LoopInput>) => Effect.Effect<MessageV2.WithParts> = Effect.fn(
       "SessionPrompt.loop",
     )(function* (input: z.infer<typeof LoopInput>) {
+      yield* assertDirectory(input.sessionID)
       const agentID = input.agentID ?? "main"
       return yield* state.ensureRunning(
         input.sessionID,
@@ -4377,6 +4326,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
 
     const shell: (input: ShellInput) => Effect.Effect<MessageV2.WithParts> = Effect.fn("SessionPrompt.shell")(
       function* (input: ShellInput) {
+        yield* assertDirectory(input.sessionID)
         return yield* state.startShell(input.sessionID, lastAssistant(input.sessionID), shellImpl(input))
       },
     )

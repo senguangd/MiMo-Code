@@ -84,6 +84,15 @@ describe("parsePath", () => {
     })
   })
 
+  test("Windows path separators are normalized", () => {
+    expect(parsePath(String.raw`C:\data\memory\sessions\ses_abc\tasks\T1\progress.md`)).toEqual({
+      scope: "sessions",
+      scope_id: "ses_abc",
+      type: "progress",
+      key: "tasks/T1/progress",
+    })
+  })
+
   test("task progress", () => {
     expect(parsePath("/data/memory/sessions/ses_abc/tasks/T1.2/progress.md")).toEqual({
       scope: "sessions",

@@ -1,5 +1,5 @@
 import { Effect, Layer, Context, Schedule } from "effect"
-import { Database, inArray, eq, and, lte, sql } from "@/storage"
+import { Database, inArray, eq, and, lte, lt, or, sql } from "@/storage"
 import { Bus } from "@/bus"
 import type { SessionID, MessageID } from "@/session/schema"
 import { ActorRegistryTable } from "./actor.sql"
@@ -8,7 +8,8 @@ import { deriveLiveness } from "./schema"
 import * as Events from "./events"
 import { Log } from "@/util"
 import { SYSTEM_SPAWNED_AGENT_TYPES } from "@/agent/config"
-import { randomUUID } from "node:crypto"
+import { ProcessIdentity } from "@/runtime/process"
+import { RuntimeLease } from "@/runtime/lease"
 
 const log = Log.create({ service: "actor.registry" })
 
@@ -19,7 +20,7 @@ const SCAN_INTERVAL_MS = 60 * 1000 // every 60s
 // A unique token generated once at module load. Stable across layer rebuilds
 // within the same process; a fresh process gets a new token and correctly
 // reclaims dead rows.
-const PROCESS_INSTANCE_ID = randomUUID()
+const PROCESS_INSTANCE_ID = ProcessIdentity.instanceID
 
 type ActorRow = typeof ActorRegistryTable.$inferSelect
 
@@ -139,6 +140,7 @@ export const layer: Layer.Layer<Service, never, Bus.Service> = Layer.effect(
         turn_count: 0,
         last_error: null,
         instance_id: instanceID,
+        lease_fence: 0,
         time_completed: null,
         time_created: now,
         time_updated: now,
@@ -166,41 +168,50 @@ export const layer: Layer.Layer<Service, never, Bus.Service> = Layer.effect(
       },
     ) {
       const now = Date.now()
+      const owner = yield* RuntimeLease.current({
+        resourceType: "session-run",
+        resourceID: sessionID,
+        subresourceID: actorID,
+      })
+      if (owner) yield* RuntimeLease.assertHandle(owner).pipe(Effect.orDie)
       const isTerminal = patch.status === "idle" && patch.lastOutcome !== undefined
       const set: Record<string, unknown> = {
         status: patch.status,
         time_updated: now,
         ...(isTerminal ? { time_completed: now } : {}),
+        ...(owner && patch.status === "running"
+          ? { instance_id: owner.ownerInstanceID, lease_fence: owner.fencingToken, time_completed: null }
+          : {}),
       }
       if (patch.lastOutcome !== undefined) set.last_outcome = patch.lastOutcome
       if (patch.lastError !== undefined) set.last_error = patch.lastError
       else if (patch.lastOutcome !== undefined && patch.lastOutcome !== "failure") set.last_error = null
-      yield* Effect.sync(() =>
-        Database.use((db) =>
-          db
-            .update(ActorRegistryTable)
-            .set(set)
-            .where(
-              and(eq(ActorRegistryTable.session_id, sessionID), eq(ActorRegistryTable.actor_id, actorID)),
+      const base = and(eq(ActorRegistryTable.session_id, sessionID), eq(ActorRegistryTable.actor_id, actorID))
+      const condition = owner
+        ? patch.status === "running"
+          ? and(
+              base,
+              or(
+                lt(ActorRegistryTable.lease_fence, owner.fencingToken),
+                and(
+                  eq(ActorRegistryTable.instance_id, owner.ownerInstanceID),
+                  eq(ActorRegistryTable.lease_fence, owner.fencingToken),
+                ),
+              ),
             )
-            .run(),
-        ),
-      )
-      // Re-read so the event payload reflects committed row values (not the
-      // sparse patch). Skip publish if the row vanished between UPDATE and
-      // SELECT — a dropped event beats a misleading one.
+          : and(
+              base,
+              eq(ActorRegistryTable.instance_id, owner.ownerInstanceID),
+              eq(ActorRegistryTable.lease_fence, owner.fencingToken),
+            )
+        : base
+      yield* Effect.sync(() => Database.use((db) => db.update(ActorRegistryTable).set(set).where(condition).run()))
       const row = yield* Effect.sync(() =>
-        Database.use((db) =>
-          db
-            .select()
-            .from(ActorRegistryTable)
-            .where(
-              and(eq(ActorRegistryTable.session_id, sessionID), eq(ActorRegistryTable.actor_id, actorID)),
-            )
-            .get(),
-        ),
+        Database.use((db) => db.select().from(ActorRegistryTable).where(base).get()),
       )
       if (!row) return
+      if (owner && (row.instance_id !== owner.ownerInstanceID || row.lease_fence !== owner.fencingToken))
+        return yield* Effect.die(new RuntimeLease.LostError(owner))
       yield* bus.publish(Events.ActorStatusChanged, {
         sessionID,
         actorID,
@@ -213,7 +224,21 @@ export const layer: Layer.Layer<Service, never, Bus.Service> = Layer.effect(
     })
 
     const updateTurn = Effect.fn("ActorRegistry.updateTurn")(function* (sessionID: SessionID, actorID: string) {
+      const owner = yield* RuntimeLease.current({
+        resourceType: "session-run",
+        resourceID: sessionID,
+        subresourceID: actorID,
+      })
+      if (owner) yield* RuntimeLease.assertHandle(owner).pipe(Effect.orDie)
       const now = Date.now()
+      const base = and(eq(ActorRegistryTable.session_id, sessionID), eq(ActorRegistryTable.actor_id, actorID))
+      const condition = owner
+        ? and(
+            base,
+            eq(ActorRegistryTable.instance_id, owner.ownerInstanceID),
+            eq(ActorRegistryTable.lease_fence, owner.fencingToken),
+          )
+        : base
       yield* Effect.sync(() =>
         Database.use((db) =>
           db
@@ -223,12 +248,17 @@ export const layer: Layer.Layer<Service, never, Bus.Service> = Layer.effect(
               turn_count: sql`${ActorRegistryTable.turn_count} + 1`,
               time_updated: now,
             })
-            .where(
-              and(eq(ActorRegistryTable.session_id, sessionID), eq(ActorRegistryTable.actor_id, actorID)),
-            )
+            .where(condition)
             .run(),
         ),
       )
+      if (!owner) return
+      const row = yield* Effect.sync(() =>
+        Database.use((db) => db.select().from(ActorRegistryTable).where(base).get()),
+      )
+      if (!row) return
+      if (row.instance_id === owner.ownerInstanceID && row.lease_fence === owner.fencingToken) return
+      return yield* Effect.die(new RuntimeLease.LostError(owner))
     })
 
     const updateAgent = Effect.fn("ActorRegistry.updateAgent")(function* (
@@ -236,17 +266,31 @@ export const layer: Layer.Layer<Service, never, Bus.Service> = Layer.effect(
       actorID: string,
       agent: string,
     ) {
+      const owner = yield* RuntimeLease.current({
+        resourceType: "session-run",
+        resourceID: sessionID,
+        subresourceID: actorID,
+      })
+      if (owner) yield* RuntimeLease.assertHandle(owner).pipe(Effect.orDie)
+      const base = and(eq(ActorRegistryTable.session_id, sessionID), eq(ActorRegistryTable.actor_id, actorID))
+      const condition = owner
+        ? and(
+            base,
+            eq(ActorRegistryTable.instance_id, owner.ownerInstanceID),
+            eq(ActorRegistryTable.lease_fence, owner.fencingToken),
+          )
+        : base
       yield* Effect.sync(() =>
         Database.use((db) =>
-          db
-            .update(ActorRegistryTable)
-            .set({ agent, time_updated: Date.now() })
-            .where(
-              and(eq(ActorRegistryTable.session_id, sessionID), eq(ActorRegistryTable.actor_id, actorID)),
-            )
-            .run(),
+          db.update(ActorRegistryTable).set({ agent, time_updated: Date.now() }).where(condition).run(),
         ),
       )
+      if (!owner) return
+      const row = yield* Effect.sync(() =>
+        Database.use((db) => db.select().from(ActorRegistryTable).where(base).get()),
+      )
+      if (row && row.instance_id === owner.ownerInstanceID && row.lease_fence === owner.fencingToken) return
+      return yield* Effect.die(new RuntimeLease.LostError(owner))
     })
 
     const get = Effect.fn("ActorRegistry.get")(function* (sessionID: SessionID, actorID: string) {
@@ -410,23 +454,52 @@ export const layer: Layer.Layer<Service, never, Bus.Service> = Layer.effect(
     })
 
     // --- Orphan Recovery ---
-    // On init, mark pending/running actors from a PREVIOUS process as idle
-    // with failure outcome. Actors from this very instance (same instanceID)
-    // are still alive and must NOT be touched.
-    yield* Effect.sync(() =>
-      Database.use((db) => {
-        const now = Date.now()
-        db.run(sql`
-          UPDATE actor_registry
-          SET status = 'idle',
-              last_outcome = 'failure',
-              last_error = 'orphaned: process restarted',
-              time_updated = ${now},
-              time_completed = ${now}
-          WHERE status IN ('pending', 'running')
-            AND instance_id != ${instanceID}
-        `)
-      }),
+    // Reconcile only actors whose execution lease is genuinely absent/stale. A
+    // different instance_id is not evidence that the previous process died.
+    const activeAtStartup = yield* Effect.sync(() =>
+      Database.use((db) =>
+        db
+          .select()
+          .from(ActorRegistryTable)
+          .where(inArray(ActorRegistryTable.status, ["pending", "running"]))
+          .all(),
+      ),
+    )
+    yield* Effect.forEach(
+      activeAtStartup,
+      (row) =>
+        Effect.gen(function* () {
+          if (Date.now() - row.last_turn_time < 30_000) return
+          const held = yield* RuntimeLease.isHeld({
+            resourceType: "session-run",
+            resourceID: row.session_id,
+            subresourceID: row.actor_id,
+          })
+          if (held) return
+          const now = Date.now()
+          yield* Effect.sync(() =>
+            Database.use((db) =>
+              db
+                .update(ActorRegistryTable)
+                .set({
+                  status: "idle",
+                  last_outcome: "failure",
+                  last_error: "orphaned: execution lease expired",
+                  time_updated: now,
+                  time_completed: now,
+                })
+                .where(
+                  and(
+                    eq(ActorRegistryTable.session_id, row.session_id),
+                    eq(ActorRegistryTable.actor_id, row.actor_id),
+                    inArray(ActorRegistryTable.status, ["pending", "running"]),
+                  ),
+                )
+                .run(),
+            ),
+          )
+        }),
+      { concurrency: 8, discard: true },
     )
     log.info("orphan recovery complete", { instanceID })
 

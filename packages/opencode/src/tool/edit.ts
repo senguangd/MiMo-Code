@@ -21,6 +21,7 @@ import { assertWriteAllowed, askEditUnlessMemory } from "./external-directory"
 import { assertFileRead } from "./read-state"
 import { AppFileSystem } from "@mimo-ai/shared/filesystem"
 import { Flag } from "@/flag/flag"
+import { AtomicWrite } from "./atomic-write"
 
 function normalizeLineEndings(text: string): string {
   return text.replaceAll("\r\n", "\n")
@@ -100,7 +101,7 @@ export const EditTool = Tool.define(
                   patterns: [path.relative(Instance.worktree, filePath)],
                   diff,
                 })
-                yield* afs.writeWithDirs(filePath, params.new_string)
+                yield* AtomicWrite.write(afs, filePath, params.new_string)
                 yield* format.file(filePath)
                 yield* bus.publish(File.Event.Edited, { file: filePath })
                 yield* bus.publish(FileWatcher.Event.Updated, {
@@ -134,7 +135,7 @@ export const EditTool = Tool.define(
                 diff,
               })
 
-              yield* afs.writeWithDirs(filePath, contentNew)
+              yield* AtomicWrite.write(afs, filePath, contentNew)
               yield* format.file(filePath)
               yield* bus.publish(File.Event.Edited, { file: filePath })
               yield* bus.publish(FileWatcher.Event.Updated, {

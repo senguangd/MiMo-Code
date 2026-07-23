@@ -5,6 +5,8 @@ import { MessageID, SessionID } from "./schema"
 import { Effect, Layer, Context } from "effect"
 import z from "zod"
 import { ContextEstimate } from "./context-estimate"
+import { RuntimeLease } from "@/runtime/lease"
+import { ProcessIdentity } from "@/runtime/process"
 
 export const Info = z
   .union([
@@ -73,13 +75,35 @@ export const layer = Layer.effect(
       Effect.fn("SessionStatus.state")(() => Effect.succeed(new Map<SessionID, Info>())),
     )
 
+    const remoteStatus = (owner: { ownerInstanceID: string }): Info => ({
+      type: "busy",
+      message:
+        owner.ownerInstanceID === ProcessIdentity.instanceID
+          ? "Running in this client."
+          : "Running in another client.",
+    })
+
     const get = Effect.fn("SessionStatus.get")(function* (sessionID: SessionID) {
       const data = yield* InstanceState.get(state)
-      return data.get(sessionID) ?? { type: "idle" as const }
+      const local = data.get(sessionID)
+      if (local) return local
+      const owner = yield* RuntimeLease.owner({
+        resourceType: "session-run",
+        resourceID: sessionID,
+        subresourceID: "main",
+      })
+      return owner ? remoteStatus(owner) : { type: "idle" as const }
     })
 
     const list = Effect.fn("SessionStatus.list")(function* () {
-      return new Map(yield* InstanceState.get(state))
+      const result = new Map(yield* InstanceState.get(state))
+      const owners = yield* RuntimeLease.active("session-run")
+      for (const owner of owners) {
+        if ((owner.subresourceID ?? "") !== "main") continue
+        const sessionID = owner.resourceID as SessionID
+        if (!result.has(sessionID)) result.set(sessionID, remoteStatus(owner))
+      }
+      return result
     })
 
     const set = Effect.fn("SessionStatus.set")(function* (sessionID: SessionID, status: Info) {

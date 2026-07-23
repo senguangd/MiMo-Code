@@ -1,16 +1,28 @@
 import { EffectLogger, InstanceState } from "@/effect"
 import { Runner } from "@/effect"
-import { Effect, Layer, Scope, Context } from "effect"
+import { Cause, Effect, Exit, Layer, Scope, Context } from "effect"
 import * as Session from "./session"
 import { MessageV2 } from "./message-v2"
 import { SessionID } from "./schema"
 import { SessionStatus } from "./status"
+import { RuntimeLease, type Handle as RuntimeLeaseHandle } from "@/runtime/lease"
+import { ActorRegistryTable } from "@/actor/actor.sql"
+import { and, Database, eq } from "@/storage"
 
 export interface Interface {
   readonly assertNotBusy: (sessionID: SessionID) => Effect.Effect<void>
   readonly cancel: (sessionID: SessionID) => Effect.Effect<void>
-  readonly cancelActor: (sessionID: SessionID, agentID: string) => Effect.Effect<void>
+  readonly cancelActor: (
+    sessionID: SessionID,
+    agentID: string,
+  ) => Effect.Effect<"local" | "remote" | "idle">
   readonly ensureRunning: (
+    sessionID: SessionID,
+    agentID: string,
+    onInterrupt: Effect.Effect<MessageV2.WithParts>,
+    work: Effect.Effect<MessageV2.WithParts>,
+  ) => Effect.Effect<MessageV2.WithParts>
+  readonly startExclusive: (
     sessionID: SessionID,
     agentID: string,
     onInterrupt: Effect.Effect<MessageV2.WithParts>,
@@ -21,6 +33,11 @@ export interface Interface {
     onInterrupt: Effect.Effect<MessageV2.WithParts>,
     work: Effect.Effect<MessageV2.WithParts>,
   ) => Effect.Effect<MessageV2.WithParts>
+  readonly withExclusive: <A, E, R>(
+    sessionID: SessionID,
+    agentID: string,
+    work: Effect.Effect<A, E, R>,
+  ) => Effect.Effect<A, E, R>
 }
 
 export class Service extends Context.Service<Service, Interface>()("@opencode/SessionRunState") {}
@@ -85,17 +102,70 @@ export const layer = Layer.effect(
       const data = yield* InstanceState.get(state)
       const existing = data.runners.get(runnerKey(sessionID, "main"))
       if (existing?.busy) throw new Session.BusyError(sessionID)
+      if (yield* RuntimeLease.isHeld({ resourceType: "session-run", resourceID: sessionID, subresourceID: "main" }))
+        throw new Session.BusyError(sessionID)
     })
+
+    const settleActor = <A>(handle: RuntimeLeaseHandle, exit: Exit.Exit<A, unknown>) =>
+      Effect.gen(function* () {
+        yield* RuntimeLease.assertHandle(handle).pipe(Effect.orDie)
+        const now = Date.now()
+        yield* Effect.sync(() => {
+        const cancelled = Exit.isFailure(exit) && Cause.hasInterruptsOnly(exit.cause)
+        Database.use((db) =>
+          db
+            .update(ActorRegistryTable)
+            .set({
+              status: "idle",
+              last_outcome: Exit.isSuccess(exit) ? "success" : cancelled ? "cancelled" : "failure",
+              last_error: Exit.isFailure(exit) && !cancelled ? Cause.pretty(exit.cause) : null,
+              time_completed: now,
+              time_updated: now,
+            })
+            .where(
+              and(
+                eq(ActorRegistryTable.session_id, handle.resourceID as SessionID),
+                eq(ActorRegistryTable.actor_id, handle.subresourceID ?? "main"),
+                eq(ActorRegistryTable.instance_id, handle.ownerInstanceID),
+                eq(ActorRegistryTable.lease_fence, handle.fencingToken),
+              ),
+            )
+            .run(),
+        )
+        })
+      })
+
+    const leased = <A, E, R>(sessionID: SessionID, agentID: string, work: Effect.Effect<A, E, R>) =>
+      Effect.gen(function* () {
+        const key = { resourceType: "session-run" as const, resourceID: sessionID, subresourceID: agentID }
+        const inherited = yield* RuntimeLease.current(key)
+        if (inherited) return yield* work
+        const handle = yield* RuntimeLease.acquire(key)
+        if (!handle) throw new Session.BusyError(sessionID)
+        return yield* RuntimeLease.hold(
+          [handle],
+          work.pipe(Effect.onExit((exit) => settleActor(handle, exit))),
+        )
+      })
+
+    const withExclusive = <A, E, R>(sessionID: SessionID, agentID: string, work: Effect.Effect<A, E, R>) =>
+      leased(sessionID, agentID, work)
 
     const cancel = Effect.fn("SessionRunState.cancel")(function* (sessionID: SessionID) {
       const key = runnerKey(sessionID, "main")
       const data = yield* InstanceState.get(state)
       const existing = data.runners.get(key)
-      if (!existing) {
-        yield* status.set(sessionID, { type: "idle" })
+      if (existing) {
+        yield* existing.interrupt
         return
       }
-      yield* existing.interrupt
+      yield* RuntimeLease.requestCancel({
+        resourceType: "session-run",
+        resourceID: sessionID,
+        subresourceID: "main",
+        reason: "Session aborted by another client",
+      })
+      yield* status.set(sessionID, { type: "idle" })
     })
 
     const cancelActor = Effect.fn("SessionRunState.cancelActor")(function* (
@@ -105,8 +175,17 @@ export const layer = Layer.effect(
       const key = runnerKey(sessionID, agentID)
       const data = yield* InstanceState.get(state)
       const existing = data.runners.get(key)
-      if (!existing || !existing.busy) return
-      yield* existing.cancel
+      if (existing?.busy) {
+        yield* existing.cancel
+        return "local" as const
+      }
+      const requested = yield* RuntimeLease.requestCancel({
+        resourceType: "session-run",
+        resourceID: sessionID,
+        subresourceID: agentID,
+        reason: "Actor cancelled by another client",
+      })
+      return requested ? ("remote" as const) : ("idle" as const)
     })
 
     const ensureRunning = Effect.fn("SessionRunState.ensureRunning")(function* (
@@ -115,7 +194,19 @@ export const layer = Layer.effect(
       onInterrupt: Effect.Effect<MessageV2.WithParts>,
       work: Effect.Effect<MessageV2.WithParts>,
     ) {
-      return yield* (yield* runner(sessionID, agentID, onInterrupt)).ensureRunning(work)
+      return yield* (yield* runner(sessionID, agentID, onInterrupt)).ensureRunning(leased(sessionID, agentID, work))
+    })
+
+    const startExclusive = Effect.fn("SessionRunState.startExclusive")(function* (
+      sessionID: SessionID,
+      agentID: string,
+      onInterrupt: Effect.Effect<MessageV2.WithParts>,
+      work: Effect.Effect<MessageV2.WithParts>,
+    ) {
+      const owned = yield* runner(sessionID, agentID, onInterrupt)
+      return yield* owned
+        .startExclusive(leased(sessionID, agentID, work))
+        .pipe(Effect.onInterrupt(() => owned.interrupt))
     })
 
     const startShell = Effect.fn("SessionRunState.startShell")(function* (
@@ -123,10 +214,10 @@ export const layer = Layer.effect(
       onInterrupt: Effect.Effect<MessageV2.WithParts>,
       work: Effect.Effect<MessageV2.WithParts>,
     ) {
-      return yield* (yield* runner(sessionID, "main", onInterrupt)).startShell(work)
+      return yield* (yield* runner(sessionID, "main", onInterrupt)).startShell(leased(sessionID, "main", work))
     })
 
-    return Service.of({ assertNotBusy, cancel, cancelActor, ensureRunning, startShell })
+    return Service.of({ assertNotBusy, cancel, cancelActor, ensureRunning, startExclusive, startShell, withExclusive })
   }),
 )
 

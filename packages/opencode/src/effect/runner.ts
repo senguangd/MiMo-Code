@@ -4,6 +4,7 @@ export interface Runner<A, E = never> {
   readonly state: State<A, E>
   readonly busy: boolean
   readonly ensureRunning: (work: Effect.Effect<A, E>) => Effect.Effect<A, E>
+  readonly startExclusive: (work: Effect.Effect<A, E>) => Effect.Effect<A, E>
   readonly startShell: (work: Effect.Effect<A, E>) => Effect.Effect<A, E>
   /** Releases the runner after delivering interruption; cleanup remains scope-owned. */
   readonly interrupt: Effect.Effect<void>
@@ -156,6 +157,30 @@ export const make = <A, E = never>(
       ),
     )
 
+  const startExclusive = (work: Effect.Effect<A, E>) =>
+    SynchronizedRef.modifyEffect(
+      ref,
+      Effect.fnUntraced(function* (st) {
+        if (st._tag !== "Idle") {
+          return [
+            Effect.sync(() => {
+              if (opts?.busy) opts.busy()
+              throw new Error("Runner is busy")
+            }),
+            st,
+          ] as const
+        }
+        const done = yield* Deferred.make<A, E | Cancelled>()
+        const run = yield* startRun(work, done)
+        return [Deferred.await(done), { _tag: "Running", run }] as const
+      }),
+    ).pipe(
+      Effect.flatten,
+      Effect.catch(
+        (e): Effect.Effect<A, E> => (e instanceof Cancelled ? (onInterrupt ?? Effect.die(e)) : Effect.fail(e as E)),
+      ),
+    )
+
   const startShell = (work: Effect.Effect<A, E>) =>
     SynchronizedRef.modifyEffect(
       ref,
@@ -231,6 +256,7 @@ export const make = <A, E = never>(
       return state()._tag !== "Idle"
     },
     ensureRunning,
+    startExclusive,
     startShell,
     interrupt: cancel(false),
     cancel: cancel(true),
