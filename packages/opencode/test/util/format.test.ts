@@ -1,7 +1,31 @@
 import { describe, expect, test } from "bun:test"
-import { formatDuration } from "../../src/util/format"
+import path from "node:path"
+import { formatDuration, formatHomePath } from "../../src/util/format"
 
 describe("util.format", () => {
+  describe("formatHomePath", () => {
+    const home = path.join(path.parse(process.cwd()).root, "Users", "Alice")
+
+    test("shortens the home directory and its descendants", () => {
+      expect(formatHomePath(home, home)).toBe("~")
+      expect(formatHomePath(path.join(home, ".config", "auth.json"), home)).toBe(
+        path.join("~", ".config", "auth.json"),
+      )
+    })
+
+    test("does not shorten sibling-prefix or unrelated paths", () => {
+      const sibling = path.join(`${home}-backup`, "auth.json")
+      expect(formatHomePath(sibling, home)).toBe(sibling)
+      const unrelated = path.join(path.parse(process.cwd()).root, "Other", "auth.json")
+      expect(formatHomePath(unrelated, home)).toBe(unrelated)
+    })
+
+    test("does not shorten a different Windows drive", () => {
+      if (process.platform !== "win32") return
+      expect(formatHomePath(String.raw`D:\auth.json`, String.raw`C:\Users\Alice`)).toBe(String.raw`D:\auth.json`)
+    })
+  })
+
   describe("formatDuration", () => {
     test("returns empty string for zero or negative values", () => {
       expect(formatDuration(0)).toBe("")

@@ -10,6 +10,7 @@ import type { ProjectID } from "../project/schema"
 import { Log } from "../util"
 import { Slug } from "@mimo-ai/shared/util/slug"
 import { errorMessage } from "../util/error"
+import { removeDirectory } from "../util/remove-directory"
 import { BusEvent } from "@/bus/bus-event"
 import { GlobalBus } from "@/bus/global"
 import { Git } from "@/git"
@@ -387,12 +388,10 @@ export const layer: Layer.Layer<
 
     function cleanDirectory(target: string) {
       return Effect.promise(() =>
-        import("fs/promises")
-          .then((fsp) => fsp.rm(target, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 }))
-          .catch((error) => {
-            const message = errorMessage(error)
-            throw new RemoveFailedError({ message: message || "Failed to remove git worktree directory" })
-          }),
+        removeDirectory(target).catch((error) => {
+          const message = errorMessage(error)
+          throw new RemoveFailedError({ message: message || "Failed to remove git worktree directory" })
+        }),
       )
     }
 
@@ -409,7 +408,7 @@ export const layer: Layer.Layer<
         throw new RemoveFailedError({ message: list.stderr || list.text || "Failed to read git worktrees" })
       }
 
-      yield* Effect.promise(() => Instance.disposeDirectory(input.directory))
+      yield* Effect.promise(() => Instance.disposeDirectoryFully(input.directory))
 
       const entries = parseWorktreeList(list.text)
       const entry = yield* locateWorktree(entries, directory)

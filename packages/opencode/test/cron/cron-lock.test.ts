@@ -54,17 +54,13 @@ test("acquire is idempotent for the same process", async () => {
 test("acquire returns false when a different live pid owns the lock", async () => {
   const dir = fresh()
   mkdirSync(join(dir, ".mimocode"), { recursive: true })
-  // Plant a lock that names pid=1 with a startedAt matching its ACTUAL
-  // reconstructed start time on this system. In containers pid=1 may not
-  // be at system boot (it's the container entrypoint), so we can't hardcode
-  // bootTimeMs — we compute the same value the recycle check would derive.
-  // With the two values matching, the check says "not recycled" and the
-  // lock holds → tryAcquire returns false.
-  const initStartedAt =
-    process.platform === "linux" ? Math.floor(reconstructPidStartMs(1)) : Date.now()
+  // Use the test runner's live parent process rather than assuming PID 1
+  // exists. PID 1 is not a user process on Windows and may be absent.
+  const livePid = process.ppid
+  const liveStartedAt = process.platform === "linux" ? Math.floor(reconstructPidStartMs(livePid)) : Date.now()
   writeFileSync(
     join(dir, ".mimocode", ".cron-lock"),
-    JSON.stringify({ pid: 1, startedAt: initStartedAt }),
+    JSON.stringify({ pid: livePid, startedAt: liveStartedAt }),
   )
   expect(await run(tryAcquireSchedulerLock({ dir }))).toBe(false)
   cleanup(dir)

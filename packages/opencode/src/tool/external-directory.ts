@@ -26,7 +26,7 @@ export const assertExternalDirectoryEffect = Effect.fn("Tool.assertExternalDirec
   if (options?.bypass) return
 
   const ins = yield* InstanceState.context
-  const full = process.platform === "win32" ? AppFileSystem.normalizePath(target) : target
+  const full = process.platform === "win32" ? AppFileSystem.resolveFromExistingAncestor(target) : target
   if (Instance.containsPath(full, ins)) return
 
   // Memory tree has its own finer authority (memory-path-guard), which the write
@@ -34,7 +34,8 @@ export const assertExternalDirectoryEffect = Effect.fn("Tool.assertExternalDirec
   // is redundant and, in headless run mode (no permission replier), deadlocks on a
   // never-resolved Deferred. memory-path-guard allows a task-bound subagent its own
   // tasks/<taskId>/*.md and rejects cross-task / wrong-agent writes.
-  if (AppFileSystem.contains(path.join(Global.Path.data, "memory"), full)) return
+  const memoryRoot = AppFileSystem.resolveFromExistingAncestor(path.join(Global.Path.data, "memory"))
+  if (AppFileSystem.contains(memoryRoot, full)) return
 
   // Orchestrator-created worktrees live under <data>/worktree/<projectID>/<name>.
   // They are TRUSTED, app-managed workspaces — a child session isolated into one is
@@ -47,7 +48,8 @@ export const assertExternalDirectoryEffect = Effect.fn("Tool.assertExternalDirec
   // Since this base is created and owned by the app itself (not a foreign user path),
   // trust it here, exactly as the memory subtree above. Genuinely external user paths
   // are unaffected and still prompt.
-  if (AppFileSystem.contains(path.join(Global.Path.data, "worktree"), full)) return
+  const worktreeRoot = AppFileSystem.resolveFromExistingAncestor(path.join(Global.Path.data, "worktree"))
+  if (AppFileSystem.contains(worktreeRoot, full)) return
 
   const kind = options?.kind ?? "file"
   const dir = kind === "directory" ? full : path.dirname(full)
@@ -134,8 +136,9 @@ export const askEditUnlessMemory = Effect.fn("Tool.askEditUnlessMemory")(functio
   filepath: string,
   input: { patterns: string[]; diff: string; files?: unknown },
 ) {
-  const full = process.platform === "win32" ? AppFileSystem.normalizePath(filepath) : filepath
-  if (AppFileSystem.contains(path.join(Global.Path.data, "memory"), full)) return
+  const full = process.platform === "win32" ? AppFileSystem.resolveFromExistingAncestor(filepath) : filepath
+  const memoryRoot = AppFileSystem.resolveFromExistingAncestor(path.join(Global.Path.data, "memory"))
+  if (AppFileSystem.contains(memoryRoot, full)) return
   yield* ctx.ask({
     permission: "edit",
     patterns: input.patterns,

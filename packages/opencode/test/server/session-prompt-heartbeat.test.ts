@@ -67,13 +67,24 @@ it.live(
         const reader = res.body!.getReader()
         const decoder = new TextDecoder()
 
+        // Keep exactly one stream read in flight. Starting a new reader.read()
+        // after every timeout leaves abandoned reads queued; those stale promises
+        // can consume future heartbeat bytes and starve the active polling loop.
+        type Chunk = { timeout: false; done: boolean; value?: Uint8Array }
+        let pendingRead: Promise<Chunk> | undefined
         const readChunk = () =>
-          Effect.promise(() =>
-            Promise.race([
-              reader.read().then((r) => ({ timeout: false as const, ...r })),
-              new Promise<{ timeout: true }>((r) => setTimeout(() => r({ timeout: true as const }), 100)),
-            ]),
-          )
+          Effect.promise(async () => {
+            pendingRead ??= reader.read().then((r) => ({ timeout: false as const, ...r }))
+            const current = pendingRead
+            const result = await Promise.race([
+              current,
+              new Promise<{ timeout: true }>((resolve) =>
+                setTimeout(() => resolve({ timeout: true as const }), 100),
+              ),
+            ])
+            if (!result.timeout && pendingRead === current) pendingRead = undefined
+            return result
+          })
 
         const listPending = () =>
           Effect.promise(async () => {

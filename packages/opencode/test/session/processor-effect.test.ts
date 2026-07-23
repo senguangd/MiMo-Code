@@ -20,7 +20,7 @@ import { SessionSummary } from "../../src/session/summary"
 import { Snapshot } from "../../src/snapshot"
 import { Log } from "../../src/util"
 import * as CrossSpawnSpawner from "../../src/effect/cross-spawn-spawner"
-import { provideTmpdirServer } from "../fixture/fixture"
+import { provideTmpdirInstance, provideTmpdirServer } from "../fixture/fixture"
 import { testEffect } from "../lib/effect"
 import { raw, reply, TestLLMServer } from "../lib/llm-server"
 import { resetAllMonitors } from "../../src/session/try-best-detector"
@@ -171,12 +171,11 @@ const deps = Layer.mergeAll(
   Provider.defaultLayer,
   status,
 ).pipe(Layer.provideMerge(infra))
-const env = Layer.mergeAll(
-  TestLLMServer.layer,
-  SessionProcessor.layer.pipe(Layer.provide(summary), Layer.provideMerge(deps)),
-)
+const processorEnv = SessionProcessor.layer.pipe(Layer.provide(summary), Layer.provideMerge(deps))
+const env = Layer.mergeAll(TestLLMServer.layer, processorEnv)
 
 const it = testEffect(env)
+const processorIt = testEffect(processorEnv)
 
 const boot = Effect.fn("test.boot")(function* () {
   const processors = yield* SessionProcessor.Service
@@ -943,9 +942,9 @@ it.live.skip("session.processor preserves try-best blocking when denied tools ma
   ),
 )
 
-it.live("session.processor keeps a turn running across distinct successful edits", () =>
-  provideTmpdirServer(
-    ({ dir }) =>
+processorIt.live("session.processor keeps a turn running across distinct successful edits", () =>
+  provideTmpdirInstance(
+    (dir) =>
       Effect.gen(function* () {
         const { processors, session, provider } = yield* boot()
         const chat = yield* session.create({})
@@ -984,7 +983,7 @@ it.live("session.processor keeps a turn running across distinct successful edits
           ),
         ).toBe(false)
       }),
-    { git: true, config: (url) => providerCfg(url) },
+    { git: true, config: cfg },
   ),
 )
 

@@ -12,8 +12,6 @@ export function mockTuiRuntime(dir: string, plugin: PluginSpec[], opts?: { plugi
     source: path.join(dir, "tui.json"),
   }))
   const wait = spyOn(TuiConfig, "waitForDependencies").mockResolvedValue()
-  const cwd = spyOn(process, "cwd").mockImplementation(() => dir)
-
   const config: TuiConfig.Info = {
     plugin,
     plugin_origins,
@@ -22,8 +20,8 @@ export function mockTuiRuntime(dir: string, plugin: PluginSpec[], opts?: { plugi
 
   return {
     config,
+    directory: dir,
     restore: () => {
-      cwd.mockRestore()
       wait.mockRestore()
       delete process.env.MIMOCODE_PLUGIN_META_FILE
     },

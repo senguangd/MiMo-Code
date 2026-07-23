@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test"
+import path from "node:path"
 import { parsePath, buildPath, resolveProjectId } from "../../src/memory/paths"
 
 describe("parsePath", () => {
@@ -110,6 +111,16 @@ describe("parsePath", () => {
     })
   })
 
+  test("parses native Windows separators", () => {
+    if (process.platform !== "win32") return
+    expect(parsePath(String.raw`C:\data\memory\sessions\ses_abc\checkpoint.md`)).toEqual({
+      scope: "sessions",
+      scope_id: "ses_abc",
+      type: "checkpoint",
+      key: "checkpoint",
+    })
+  })
+
   test("non-memory path returns null", () => {
     expect(parsePath("/data/checkpoints/ses_abc/001.md")).toBeNull()
   })
@@ -154,12 +165,12 @@ describe("buildPath", () => {
   test("session checkpoint", () => {
     expect(
       buildPath({ root: "/data/memory", scope: "sessions", scope_id: "ses_abc", key: "checkpoint" }),
-    ).toBe("/data/memory/sessions/ses_abc/checkpoint.md")
+    ).toBe(path.join("/data/memory", "sessions", "ses_abc", "checkpoint.md"))
   })
 
   test("global free", () => {
     expect(buildPath({ root: "/data/memory", scope: "global", key: "tooling" })).toBe(
-      "/data/memory/global/tooling.md",
+      path.join("/data/memory", "global", "tooling.md"),
     )
   })
 

@@ -1,3 +1,13 @@
+import os from "node:os"
+import path from "node:path"
+
+export function formatHomePath(filepath: string, home = os.homedir()) {
+  const rel = path.relative(home, filepath)
+  if (rel === "") return "~"
+  if (path.isAbsolute(rel) || rel === ".." || rel.startsWith(`..${path.sep}`)) return filepath
+  return path.join("~", rel)
+}
+
 export function formatDuration(secs: number) {
   if (secs <= 0) return ""
   if (secs < 60) return `${secs}s`

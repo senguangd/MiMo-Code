@@ -325,14 +325,33 @@ describe("AppFileSystem", () => {
     })
 
     test("contains checks path containment", () => {
+      expect(AppFileSystem.contains("/a/b", "/a/b")).toBe(true)
       expect(AppFileSystem.contains("/a/b", "/a/b/c")).toBe(true)
       expect(AppFileSystem.contains("/a/b", "/a/c")).toBe(false)
+      expect(AppFileSystem.contains("/a/b", "/a/b-sibling/c")).toBe(false)
+      expect(AppFileSystem.contains("/a/b", "/a/b/..cache/file")).toBe(true)
+
+      if (process.platform === "win32") {
+        expect(AppFileSystem.contains("C:\\repo", "D:\\secret")).toBe(false)
+      }
+    })
+
+    test("resolves non-existent paths through their nearest existing ancestor", () => {
+      const suffix = path.join(".mimocode-missing", "nested", "file.txt")
+      expect(AppFileSystem.resolveFromExistingAncestor(path.join(process.cwd(), suffix))).toBe(
+        path.join(AppFileSystem.resolve(process.cwd()), suffix),
+      )
     })
 
     test("overlaps detects overlapping paths", () => {
       expect(AppFileSystem.overlaps("/a/b", "/a/b/c")).toBe(true)
       expect(AppFileSystem.overlaps("/a/b/c", "/a/b")).toBe(true)
+      expect(AppFileSystem.overlaps("/a/b", "/a/b/..cache/file")).toBe(true)
       expect(AppFileSystem.overlaps("/a", "/b")).toBe(false)
+
+      if (process.platform === "win32") {
+        expect(AppFileSystem.overlaps("C:\\repo", "D:\\secret")).toBe(false)
+      }
     })
   })
 })

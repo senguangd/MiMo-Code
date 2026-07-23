@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test"
+import { createTwoFilesPatch } from "diff"
 import { normalize, text } from "./session-diff"
 
 describe("session diff", () => {
@@ -33,5 +34,33 @@ describe("session diff", () => {
     expect(view.patch).toContain("@@ -1,1 +1,1 @@")
     expect(text(view, "deletions")).toBe("one\n")
     expect(text(view, "additions")).toBe("two\n")
+  })
+
+  test("preserves a missing final newline on the deletion side", () => {
+    const view = normalize({
+      file: "a.ts",
+      patch: createTwoFilesPatch("a.ts", "a.ts", "one", "two\n"),
+      additions: 1,
+      deletions: 1,
+      status: "modified",
+    })
+
+    expect(text(view, "deletions")).toBe("one")
+    expect(text(view, "additions")).toBe("two\n")
+    expect(text(view, "deletions")).not.toContain("No newline at end of file")
+  })
+
+  test("preserves a missing final newline on the addition side", () => {
+    const view = normalize({
+      file: "a.ts",
+      patch: createTwoFilesPatch("a.ts", "a.ts", "one\n", "two"),
+      additions: 1,
+      deletions: 1,
+      status: "modified",
+    })
+
+    expect(text(view, "deletions")).toBe("one\n")
+    expect(text(view, "additions")).toBe("two")
+    expect(text(view, "additions")).not.toContain("No newline at end of file")
   })
 })

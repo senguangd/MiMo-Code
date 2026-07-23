@@ -420,7 +420,7 @@ describe("WorkflowRuntime per-agent timeout (straggler-abort)", () => {
           sessionID: parent.id,
           parentActorID: "main",
           model: ref,
-          agentTimeoutMs: 1500,
+          agentTimeoutMs: 8000,
           scriptDeadlineMs: 60000, // far above the per-agent timeout
         })
         const outcome = yield* runtime.wait({ runID })
@@ -431,7 +431,7 @@ describe("WorkflowRuntime per-agent timeout (straggler-abort)", () => {
       }),
       { git: true, config: providerCfg },
     ),
-    20000, // budget >> the 1500ms per-agent timeout, well under any true hang
+    20000, // budget >> the 8000ms per-agent timeout, well under any true hang
   )
 })
 

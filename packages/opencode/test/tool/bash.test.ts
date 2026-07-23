@@ -426,6 +426,7 @@ describe("tool.bash permissions", () => {
         "asks for nested bash command permissions [bash]",
         withShell({ label: "bash", shell: bash }, async () => {
           await using outerTmp = await tmpdir({
+            outsideGit: true,
             init: async (dir) => {
               await Bun.write(path.join(dir, "outside.txt"), "x")
             },
@@ -524,7 +525,7 @@ describe("tool.bash permissions", () => {
       test(
         `asks for external_directory permission for drive-relative PowerShell paths [${item.label}]`,
         withShell(item, async () => {
-          await using tmp = await tmpdir()
+          await using tmp = await tmpdir({ outsideGit: true })
           await Instance.provide({
             directory: tmp.path,
             fn: async () => {
@@ -585,7 +586,7 @@ describe("tool.bash permissions", () => {
       test(
         `asks for external_directory permission for $PWD PowerShell paths [${item.label}]`,
         withShell(item, async () => {
-          await using tmp = await tmpdir()
+          await using tmp = await tmpdir({ outsideGit: true })
           await Instance.provide({
             directory: tmp.path,
             fn: async () => {
@@ -891,8 +892,8 @@ describe("tool.bash permissions", () => {
   if (process.platform === "win32") {
     test("normalizes external_directory workdir variants on Windows", async () => {
       const err = new Error("stop after permission")
-      await using outerTmp = await tmpdir()
-      await using tmp = await tmpdir()
+      await using outerTmp = await tmpdir({ outsideGit: true })
+      await using tmp = await tmpdir({ outsideGit: true })
       await Instance.provide({
         directory: tmp.path,
         fn: async () => {

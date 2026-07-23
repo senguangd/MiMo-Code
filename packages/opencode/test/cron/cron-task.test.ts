@@ -16,7 +16,7 @@ import {
 const run = <A, E>(e: Effect.Effect<A, E>) => Effect.runPromise(e as Effect.Effect<A, E, never>)
 
 test("getCronFilePath joins .mimocode/scheduled_tasks.json", () => {
-  expect(getCronFilePath("/tmp/x").endsWith("/.mimocode/scheduled_tasks.json")).toBe(true)
+  expect(getCronFilePath("/tmp/x")).toBe(join("/tmp/x", ".mimocode", "scheduled_tasks.json"))
 })
 
 test("readCronTasks returns [] on missing file", async () => {

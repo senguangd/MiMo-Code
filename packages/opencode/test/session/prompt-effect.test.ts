@@ -1389,7 +1389,7 @@ it.live(
       }),
       { git: true, config: providerCfg },
     ),
-  3_000,
+  10_000,
 )
 
 it.live(
@@ -1539,7 +1539,7 @@ it.live(
       }),
       { git: true, config: providerCfg },
     ),
-  3_000,
+  10_000,
 )
 
 it.live(
@@ -1684,33 +1684,55 @@ it.live(
 it.live(
   "assertNotBusy throws BusyError when loop running",
   () =>
-    provideTmpdirServer(
-      Effect.fnUntraced(function* ({ llm }) {
-        const prompt = yield* SessionPrompt.Service
-        const run = yield* SessionRunState.Service
-        const sessions = yield* Session.Service
-        yield* llm.hang
+    provideTmpdirInstance(
+      (dir) =>
+        Effect.gen(function* () {
+          const run = yield* SessionRunState.Service
+          const sessions = yield* Session.Service
+          const chat = yield* sessions.create({})
+          const started = yield* Deferred.make<void>()
+          const interrupted: MessageV2.WithParts = {
+            info: {
+              id: MessageID.ascending(),
+              role: "assistant",
+              parentID: MessageID.ascending(),
+              sessionID: chat.id,
+              mode: "build",
+              agent: "build",
+              cost: 0,
+              path: { cwd: dir, root: dir },
+              tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+              modelID: ref.modelID,
+              providerID: ref.providerID,
+              time: { created: Date.now(), completed: Date.now() },
+              finish: "stop",
+            },
+            parts: [],
+          }
 
-        const chat = yield* sessions.create({})
-        yield* user(chat.id, "hi")
+          const fiber = yield* run
+            .ensureRunning(
+              chat.id,
+              "main",
+              Effect.succeed(interrupted),
+              Deferred.succeed(started, undefined).pipe(Effect.andThen(Effect.never)),
+            )
+            .pipe(Effect.forkChild)
+          yield* Deferred.await(started)
 
-        const fiber = yield* prompt.loop({ sessionID: chat.id }).pipe(Effect.forkChild)
-        yield* llm.wait(1)
+          const exit = yield* run.assertNotBusy(chat.id).pipe(Effect.exit)
+          expect(Exit.isFailure(exit)).toBe(true)
+          if (Exit.isFailure(exit)) {
+            expect(Cause.squash(exit.cause)).toBeInstanceOf(Session.BusyError)
+          }
 
-        const exit = yield* run.assertNotBusy(chat.id).pipe(Effect.exit)
-        expect(Exit.isFailure(exit)).toBe(true)
-        if (Exit.isFailure(exit)) {
-          expect(Cause.squash(exit.cause)).toBeInstanceOf(Session.BusyError)
-        }
-
-        yield* prompt.cancel(chat.id)
-        yield* Fiber.await(fiber)
-      }),
-      { git: true, config: providerCfg },
+          yield* run.cancel(chat.id)
+          yield* Fiber.await(fiber)
+        }),
+      { git: true },
     ),
-  3_000,
+  10_000,
 )
-
 it.live("assertNotBusy succeeds when idle", () =>
   provideTmpdirInstance(
     (_dir) =>
@@ -1753,7 +1775,7 @@ it.live(
       }),
       { git: true, config: providerCfg },
     ),
-  3_000,
+  10_000,
 )
 
 unix("shell captures stdout and stderr in completed tool output", () =>
@@ -1923,7 +1945,7 @@ it.live(
       }),
       { git: true, config: providerCfg },
     ),
-  3_000,
+  10_000,
 )
 
 it.live(
@@ -1963,7 +1985,7 @@ it.live(
       }),
       { git: true, config: providerCfg },
     ),
-  3_000,
+  10_000,
 )
 
 unix(

@@ -136,14 +136,14 @@ function isTheme(value: unknown) {
   return true
 }
 
-function resolveRoot(root: string) {
+function resolveRoot(root: string, directory: string) {
   if (root.startsWith("file://")) {
     const file = fileURLToPath(root)
     if (root.endsWith("/")) return file
     return path.dirname(file)
   }
   if (path.isAbsolute(root)) return root
-  return path.resolve(process.cwd(), root)
+  return path.resolve(directory, root)
 }
 
 function createThemeInstaller(
@@ -262,7 +262,7 @@ function createMeta(
   }
 }
 
-function loadInternalPlugin(item: InternalTuiPlugin): PluginLoad {
+function loadInternalPlugin(item: InternalTuiPlugin, directory: string): PluginLoad {
   const spec = item.id
   const target = spec
 
@@ -279,7 +279,7 @@ function loadInternalPlugin(item: InternalTuiPlugin): PluginLoad {
       scope: "global",
       source: target,
     },
-    theme_root: process.cwd(),
+    theme_root: directory,
     theme_files: [],
   }
 }
@@ -590,7 +590,7 @@ function applyInitialPluginEnabledState(state: RuntimeState, config: TuiConfig.I
   }
 }
 
-async function resolveExternalPlugins(list: ConfigPlugin.Origin[], wait: () => Promise<void>) {
+async function resolveExternalPlugins(list: ConfigPlugin.Origin[], wait: () => Promise<void>, directory: string) {
   return PluginLoader.loadExternal({
     items: list,
     kind: "tui",
@@ -636,7 +636,7 @@ async function resolveExternalPlugins(list: ConfigPlugin.Origin[], wait: () => P
         id,
         module: mod,
         origin,
-        theme_root: loaded.pkg?.dir ?? resolveRoot(loaded.target),
+        theme_root: loaded.pkg?.dir ?? resolveRoot(loaded.target, directory),
         theme_files,
       }
     },
@@ -663,7 +663,7 @@ async function resolveExternalPlugins(list: ConfigPlugin.Origin[], wait: () => P
         id,
         module: EMPTY_TUI,
         origin,
-        theme_root: loaded.pkg?.dir ?? resolveRoot(loaded.target),
+        theme_root: loaded.pkg?.dir ?? resolveRoot(loaded.target, directory),
         theme_files,
       }
     },
@@ -793,7 +793,7 @@ async function addPluginBySpec(state: RuntimeState | undefined, raw: string) {
   }
   const ready = await Instance.provide({
     directory: state.directory,
-    fn: () => resolveExternalPlugins([cfg], () => TuiConfig.waitForDependencies()),
+    fn: () => resolveExternalPlugins([cfg], () => TuiConfig.waitForDependencies(), state.directory),
   }).catch((error) => {
     fail("failed to add tui plugin", { path: next, error })
     return [] as PluginLoad[]
@@ -924,8 +924,8 @@ let loaded: Promise<void> | undefined
 let runtime: RuntimeState | undefined
 export const Slot = View
 
-export async function init(input: { api: HostPluginApi; config: TuiConfig.Info }) {
-  const cwd = process.cwd()
+export async function init(input: { api: HostPluginApi; config: TuiConfig.Info; directory?: string }) {
+  const cwd = input.directory ? path.resolve(input.directory) : process.cwd()
   if (loaded) {
     if (dir !== cwd) {
       throw new Error(`TuiPluginRuntime.init() called with a different working directory. expected=${dir} got=${cwd}`)
@@ -934,7 +934,7 @@ export async function init(input: { api: HostPluginApi; config: TuiConfig.Info }
   }
 
   dir = cwd
-  loaded = load(input)
+  loaded = load({ ...input, directory: cwd })
   return loaded
 }
 
@@ -973,14 +973,13 @@ export async function dispose() {
   }
 }
 
-export async function reload(input: { api: HostPluginApi; config: TuiConfig.Info }) {
+export async function reload(input: { api: HostPluginApi; config: TuiConfig.Info; directory?: string }) {
   await dispose()
   return init(input)
 }
 
-async function load(input: { api: Api; config: TuiConfig.Info }) {
-  const { api, config } = input
-  const cwd = process.cwd()
+async function load(input: { api: Api; config: TuiConfig.Info; directory: string }) {
+  const { api, config, directory: cwd } = input
   const slots = setupSlots(api)
   const next: RuntimeState = {
     directory: cwd,
@@ -1002,7 +1001,7 @@ async function load(input: { api: Api; config: TuiConfig.Info }) {
 
         for (const item of INTERNAL_TUI_PLUGINS) {
           log.info("loading internal tui plugin", { id: item.id })
-          const entry = loadInternalPlugin(item)
+          const entry = loadInternalPlugin(item, cwd)
           const meta = createMeta(entry.source, entry.spec, entry.target, undefined, entry.id)
           addPluginEntry(next, {
             id: entry.id,
@@ -1014,7 +1013,7 @@ async function load(input: { api: Api; config: TuiConfig.Info }) {
           })
         }
 
-        const ready = await resolveExternalPlugins(records, () => TuiConfig.waitForDependencies())
+        const ready = await resolveExternalPlugins(records, () => TuiConfig.waitForDependencies(), cwd)
         await addExternalPluginEntries(next, ready)
 
         // File-based TUI plugins from .mimocode/tui/*.{ts,tsx}
@@ -1034,7 +1033,7 @@ async function load(input: { api: Api; config: TuiConfig.Info }) {
           }
         }
         if (fileTuiOrigins.length) {
-          const fileReady = await resolveExternalPlugins(fileTuiOrigins, () => Promise.resolve())
+          const fileReady = await resolveExternalPlugins(fileTuiOrigins, () => Promise.resolve(), cwd)
           await addExternalPluginEntries(next, fileReady)
         }
 

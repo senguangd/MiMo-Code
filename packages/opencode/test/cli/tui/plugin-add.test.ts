@@ -36,12 +36,11 @@ test("adds tui plugin at runtime from spec", async () => {
     plugin_origins: undefined,
   }
   const wait = spyOn(TuiConfig, "waitForDependencies").mockResolvedValue()
-  const cwd = spyOn(process, "cwd").mockImplementation(() => tmp.path)
-
   try {
     await TuiPluginRuntime.init({
       api: createTuiPluginApi(),
       config,
+      directory: tmp.path,
     })
 
     await expect(TuiPluginRuntime.addPlugin(tmp.extra.spec)).resolves.toBe(true)
@@ -56,7 +55,6 @@ test("adds tui plugin at runtime from spec", async () => {
     })
   } finally {
     await TuiPluginRuntime.dispose()
-    cwd.mockRestore()
     wait.mockRestore()
     delete process.env.MIMOCODE_PLUGIN_META_FILE
   }
@@ -90,12 +88,11 @@ test("retries runtime add for file plugins after dependency wait", async () => {
 `,
     )
   })
-  const cwd = spyOn(process, "cwd").mockImplementation(() => tmp.path)
-
   try {
     await TuiPluginRuntime.init({
       api: createTuiPluginApi(),
       config,
+      directory: tmp.path,
     })
 
     await expect(TuiPluginRuntime.addPlugin(tmp.extra.spec)).resolves.toBe(true)
@@ -104,7 +101,6 @@ test("retries runtime add for file plugins after dependency wait", async () => {
     expect(TuiPluginRuntime.list().find((item) => item.id === "demo.add.retry")?.active).toBe(true)
   } finally {
     await TuiPluginRuntime.dispose()
-    cwd.mockRestore()
     wait.mockRestore()
     delete process.env.MIMOCODE_PLUGIN_META_FILE
   }

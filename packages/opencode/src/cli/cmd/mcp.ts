@@ -19,6 +19,7 @@ import { Filesystem } from "../../util"
 import { Bus } from "../../bus"
 import { AppRuntime } from "../../effect/app-runtime"
 import { Effect } from "effect"
+import { formatHomePath } from "../../util/format"
 
 function getAuthStatusIcon(status: MCP.AuthStatus): string {
   switch (status) {
@@ -61,8 +62,7 @@ function configuredServers(config: Config.Info) {
 function sourceLabel(config: Config.Info, name: string) {
   const origin = config.mcp_origins?.[name]
   if (!origin) return "opencode"
-  const home = Global.Path.home
-  const source = origin.source === home ? "~" : origin.source.startsWith(home + path.sep) ? "~" + origin.source.slice(home.length) : origin.source
+  const source = formatHomePath(origin.source, Global.Path.home)
   return `${origin.type}:${source}`
 }
 

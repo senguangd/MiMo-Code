@@ -55,11 +55,10 @@ test("loads npm tui plugin from package ./tui export", async () => {
     ],
   }
   const wait = spyOn(TuiConfig, "waitForDependencies").mockResolvedValue()
-  const cwd = spyOn(process, "cwd").mockImplementation(() => tmp.path)
   const install = spyOn(Npm, "add").mockResolvedValue({ directory: tmp.extra.mod, entrypoint: undefined })
 
   try {
-    await TuiPluginRuntime.init({ api: createTuiPluginApi(), config })
+    await TuiPluginRuntime.init({ api: createTuiPluginApi(), config, directory: tmp.path })
     await expect(fs.readFile(tmp.extra.marker, "utf8")).resolves.toBe("called")
     const hit = TuiPluginRuntime.list().find((item) => item.id === "demo.tui.export")
     expect(hit?.enabled).toBe(true)
@@ -68,7 +67,6 @@ test("loads npm tui plugin from package ./tui export", async () => {
   } finally {
     await TuiPluginRuntime.dispose()
     install.mockRestore()
-    cwd.mockRestore()
     wait.mockRestore()
     delete process.env.MIMOCODE_PLUGIN_META_FILE
   }
@@ -116,17 +114,15 @@ test("does not use npm package exports dot for tui entry", async () => {
     ],
   }
   const wait = spyOn(TuiConfig, "waitForDependencies").mockResolvedValue()
-  const cwd = spyOn(process, "cwd").mockImplementation(() => tmp.path)
   const install = spyOn(Npm, "add").mockResolvedValue({ directory: tmp.extra.mod, entrypoint: undefined })
 
   try {
-    await TuiPluginRuntime.init({ api: createTuiPluginApi(), config })
+    await TuiPluginRuntime.init({ api: createTuiPluginApi(), config, directory: tmp.path })
     await expect(fs.readFile(tmp.extra.marker, "utf8")).rejects.toThrow()
     expect(TuiPluginRuntime.list().some((item) => item.spec === tmp.extra.spec)).toBe(false)
   } finally {
     await TuiPluginRuntime.dispose()
     install.mockRestore()
-    cwd.mockRestore()
     wait.mockRestore()
     delete process.env.MIMOCODE_PLUGIN_META_FILE
   }
@@ -178,11 +174,10 @@ test("rejects npm tui export that resolves outside plugin directory", async () =
     ],
   }
   const wait = spyOn(TuiConfig, "waitForDependencies").mockResolvedValue()
-  const cwd = spyOn(process, "cwd").mockImplementation(() => tmp.path)
   const install = spyOn(Npm, "add").mockResolvedValue({ directory: tmp.extra.mod, entrypoint: undefined })
 
   try {
-    await TuiPluginRuntime.init({ api: createTuiPluginApi(), config })
+    await TuiPluginRuntime.init({ api: createTuiPluginApi(), config, directory: tmp.path })
     // plugin code never ran
     await expect(fs.readFile(tmp.extra.marker, "utf8")).rejects.toThrow()
     // plugin not listed
@@ -190,7 +185,6 @@ test("rejects npm tui export that resolves outside plugin directory", async () =
   } finally {
     await TuiPluginRuntime.dispose()
     install.mockRestore()
-    cwd.mockRestore()
     wait.mockRestore()
     delete process.env.MIMOCODE_PLUGIN_META_FILE
   }
@@ -240,17 +234,15 @@ test("rejects npm tui plugin that exports server and tui together", async () => 
     ],
   }
   const wait = spyOn(TuiConfig, "waitForDependencies").mockResolvedValue()
-  const cwd = spyOn(process, "cwd").mockImplementation(() => tmp.path)
   const install = spyOn(Npm, "add").mockResolvedValue({ directory: tmp.extra.mod, entrypoint: undefined })
 
   try {
-    await TuiPluginRuntime.init({ api: createTuiPluginApi(), config })
+    await TuiPluginRuntime.init({ api: createTuiPluginApi(), config, directory: tmp.path })
     await expect(fs.readFile(tmp.extra.marker, "utf8")).rejects.toThrow()
     expect(TuiPluginRuntime.list().some((item) => item.spec === tmp.extra.spec)).toBe(false)
   } finally {
     await TuiPluginRuntime.dispose()
     install.mockRestore()
-    cwd.mockRestore()
     wait.mockRestore()
     delete process.env.MIMOCODE_PLUGIN_META_FILE
   }
@@ -298,13 +290,12 @@ test("does not use npm package main for tui entry", async () => {
     ],
   }
   const wait = spyOn(TuiConfig, "waitForDependencies").mockResolvedValue()
-  const cwd = spyOn(process, "cwd").mockImplementation(() => tmp.path)
   const install = spyOn(Npm, "add").mockResolvedValue({ directory: tmp.extra.mod, entrypoint: undefined })
   const warn = spyOn(console, "warn").mockImplementation(() => {})
   const error = spyOn(console, "error").mockImplementation(() => {})
 
   try {
-    await TuiPluginRuntime.init({ api: createTuiPluginApi(), config })
+    await TuiPluginRuntime.init({ api: createTuiPluginApi(), config, directory: tmp.path })
     await expect(fs.readFile(tmp.extra.marker, "utf8")).rejects.toThrow()
     expect(TuiPluginRuntime.list().some((item) => item.spec === tmp.extra.spec)).toBe(false)
     expect(error).not.toHaveBeenCalled()
@@ -312,7 +303,6 @@ test("does not use npm package main for tui entry", async () => {
   } finally {
     await TuiPluginRuntime.dispose()
     install.mockRestore()
-    cwd.mockRestore()
     wait.mockRestore()
     warn.mockRestore()
     error.mockRestore()
@@ -363,15 +353,13 @@ test("does not use directory package main for tui entry", async () => {
     ],
   }
   const wait = spyOn(TuiConfig, "waitForDependencies").mockResolvedValue()
-  const cwd = spyOn(process, "cwd").mockImplementation(() => tmp.path)
 
   try {
-    await TuiPluginRuntime.init({ api: createTuiPluginApi(), config })
+    await TuiPluginRuntime.init({ api: createTuiPluginApi(), config, directory: tmp.path })
     await expect(fs.readFile(tmp.extra.marker, "utf8")).rejects.toThrow()
     expect(TuiPluginRuntime.list().some((item) => item.spec === tmp.extra.spec)).toBe(false)
   } finally {
     await TuiPluginRuntime.dispose()
-    cwd.mockRestore()
     wait.mockRestore()
     delete process.env.MIMOCODE_PLUGIN_META_FILE
   }
@@ -410,15 +398,13 @@ test("uses directory index fallback for tui when package.json is missing", async
     ],
   }
   const wait = spyOn(TuiConfig, "waitForDependencies").mockResolvedValue()
-  const cwd = spyOn(process, "cwd").mockImplementation(() => tmp.path)
 
   try {
-    await TuiPluginRuntime.init({ api: createTuiPluginApi(), config })
+    await TuiPluginRuntime.init({ api: createTuiPluginApi(), config, directory: tmp.path })
     await expect(fs.readFile(tmp.extra.marker, "utf8")).resolves.toBe("called")
     expect(TuiPluginRuntime.list().find((item) => item.id === "demo.dir.index")?.active).toBe(true)
   } finally {
     await TuiPluginRuntime.dispose()
-    cwd.mockRestore()
     wait.mockRestore()
     delete process.env.MIMOCODE_PLUGIN_META_FILE
   }
@@ -467,17 +453,15 @@ test("uses npm package name when tui plugin id is omitted", async () => {
     ],
   }
   const wait = spyOn(TuiConfig, "waitForDependencies").mockResolvedValue()
-  const cwd = spyOn(process, "cwd").mockImplementation(() => tmp.path)
   const install = spyOn(Npm, "add").mockResolvedValue({ directory: tmp.extra.mod, entrypoint: undefined })
 
   try {
-    await TuiPluginRuntime.init({ api: createTuiPluginApi(), config })
+    await TuiPluginRuntime.init({ api: createTuiPluginApi(), config, directory: tmp.path })
     await expect(fs.readFile(tmp.extra.marker, "utf8")).resolves.toBe("called")
     expect(TuiPluginRuntime.list().find((item) => item.spec === tmp.extra.spec)?.id).toBe("acme-plugin")
   } finally {
     await TuiPluginRuntime.dispose()
     install.mockRestore()
-    cwd.mockRestore()
     wait.mockRestore()
     delete process.env.MIMOCODE_PLUGIN_META_FILE
   }

@@ -1,6 +1,7 @@
 import * as path from "path"
 import type { ProjectID } from "../project/schema"
 import type { SessionID } from "../session/schema"
+import { AppFileSystem } from "@mimo-ai/shared/filesystem"
 
 const VALID_SCOPES = ["global", "projects", "sessions"] as const
 
@@ -105,10 +106,11 @@ export function assertMemoryWriteAllowed(input: {
   const notesFile = path.join(memoryRoot, "sessions", sessionID, "notes.md")
   const checkpointFile = path.join(memoryRoot, "sessions", sessionID, "checkpoint.md")
   const taskMemDir = path.join(memoryRoot, "sessions", sessionID, "tasks")
-  const normalizedRoot = memoryRoot.endsWith(path.sep) ? memoryRoot : memoryRoot + path.sep
-  if (!target.startsWith(normalizedRoot)) return
+  const normalizedRoot = path.resolve(memoryRoot)
+  const normalizedTarget = path.resolve(target)
+  if (!AppFileSystem.contains(normalizedRoot, normalizedTarget)) return
 
-  const rel = path.relative(memoryRoot, target)
+  const rel = path.relative(normalizedRoot, normalizedTarget)
   const parts = rel.split(path.sep)
 
   if (parts.length < 2) {

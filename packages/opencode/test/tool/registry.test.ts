@@ -1,11 +1,12 @@
-import { afterEach, describe, expect } from "bun:test"
+import { afterEach, describe, expect, test } from "bun:test"
 import path from "path"
 import fs from "fs/promises"
 import { Effect, Layer } from "effect"
 import { Instance } from "../../src/project/instance"
 import * as CrossSpawnSpawner from "../../src/effect/cross-spawn-spawner"
 import { ToolRegistry } from "../../src/tool"
-import { provideTmpdirInstance } from "../fixture/fixture"
+import { loadFileToolDefinitions, scanFileToolPaths } from "../../src/tool/registry"
+import { provideTmpdirInstance, tmpdir } from "../fixture/fixture"
 import { testEffect } from "../lib/effect"
 
 const node = CrossSpawnSpawner.defaultLayer
@@ -17,61 +18,34 @@ afterEach(async () => {
 })
 
 describe("tool.registry", () => {
-  it.live("loads tools from .mimocode/tool (singular)", () =>
-    provideTmpdirInstance((dir) =>
-      Effect.gen(function* () {
-        const opencode = path.join(dir, ".mimocode")
-        const tool = path.join(opencode, "tool")
-        yield* Effect.promise(() => fs.mkdir(tool, { recursive: true }))
-        yield* Effect.promise(() =>
-          Bun.write(
-            path.join(tool, "hello.ts"),
-            [
-              "export default {",
-              "  description: 'hello tool',",
-              "  args: {},",
-              "  execute: async () => {",
-              "    return 'hello world'",
-              "  },",
-              "}",
-              "",
-            ].join("\n"),
-          ),
-        )
-        const registry = yield* ToolRegistry.Service
-        const ids = yield* registry.ids()
-        expect(ids).toContain("hello")
-      }),
-    ),
-  )
+  test("loads tools from singular and plural .mimocode directories", async () => {
+    await using tmp = await tmpdir()
+    const opencode = path.join(tmp.path, ".mimocode")
+    const singular = path.join(opencode, "tool")
+    const plural = path.join(opencode, "tools")
+    await Promise.all([fs.mkdir(singular, { recursive: true }), fs.mkdir(plural, { recursive: true })])
 
-  it.live("loads tools from .mimocode/tools (plural)", () =>
-    provideTmpdirInstance((dir) =>
-      Effect.gen(function* () {
-        const opencode = path.join(dir, ".mimocode")
-        const tools = path.join(opencode, "tools")
-        yield* Effect.promise(() => fs.mkdir(tools, { recursive: true }))
-        yield* Effect.promise(() =>
-          Bun.write(
-            path.join(tools, "hello.ts"),
-            [
-              "export default {",
-              "  description: 'hello tool',",
-              "  args: {},",
-              "  execute: async () => {",
-              "    return 'hello world'",
-              "  },",
-              "}",
-              "",
-            ].join("\n"),
-          ),
-        )
-        const registry = yield* ToolRegistry.Service
-        const ids = yield* registry.ids()
-        expect(ids).toContain("hello")
-      }),
-    ),
-  )
+    const source = (description: string, output: string) =>
+      [
+        "export default {",
+        `  description: '${description}',`,
+        "  args: {},",
+        "  execute: async () => {",
+        `    return '${output}'`,
+        "  },",
+        "}",
+        "",
+      ].join("\n")
+
+    await Promise.all([
+      Bun.write(path.join(singular, "singular.ts"), source("singular tool", "singular")),
+      Bun.write(path.join(plural, "plural.ts"), source("plural tool", "plural")),
+    ])
+
+    const definitions = await Effect.runPromise(loadFileToolDefinitions(scanFileToolPaths([opencode])))
+    expect(definitions.map((item) => item.id)).toContain("singular")
+    expect(definitions.map((item) => item.id)).toContain("plural")
+  })
 
   it.live("loads tools with external dependencies without crashing", () =>
     provideTmpdirInstance((dir) =>

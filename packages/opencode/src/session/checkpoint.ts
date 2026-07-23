@@ -1202,7 +1202,9 @@ export const layer: Layer.Layer<
       )
       const globalText = globalResult?.text ?? ""
 
-      const actors = yield* actorRegistry.listActive()
+      const actors = (yield* actorRegistry.listBySession(sessionID)).filter(
+        (actor) => actor.background && (actor.status === "pending" || actor.status === "running"),
+      )
 
       // Pull recent user messages (verbatim, FIFO-bounded). Done before the
       // early-bail check so a session whose only signal is "user typed N

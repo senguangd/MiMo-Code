@@ -10,6 +10,7 @@ import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
 import type { Config } from "../../src/config"
 import { InstanceRef } from "../../src/effect/instance-ref"
 import { Instance } from "../../src/project/instance"
+import { removeDirectory } from "../../src/util/remove-directory"
 import { TestLLMServer } from "../lib/llm-server"
 
 // Strip null bytes from paths (defensive fix for CI environment issues)
@@ -18,23 +19,16 @@ function sanitizePath(p: string): string {
 }
 
 function exists(dir: string) {
-  return fs
-    .stat(dir)
-    .then(() => true)
-    .catch(() => false)
+  return fs.stat(dir).then(
+    () => true,
+    () => false,
+  )
 }
-
 async function clean(dir: string) {
   Bun.gc(true)
   await sleep(100)
-  await fs.rm(dir, {
-    recursive: true,
-    force: true,
-    maxRetries: 30,
-    retryDelay: 100,
-  })
+  await removeDirectory(dir, { maxRetries: 30, retryDelay: 100 })
 }
-
 export async function cleanupTmpdir(dir: string, cleanup = clean) {
   return cleanup(dir).catch((error) => {
     throw new Error(
@@ -102,6 +96,7 @@ export async function tmpdir<T>(options?: TmpDirOptions<T>) {
       try {
         await options?.dispose?.(realpath)
       } finally {
+        await Instance.disposeDirectoryFully(realpath).catch(() => undefined)
         if (options?.git) await stop(realpath).catch(() => undefined)
         await cleanupTmpdir(realpath)
         if (options?.outsideGit) {

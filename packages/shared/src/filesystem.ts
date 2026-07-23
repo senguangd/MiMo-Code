@@ -1,5 +1,5 @@
 import { NodeFileSystem } from "@effect/platform-node"
-import { dirname, join, relative, resolve as pathResolve } from "path"
+import { dirname, isAbsolute, join, relative, resolve as pathResolve, sep } from "path"
 import { realpathSync } from "fs"
 import * as NFS from "fs/promises"
 import { lookup } from "mime-types"
@@ -215,6 +215,27 @@ export namespace AppFileSystem {
     }
   }
 
+  /**
+   * Canonicalize a path even when its leaf does not exist. The nearest existing
+   * ancestor is resolved through realpath (expanding Windows 8.3 aliases,
+   * junctions, and symlinks), then the non-existent suffix is appended again.
+   */
+  export function resolveFromExistingAncestor(p: string): string {
+    const resolved = pathResolve(windowsPath(p))
+    let ancestor = resolved
+    while (true) {
+      try {
+        const canonical = normalizePath(realpathSync.native(ancestor))
+        return join(canonical, relative(ancestor, resolved))
+      } catch (error: any) {
+        if (error?.code !== "ENOENT" && error?.code !== "ENOTDIR") throw error
+        const parent = dirname(ancestor)
+        if (parent === ancestor) return normalizePath(resolved)
+        ancestor = parent
+      }
+    }
+  }
+
   export function windowsPath(p: string): string {
     if (process.platform !== "win32") return p
     return p
@@ -224,13 +245,15 @@ export namespace AppFileSystem {
       .replace(/^\/mnt\/([a-zA-Z])(?:\/|$)/, (_, drive) => `${drive.toUpperCase()}:/`)
   }
 
-  export function overlaps(a: string, b: string) {
-    const relA = relative(a, b)
-    const relB = relative(b, a)
-    return !relA || !relA.startsWith("..") || !relB || !relB.startsWith("..")
+  function isContainedRelativePath(value: string) {
+    return value === "" || (!isAbsolute(value) && value !== ".." && !value.startsWith(`..${sep}`))
   }
 
   export function contains(parent: string, child: string) {
-    return !relative(parent, child).startsWith("..")
+    return isContainedRelativePath(relative(parent, child))
+  }
+
+  export function overlaps(a: string, b: string) {
+    return contains(a, b) || contains(b, a)
   }
 }

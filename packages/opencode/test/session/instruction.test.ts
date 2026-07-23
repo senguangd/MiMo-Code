@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test"
 import path from "path"
+import fs from "fs/promises"
 import { Effect } from "effect"
 import { ModelID, ProviderID } from "../../src/provider/schema"
 import { Instruction } from "../../src/session/instruction"
@@ -216,6 +217,37 @@ describe("Instruction.resolve", () => {
     })
   })
 
+  test("does not load instructions from a sibling directory with the same path prefix", async () => {
+    await using tmp = await tmpdir()
+    const sibling = `${tmp.path}-outside`
+
+    try {
+      await fs.mkdir(path.join(sibling, "nested"), { recursive: true })
+      await Bun.write(path.join(sibling, "AGENTS.md"), "# Outside Instructions")
+      await Bun.write(path.join(sibling, "nested", "file.ts"), "const outside = true")
+
+      await Instance.provide({
+        directory: tmp.path,
+        fn: () =>
+          run(
+            Instruction.Service.use((svc) =>
+              Effect.gen(function* () {
+                const results = yield* svc.resolve(
+                  [],
+                  path.join(sibling, "nested", "file.ts"),
+                  MessageID.make("message-outside-prefix"),
+                )
+
+                expect(results).toEqual([])
+              }),
+            ),
+          ),
+      })
+    } finally {
+      await fs.rm(sibling, { recursive: true, force: true })
+    }
+  })
+
   test.todo("fetches remote instructions from config URLs via HttpClient", () => {})
 })
 
@@ -384,5 +416,13 @@ describe("Instruction.systemPaths MIMOCODE_CONFIG_DIR", () => {
     } finally {
       ;(Global.Path as { config: string }).config = originalGlobalConfig
     }
+  })
+})
+describe("Instruction.display", () => {
+  test("keeps dot-prefixed child directories relative to the worktree", () => {
+    const worktree = path.join(path.parse(process.cwd()).root, "repo")
+    const filepath = path.join(worktree, "..cache", "AGENTS.md")
+
+    expect(Instruction.display(filepath, worktree)).toBe(path.join("..cache", "AGENTS.md"))
   })
 })

@@ -20,6 +20,7 @@ import { PROVIDER_PRIORITY } from "../../util/provider-priority"
 import { text } from "node:stream/consumers"
 import { Effect } from "effect"
 import * as readline from "readline"
+import { formatHomePath } from "../../util/format"
 
 type PluginAuth = NonNullable<Hooks["auth"]>
 
@@ -376,7 +377,7 @@ export const ProvidersListCommand = cmd({
     UI.empty()
     const authPath = path.join(Global.Path.data, "auth.json")
     const homedir = os.homedir()
-    const displayPath = authPath.startsWith(homedir) ? authPath.replace(homedir, "~") : authPath
+    const displayPath = formatHomePath(authPath, homedir)
     prompts.intro(`Credentials ${UI.Style.TEXT_DIM}${displayPath}`)
     const results = await AppRuntime.runPromise(
       Effect.gen(function* () {

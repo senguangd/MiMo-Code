@@ -3,7 +3,6 @@
 import os from "os"
 import path from "path"
 import fs from "fs/promises"
-import { setTimeout as sleep } from "node:timers/promises"
 import { afterAll } from "bun:test"
 
 // Set XDG env vars FIRST, before any src/ imports
@@ -15,26 +14,22 @@ await fs.mkdir(dir, { recursive: true })
 const fixtureRoot = path.join(process.cwd(), ".mimocode-test-fixtures-" + process.pid)
 await fs.mkdir(fixtureRoot, { recursive: true })
 process.env["MIMOCODE_TEST_TMPDIR_ROOT"] = fixtureRoot
-afterAll(async () => {
-  const { Database } = await import("../src/storage")
-  Database.close()
-  const busy = (error: unknown) =>
-    typeof error === "object" && error !== null && "code" in error && error.code === "EBUSY"
-  const rm = async (target: string, left: number): Promise<void> => {
+afterAll(
+  async () => {
+    const [{ Database }, { removeDirectory }] = await Promise.all([
+      import("../src/storage"),
+      import("../src/util/remove-directory"),
+    ])
+    Database.close()
     Bun.gc(true)
-    await sleep(100)
-    return fs.rm(target, { recursive: true, force: true }).catch((error) => {
-      if (!busy(error)) throw error
-      if (left <= 1) throw error
-      return rm(target, left - 1)
-    })
-  }
 
-  // Windows can keep SQLite WAL handles alive until GC finalizers run, so we
-  // force GC and retry teardown to avoid flaky EBUSY in test cleanup.
-  await rm(dir, 30)
-  await rm(fixtureRoot, 30)
-})
+    await Promise.all([
+      removeDirectory(dir, { maxRetries: 5, retryDelay: 100, nativeTimeout: 60_000 }),
+      removeDirectory(fixtureRoot, { maxRetries: 5, retryDelay: 100, nativeTimeout: 60_000 }),
+    ])
+  },
+  { timeout: 120_000 },
+)
 
 process.env["XDG_DATA_HOME"] = path.join(dir, "share")
 process.env["XDG_CACHE_HOME"] = path.join(dir, "cache")

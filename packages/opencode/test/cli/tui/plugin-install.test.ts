@@ -55,7 +55,6 @@ test("installs plugin without loading it", async () => {
     plugin_origins: undefined,
   }
   const wait = spyOn(TuiConfig, "waitForDependencies").mockResolvedValue()
-  const cwd = spyOn(process, "cwd").mockImplementation(() => tmp.path)
   const api = createTuiPluginApi({
     state: {
       path: {
@@ -68,7 +67,7 @@ test("installs plugin without loading it", async () => {
   })
 
   try {
-    await TuiPluginRuntime.init({ api, config })
+    await TuiPluginRuntime.init({ api, config, directory: tmp.path })
     const out = await TuiPluginRuntime.installPlugin(tmp.extra.spec)
     expect(out).toMatchObject({
       ok: true,
@@ -80,7 +79,6 @@ test("installs plugin without loading it", async () => {
     await expect(fs.readFile(tmp.extra.marker, "utf8")).resolves.toBe("loaded")
   } finally {
     await TuiPluginRuntime.dispose()
-    cwd.mockRestore()
     wait.mockRestore()
     delete process.env.MIMOCODE_PLUGIN_META_FILE
   }

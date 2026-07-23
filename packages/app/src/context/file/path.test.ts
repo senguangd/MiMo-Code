@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { createPathHelpers, stripQueryAndHash, unquoteGitPath, encodeFilePath } from "./path"
+import { createPathHelpers, stripQueryAndHash, unquoteGitPath, encodeFilePath, relativePathWithinRoot } from "./path"
 
 describe("file path helpers", () => {
   test("normalizes file inputs against workspace root", () => {
@@ -19,6 +19,16 @@ describe("file path helpers", () => {
     expect(path.normalize("C:/repo/src/app.ts")).toBe("src/app.ts")
     expect(path.normalize("file://C:/repo/src/app.ts")).toBe("src/app.ts")
     expect(path.normalize("c:\\repo\\src\\app.ts")).toBe("src\\app.ts")
+  })
+
+  test("relativizes only paths inside the exact root boundary", () => {
+    expect(relativePathWithinRoot("/repo", "/repo/src/app.ts")).toBe("src/app.ts")
+    expect(relativePathWithinRoot("/repo", "/repo-old/src/app.ts")).toBeUndefined()
+    expect(relativePathWithinRoot("", "/repo/src/app.ts")).toBeUndefined()
+    expect(relativePathWithinRoot(String.raw`C:\Repo`, String.raw`c:\repo\src\app.ts`)).toBe(
+      String.raw`src\app.ts`,
+    )
+    expect(relativePathWithinRoot(String.raw`C:\Repo`, String.raw`C:\Repo-old\src\app.ts`)).toBeUndefined()
   })
 
   test("keeps query/hash stripping behavior stable", () => {

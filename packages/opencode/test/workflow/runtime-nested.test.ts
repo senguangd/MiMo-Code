@@ -38,7 +38,7 @@ describe("WorkflowRuntime file primitives", () => {
         const outcome = yield* runtime.wait({ runID })
         expect(outcome.status).toBe("completed")
         const r = (outcome as { result: { found: string[]; body: string; missing: unknown; there: boolean } }).result
-        expect(r.found).toEqual(["notes/a.txt"])
+        expect(r.found).toEqual([path.join("notes", "a.txt")])
         expect(r.body).toBe("hello")
         expect(r.missing === null || r.missing === undefined).toBe(true)
         expect(r.there).toBe(true)

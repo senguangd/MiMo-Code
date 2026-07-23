@@ -69,6 +69,10 @@ type ScanState = {
   dirs: Set<string>
 }
 
+export function isBundledSkill(match: string, bundledRoots: string[]) {
+  return bundledRoots.some((root) => AppFileSystem.contains(root, match))
+}
+
 export interface Interface {
   readonly get: (name: string) => Effect.Effect<Info | undefined>
   readonly all: () => Effect.Effect<Info[]>
@@ -100,7 +104,7 @@ const add = Effect.fnUntraced(function* (state: State, match: string, bundledRoo
   const parsed = Info.pick({ name: true, description: true, hidden: true }).safeParse(md.data)
   if (!parsed.success) return
 
-  const isBundled = bundledRoots.some((root) => match.startsWith(root))
+  const isBundled = isBundledSkill(match, bundledRoots)
   const existing = state.skills[parsed.data.name]
 
   if (existing) {

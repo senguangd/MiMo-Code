@@ -109,6 +109,40 @@ type State = {
   read: ReadDef
 }
 
+export type FileToolDefinition = {
+  id: string
+  definition: ToolDefinition
+}
+
+export function scanFileToolPaths(dirs: string[]) {
+  return dirs.flatMap((dir) =>
+    Glob.scanSync("{tool,tools}/*.{js,ts}", { cwd: dir, absolute: true, dot: true, symlink: true }),
+  )
+}
+
+export const loadFileToolDefinitions = Effect.fn("ToolRegistry.loadFileToolDefinitions")(function* (matches: string[]) {
+  const loaded: FileToolDefinition[] = []
+  for (const match of matches) {
+    const namespace = path.basename(match, path.extname(match))
+    // `match` is an absolute filesystem path from Glob.scanSync. Import it as
+    // `file://` so Node-compatible runtimes on Windows accept the module ID.
+    const mod = yield* Effect.tryPromise({
+      try: () => import(`${pathToFileURL(match).href}?v=${Date.now()}`),
+      catch: (err) => err,
+    }).pipe(
+      Effect.catch((err) => {
+        log.error("failed to load file tool, skipping", { path: match, error: errorMessage(err) })
+        return Effect.succeed(undefined)
+      }),
+    )
+    if (!mod) continue
+    for (const [id, definition] of Object.entries<ToolDefinition>(mod)) {
+      loaded.push({ id: id === "default" ? namespace : `${namespace}_${id}`, definition })
+    }
+  }
+  return loaded
+})
+
 export interface Interface {
   readonly ids: () => Effect.Effect<string[]>
   readonly all: () => Effect.Effect<Tool.Def[]>
@@ -198,27 +232,10 @@ export const layer = Layer.effect(
         }
 
         const dirs = yield* config.directories()
-        const matches = dirs.flatMap((dir) =>
-          Glob.scanSync("{tool,tools}/*.{js,ts}", { cwd: dir, absolute: true, dot: true, symlink: true }),
-        )
+        const matches = scanFileToolPaths(dirs)
         if (matches.length) yield* config.waitForDependencies()
-        for (const match of matches) {
-          const namespace = path.basename(match, path.extname(match))
-          // `match` is an absolute filesystem path from `Glob.scanSync(..., { absolute: true })`.
-          // Import it as `file://` so Node on Windows accepts the dynamic import.
-          const mod = yield* Effect.tryPromise({
-            try: () => import(`${pathToFileURL(match).href}?v=${Date.now()}`),
-            catch: (err) => err,
-          }).pipe(
-            Effect.catch((err) => {
-              log.error("failed to load file tool, skipping", { path: match, error: errorMessage(err) })
-              return Effect.succeed(undefined)
-            }),
-          )
-          if (!mod) continue
-          for (const [id, def] of Object.entries<ToolDefinition>(mod)) {
-            custom.push(fromPlugin(id === "default" ? namespace : `${namespace}_${id}`, def))
-          }
+        for (const item of yield* loadFileToolDefinitions(matches)) {
+          custom.push(fromPlugin(item.id, item.definition))
         }
 
         const plugins = yield* plugin.list()

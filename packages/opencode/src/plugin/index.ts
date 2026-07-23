@@ -32,6 +32,7 @@ import { Effect, Layer, Context, Stream } from "effect"
 import { EffectBridge } from "@/effect"
 import { InstanceState } from "@/effect"
 import { errorMessage } from "@/util/error"
+import { withTimeout } from "@/util/timeout"
 import { PluginLoader } from "./loader"
 import { parsePluginSpecifier, readPluginId, readV1Plugin, resolvePluginId } from "./shared"
 import { registerAdaptor } from "@/control-plane/adaptors"
@@ -682,12 +683,11 @@ export const layer = Layer.effect(
         const snapshot = structuredClone(output)
         const failed = yield* Effect.tryPromise({
           try: async () => {
-            await Promise.race([
+            await withTimeout(
               Promise.resolve(fn(input, output)),
-              new Promise<never>((_, reject) =>
-                setTimeout(() => reject(new Error(`hook timed out after ${HOOK_TIMEOUT_MS}ms`)), HOOK_TIMEOUT_MS),
-              ),
-            ])
+              HOOK_TIMEOUT_MS,
+              `hook timed out after ${HOOK_TIMEOUT_MS}ms`,
+            )
           },
           catch: (err) => err,
         }).pipe(

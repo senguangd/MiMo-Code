@@ -13,6 +13,7 @@ describe("postinstall", () => {
   const packageName = `@mimo-ai/mimocode-${platform}-${arch}`
 
   test("creates .mimocode binary cache from platform package", async () => {
+    if (os.platform() === "win32") return
     await using tmp = await tmpdir()
     const dir = tmp.path
 
@@ -64,6 +65,7 @@ describe("postinstall", () => {
   })
 
   test("exits with error when binary package is missing", async () => {
+    if (os.platform() === "win32") return
     await using tmp = await tmpdir()
     const dir = tmp.path
 
@@ -79,13 +81,18 @@ describe("postinstall", () => {
     expect(result.stdout.toString()).toContain("Recommended: install MiMoCode natively")
   })
 
-  test("skips binary cache on windows but still prints notice", () => {
-    const source = fs.readFileSync(SCRIPT_PATH, "utf8")
-    const mainBody = source.slice(source.indexOf("async function main()"))
-    // Windows skip must come AFTER printMigrationNotice()
-    const noticeIdx = mainBody.indexOf("printMigrationNotice()")
-    const winCheckIdx = mainBody.indexOf("os.platform() === \"win32\"")
-    expect(noticeIdx).toBeGreaterThan(-1)
-    expect(winCheckIdx).toBeGreaterThan(noticeIdx)
+  test("skips binary cache on windows but still prints notice", async () => {
+    if (os.platform() !== "win32") return
+    await using tmp = await tmpdir()
+    const dir = tmp.path
+    const binDir = path.join(dir, "bin")
+    fs.mkdirSync(binDir)
+    fs.copyFileSync(SCRIPT_PATH, path.join(dir, "postinstall.mjs"))
+
+    const result = Bun.spawnSync(["node", "postinstall.mjs"], { cwd: dir, env: process.env })
+
+    expect(result.exitCode).toBe(0)
+    expect(result.stdout.toString()).toContain("Recommended: install MiMoCode natively")
+    expect(fs.existsSync(path.join(binDir, ".mimocode"))).toBe(false)
   })
 })

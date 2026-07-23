@@ -9,6 +9,7 @@ import path from "path"
 import os from "os"
 import { Filesystem } from "../../util"
 import { Process } from "../../util"
+import { formatHomePath as shortenPath } from "../../util/format"
 
 interface UninstallArgs {
   keepConfig: boolean
@@ -357,13 +358,6 @@ function formatSize(bytes: number): string {
   return `${(bytes / (1024 * 1024 * 1024)).toFixed(1)} GB`
 }
 
-function shortenPath(p: string): string {
-  const home = os.homedir()
-  if (p.startsWith(home)) {
-    return p.replace(home, "~")
-  }
-  return p
-}
 
 async function cleanWindowsPath() {
   const installDir = path.join(os.homedir(), ".mimocode", "bin")

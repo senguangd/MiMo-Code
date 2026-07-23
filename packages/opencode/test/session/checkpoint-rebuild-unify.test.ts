@@ -72,6 +72,43 @@ async function seedUserMessage(sessionID: SessionID, text: string) {
 
 describe("SessionCheckpoint.insertRebuildBoundary", () => {
   it.live(
+    "rebuild context ignores active actors from other sessions",
+    provideTmpdirInstance(() =>
+      Effect.gen(function* () {
+        const sessions = yield* SessionNs.Service
+        const checkpoints = yield* SessionCheckpoint.Service
+        const actors = yield* ActorRegistry.Service
+        const target = yield* sessions.create({})
+        const other = yield* sessions.create({})
+        const actorID = "unrelated-peer-1"
+
+        yield* actors.register({
+          sessionID: other.id,
+          actorID,
+          mode: "peer",
+          agent: "build",
+          description: "actor from another session",
+          contextMode: "full",
+          background: true,
+          lifecycle: "persistent",
+        })
+
+        yield* Effect.gen(function* () {
+          const context = yield* checkpoints.renderRebuildContext(target.id)
+          expect(context).not.toContain("actor from another session")
+        }).pipe(
+          Effect.ensuring(
+            actors.updateStatus(other.id, actorID, {
+              status: "idle",
+              lastOutcome: "success",
+            }),
+          ),
+        )
+      }),
+    ),
+  )
+
+  it.live(
     "insertRebuildBoundary returns false and inserts nothing when rebuild context is empty",
     provideTmpdirInstance(
       () =>

@@ -18,29 +18,31 @@ export interface InstanceContext {
 
 const context = LocalContext.create<InstanceContext>("instance")
 const cache = new Map<string, Promise<InstanceContext>>()
+// Bounded gates preserve the public disposeDirectory contract: callers wait at
+// most DIRECTORY_DISPOSE_TIMEOUT before a replacement may initialize.
 const directoryDisposals = new Map<string, Promise<void>>()
+// Full cleanups outlive the bounded gate and are awaited by deletion boundaries
+// (worktree removal / test fixture teardown) that must not race open handles.
+const directoryCleanups = new Map<string, Promise<void>>()
 const project = makeRuntime(Project.Service, Project.defaultLayer)
 const DIRECTORY_DISPOSE_TIMEOUT = 2_000
 
-const FORBIDDEN_PREFIXES = [
-  "/etc",
-  "/proc",
-  "/sys",
-  "/dev",
-  "/boot",
-  "/private/etc",
-] as const
+const POSIX_FORBIDDEN_PREFIXES = ["/etc", "/proc", "/sys", "/dev", "/boot", "/private/etc"] as const
+
+function protectedSystemDirectories() {
+  if (process.platform !== "win32") return POSIX_FORBIDDEN_PREFIXES
+  const systemRoot = process.env.SystemRoot ?? process.env.WINDIR
+  return systemRoot ? [systemRoot] : []
+}
 
 function assertSafeDirectory(directory: string): void {
   const resolved = AppFileSystem.resolve(directory)
   if (resolved === pathParse(resolved).root) {
     throw new Error("Access denied: filesystem root is not a valid project directory")
   }
-  if (process.platform !== "win32") {
-    for (const prefix of FORBIDDEN_PREFIXES) {
-      if (resolved === prefix || resolved.startsWith(`${prefix}/`)) {
-        throw new Error("Access denied: target is a protected system directory")
-      }
+  for (const prefix of protectedSystemDirectories()) {
+    if (AppFileSystem.contains(AppFileSystem.resolve(prefix), resolved)) {
+      throw new Error("Access denied: target is a protected system directory")
     }
   }
 }
@@ -100,6 +102,30 @@ async function disposeCached(directory: string, current: Promise<InstanceContext
       },
     },
   })
+}
+
+function beginDirectoryCleanup(directory: string, current: Promise<InstanceContext>) {
+  const existing = directoryCleanups.get(directory)
+  if (existing) return existing
+  const cleanup = disposeCached(directory, current).finally(() => {
+    if (directoryCleanups.get(directory) === cleanup) directoryCleanups.delete(directory)
+  })
+  directoryCleanups.set(directory, cleanup)
+  return cleanup
+}
+
+function beginDirectoryDisposal(directory: string, cleanup: Promise<void>) {
+  const existing = directoryDisposals.get(directory)
+  if (existing) return existing
+  const bounded = withTimeout(cleanup, DIRECTORY_DISPOSE_TIMEOUT)
+    .catch((error) => {
+      Log.Default.warn("instance dispose did not complete", { directory, error })
+    })
+    .finally(() => {
+      if (directoryDisposals.get(directory) === bounded) directoryDisposals.delete(directory)
+    })
+  directoryDisposals.set(directory, bounded)
+  return bounded
 }
 
 export const Instance = {
@@ -192,25 +218,24 @@ export const Instance = {
     const directory = AppFileSystem.resolve(input)
     assertSafeDirectory(directory)
     const pending = directoryDisposals.get(directory)
-    if (pending) return pending
+    if (pending) {
+      await pending
+      return
+    }
     const current = cache.get(directory)
     if (!current) return
-
-    // NOTE: withTimeout only bounds the *wait*, not the underlying promise —
-    // a slow disposer may still complete after the timeout fires.  The
-    // directoryDisposals guard above is a soft happens-before (bounded by
-    // DIRECTORY_DISPOSE_TIMEOUT), not a true barrier.  If a disposer times
-    // out and the same directory is re-provided immediately, the background
-    // disposer can still race with the new instance and tear down
-    // per-directory state (e.g. session-cwd entries) once it finally finishes.
-    const cleanup = withTimeout(disposeCached(directory, current), DIRECTORY_DISPOSE_TIMEOUT).catch((error) => {
-      Log.Default.warn("instance dispose did not complete", { directory, error })
-    })
-    directoryDisposals.set(directory, cleanup)
-    try {
-      await cleanup
-    } finally {
-      if (directoryDisposals.get(directory) === cleanup) directoryDisposals.delete(directory)
+    const cleanup = beginDirectoryCleanup(directory, current)
+    await beginDirectoryDisposal(directory, cleanup)
+  },
+  async disposeDirectoryFully(input: string) {
+    const directory = AppFileSystem.resolve(input)
+    assertSafeDirectory(directory)
+    while (true) {
+      const cleanup = directoryCleanups.get(directory)
+      if (cleanup) await cleanup
+      const current = cache.get(directory)
+      if (!current) return
+      await beginDirectoryCleanup(directory, current)
     }
   },
   async dispose() {

@@ -211,7 +211,16 @@ describe("Instance.containsPath", () => {
 
 describe("Instance.provide directory safety", () => {
   test("rejects system paths containing secrets", async () => {
-    const systemPaths = ["/etc", "/etc/nginx", "/etc/shadow", "/proc", "/sys", "/dev", "/boot"]
+    const systemPaths = (() => {
+      if (process.platform !== "win32") {
+        return ["/etc", "/etc/nginx", "/etc/shadow", "/proc", "/sys", "/dev", "/boot"]
+      }
+
+      const systemRoot = process.env.SystemRoot ?? process.env.WINDIR
+      expect(systemRoot).toBeDefined()
+      return [systemRoot!, path.join(systemRoot!, "System32"), path.join(systemRoot!, "System32", "config")]
+    })()
+
     for (const dir of systemPaths) {
       await expect(
         Instance.provide({ directory: dir, fn: () => {} }),

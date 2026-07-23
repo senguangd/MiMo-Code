@@ -322,7 +322,6 @@ export default {
       }
     },
   })
-  const cwd = spyOn(process, "cwd").mockImplementation(() => tmp.path)
   const wait = spyOn(TuiConfig, "waitForDependencies").mockResolvedValue()
 
   try {
@@ -414,6 +413,7 @@ export default {
         },
       }),
       config,
+      directory: tmp.path,
     })
     const local = await row(tmp.extra.localMarker)
     const global = await row(tmp.extra.globalMarker)
@@ -451,7 +451,6 @@ export default {
     }
   } finally {
     await TuiPluginRuntime.dispose()
-    cwd.mockRestore()
     wait.mockRestore()
     if (backup === undefined) {
       await fs.rm(globalConfigPath, { force: true })
@@ -527,10 +526,9 @@ test("continues loading when a plugin is missing config metadata", async () => {
     ],
   }
   const wait = spyOn(TuiConfig, "waitForDependencies").mockResolvedValue()
-  const cwd = spyOn(process, "cwd").mockImplementation(() => tmp.path)
 
   try {
-    await TuiPluginRuntime.init({ api: createTuiPluginApi(), config })
+    await TuiPluginRuntime.init({ api: createTuiPluginApi(), config, directory: tmp.path })
     // bad plugin was skipped (no metadata entry)
     await expect(fs.readFile(path.join(tmp.path, "bad.txt"), "utf8")).rejects.toThrow()
     // good plugin loaded fine
@@ -539,7 +537,6 @@ test("continues loading when a plugin is missing config metadata", async () => {
     await expect(fs.readFile(tmp.extra.bareMarker, "utf8")).resolves.toBe("undefined")
   } finally {
     await TuiPluginRuntime.dispose()
-    cwd.mockRestore()
     wait.mockRestore()
     delete process.env.MIMOCODE_PLUGIN_META_FILE
   }
@@ -599,7 +596,6 @@ export default {
   })
 
   process.env.MIMOCODE_PLUGIN_META_FILE = path.join(tmp.path, "plugin-meta.json")
-  const cwd = spyOn(process, "cwd").mockImplementation(() => tmp.path)
 
   try {
     const a = path.join(tmp.path, "order-a.ts")
@@ -613,12 +609,11 @@ export default {
         { spec: bSpec, scope: "local", source: path.join(tmp.path, "tui.json") },
       ],
     }
-    await TuiPluginRuntime.init({ api: createTuiPluginApi(), config })
+    await TuiPluginRuntime.init({ api: createTuiPluginApi(), config, directory: tmp.path })
     const lines = (await fs.readFile(tmp.extra.marker, "utf8")).trim().split("\n")
     expect(lines).toEqual(["a-start", "a-end", "b"])
   } finally {
     await TuiPluginRuntime.dispose()
-    cwd.mockRestore()
     delete process.env.MIMOCODE_PLUGIN_META_FILE
 
     if (backupJson === undefined) {
@@ -754,7 +749,6 @@ test("updates installed theme when plugin metadata changes", async () => {
   })
 
   process.env.MIMOCODE_PLUGIN_META_FILE = path.join(tmp.path, "plugin-meta.json")
-  const cwd = spyOn(process, "cwd").mockImplementation(() => tmp.path)
   const wait = spyOn(TuiConfig, "waitForDependencies").mockResolvedValue()
 
   const mkApi = () =>
@@ -778,7 +772,7 @@ test("updates installed theme when plugin metadata changes", async () => {
   })
 
   try {
-    await TuiPluginRuntime.init({ api: mkApi(), config: mkConfig() })
+    await TuiPluginRuntime.init({ api: mkApi(), config: mkConfig(), directory: tmp.path })
     await TuiPluginRuntime.dispose()
     await expect(fs.readFile(tmp.extra.dest, "utf8")).resolves.toContain("#111111")
 
@@ -799,7 +793,7 @@ test("updates installed theme when plugin metadata changes", async () => {
     await fs.utimes(tmp.extra.pluginPath, stamp, stamp)
     await fs.utimes(tmp.extra.themePath, stamp, stamp)
 
-    await TuiPluginRuntime.init({ api: mkApi(), config: mkConfig() })
+    await TuiPluginRuntime.init({ api: mkApi(), config: mkConfig(), directory: tmp.path })
     const text = await fs.readFile(tmp.extra.dest, "utf8")
     expect(text).toContain("#222222")
     expect(text).not.toContain("#111111")
@@ -809,7 +803,6 @@ test("updates installed theme when plugin metadata changes", async () => {
     expect(list["demo.theme-update"]?.themes?.[tmp.extra.themeName]?.dest).toBe(tmp.extra.dest)
   } finally {
     await TuiPluginRuntime.dispose()
-    cwd.mockRestore()
     wait.mockRestore()
     delete process.env.MIMOCODE_PLUGIN_META_FILE
   }

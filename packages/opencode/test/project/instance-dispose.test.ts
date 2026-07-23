@@ -55,3 +55,38 @@ test("targeted disposal is bounded and cannot evict a replacement", async () => 
     await Instance.disposeDirectory(tmp.path)
   }
 }, 5_000)
+
+test("full disposal waits for the underlying cleanup after the bounded gate opens", async () => {
+  await using tmp = await tmpdir()
+  let started!: () => void
+  let finish!: () => void
+  const disposing = new Promise<void>((resolve) => (started = resolve))
+  const blocked = new Promise<void>((resolve) => (finish = resolve))
+  const unregister = registerDisposer(async (directory) => {
+    if (directory !== tmp.path) return
+    started()
+    await blocked
+  })
+
+  try {
+    await Instance.provide({ directory: tmp.path, fn: () => undefined })
+    const bounded = Instance.disposeDirectory(tmp.path)
+    await disposing
+    await bounded
+
+    let settled = false
+    const full = Instance.disposeDirectoryFully(tmp.path).then(() => {
+      settled = true
+    })
+    await Bun.sleep(20)
+    expect(settled).toBe(false)
+
+    finish()
+    await full
+    expect(settled).toBe(true)
+  } finally {
+    finish()
+    unregister()
+    await Instance.disposeDirectoryFully(tmp.path)
+  }
+}, 10_000)

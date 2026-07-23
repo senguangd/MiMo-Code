@@ -58,6 +58,13 @@ function escapeRegex(s: string) {
   return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
 }
 
+export function resolvePlaygroundCssFile(file: string) {
+  if (path.basename(file) !== file) return
+  const absolute = path.resolve(root, file)
+  if (path.dirname(absolute) !== root) return
+  return absolute
+}
+
 export function playgroundCss(): Plugin {
   return {
     name: "playground-css",
@@ -97,8 +104,8 @@ export function playgroundCss(): Plugin {
           const grouped = new Map<string, Edit[]>()
           for (const edit of payload.edits) {
             if (!edit.file || !edit.anchor || !edit.prop || edit.value === undefined) continue
-            const abs = path.resolve(root, edit.file)
-            if (!abs.startsWith(root)) continue
+            const abs = resolvePlaygroundCssFile(edit.file)
+            if (!abs) continue
             const key = abs
             if (!grouped.has(key)) grouped.set(key, [])
             grouped.get(key)!.push(edit)

@@ -7,6 +7,7 @@ import { InstanceState } from "@/effect"
 import { Flag } from "@/flag/flag"
 import { AppFileSystem } from "@mimo-ai/shared/filesystem"
 import { withTransientReadRetry } from "@/util/effect-http-client"
+import { formatHomePath } from "@/util/format"
 import { Global } from "../global"
 import { Log } from "../util"
 import type { MessageV2 } from "./message-v2"
@@ -219,7 +220,7 @@ export const layer: Layer.Layer<Service, never, AppFileSystem.Service | Config.S
         let current = path.dirname(target)
 
         // Walk upward from the file being read and attach nearby instruction files once per message.
-        while (current.startsWith(root) && current !== root) {
+        while (AppFileSystem.contains(root, current) && current !== root) {
           const found = yield* find(current)
           if (!found || found === target || sys.has(found) || already.has(found)) {
             current = path.dirname(current)
@@ -267,9 +268,9 @@ export function loaded(messages: MessageV2.WithParts[]) {
 // otherwise the absolute path.
 export function display(filepath: string, worktree: string) {
   const rel = path.relative(worktree, filepath)
-  if (rel && !rel.startsWith("..") && !path.isAbsolute(rel)) return rel
-  const home = os.homedir()
-  if (filepath === home || filepath.startsWith(home + path.sep)) return path.join("~", path.relative(home, filepath))
+  if (rel && AppFileSystem.contains(worktree, filepath)) return rel
+  const homePath = formatHomePath(filepath)
+  if (homePath !== filepath) return homePath
   return filepath
 }
 

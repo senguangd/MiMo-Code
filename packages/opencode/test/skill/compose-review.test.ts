@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test"
+import path from "node:path"
 import { loadComposeBundle } from "../../src/skill/compose/bundle.macro"
 import { ConfigCompose } from "../../src/config"
 
@@ -142,7 +143,8 @@ describe("compose spec-anchored review contract", () => {
 })
 
 describe("compose docs dir resolution", () => {
-  const worktree = "/repo/root"
+  const worktree = path.join(path.parse(process.cwd()).root, "repo", "root")
+  const absoluteDocs = path.join(path.parse(worktree).root, "abs", "docs")
 
   test("relative docs is passed through verbatim by default", () => {
     expect(ConfigCompose.resolveDocsDir(worktree, { docs: "docs/compose" })).toBe("docs/compose")
@@ -150,13 +152,13 @@ describe("compose docs dir resolution", () => {
 
   test("relative docs is anchored to worktree when docs_absolute is true", () => {
     expect(ConfigCompose.resolveDocsDir(worktree, { docs: "docs/compose", docs_absolute: true })).toBe(
-      "/repo/root/docs/compose",
+      path.join(worktree, "docs", "compose"),
     )
   })
 
   test("absolute docs ignores worktree regardless of docs_absolute", () => {
-    expect(ConfigCompose.resolveDocsDir(worktree, { docs: "/abs/docs" })).toBe("/abs/docs")
-    expect(ConfigCompose.resolveDocsDir(worktree, { docs: "/abs/docs", docs_absolute: true })).toBe("/abs/docs")
+    expect(ConfigCompose.resolveDocsDir(worktree, { docs: absoluteDocs })).toBe(absoluteDocs)
+    expect(ConfigCompose.resolveDocsDir(worktree, { docs: absoluteDocs, docs_absolute: true })).toBe(absoluteDocs)
   })
 
   test("default docs dir is used when config is absent", () => {

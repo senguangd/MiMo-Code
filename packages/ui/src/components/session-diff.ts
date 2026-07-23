@@ -25,28 +25,52 @@ export type ViewDiff = {
 
 const cache = new Map<string, FileDiffMetadata>()
 
+type ContentLine = { text: string; newline: boolean }
+
+function content(lines: ContentLine[]) {
+  return lines.map((line) => line.text + (line.newline ? "\n" : "")).join("")
+}
+
+function markNoFinalNewline(lines: ContentLine[]) {
+  const line = lines.at(-1)
+  if (line) line.newline = false
+}
+
+function patchContents(value: string) {
+  const parsed = parsePatch(value)[0]
+  const before: ContentLine[] = []
+  const after: ContentLine[] = []
+  let previous: string | undefined
+
+  for (const hunk of parsed?.hunks ?? []) {
+    for (const line of hunk.lines) {
+      if (line === "\\ No newline at end of file") {
+        if (previous?.startsWith("-")) markNoFinalNewline(before)
+        if (previous?.startsWith("+")) markNoFinalNewline(after)
+        if (previous?.startsWith(" ")) {
+          markNoFinalNewline(before)
+          markNoFinalNewline(after)
+        }
+        continue
+      }
+
+      const next = { text: line.slice(1), newline: true }
+      if (line.startsWith("-")) before.push(next)
+      if (line.startsWith("+")) after.push(next)
+      if (line.startsWith(" ")) {
+        before.push(next)
+        after.push({ ...next })
+      }
+      previous = line
+    }
+  }
+
+  return { before: content(before), after: content(after) }
+}
+
 function patch(diff: ReviewDiff) {
   if (typeof diff.patch === "string") {
-    const [patch] = parsePatch(diff.patch)
-
-    const beforeLines = []
-    const afterLines = []
-
-    for (const hunk of patch.hunks) {
-      for (const line of hunk.lines) {
-        if (line.startsWith("-")) {
-          beforeLines.push(line.slice(1))
-        } else if (line.startsWith("+")) {
-          afterLines.push(line.slice(1))
-        } else {
-          // context line (starts with ' ')
-          beforeLines.push(line.slice(1))
-          afterLines.push(line.slice(1))
-        }
-      }
-    }
-
-    return { before: beforeLines.join("\n"), after: afterLines.join("\n"), patch: diff.patch }
+    return { ...patchContents(diff.patch), patch: diff.patch }
   }
   return {
     before: "before" in diff && typeof diff.before === "string" ? diff.before : "",

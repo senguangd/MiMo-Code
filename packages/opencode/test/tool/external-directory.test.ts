@@ -199,6 +199,32 @@ describe("tool.assertExternalDirectory", () => {
   })
 
   if (process.platform === "win32") {
+    test("recognizes an existing memory file through normalized Windows path aliases", async () => {
+      const { requests, ctx } = makeCtx()
+      const target = path.join(
+        Global.Path.data,
+        "memory",
+        "sessions",
+        "ses_alias",
+        "tasks",
+        "T1",
+        "progress.md",
+      )
+      await Bun.write(target, "progress")
+
+      try {
+        await Instance.provide({
+          directory: path.join(Global.Path.data, "project-alias-test"),
+          fn: async () => {
+            await assertExternalDirectory(ctx, target)
+          },
+        })
+        expect(requests).toHaveLength(0)
+      } finally {
+        await import("node:fs/promises").then((fs) => fs.rm(path.dirname(target), { recursive: true, force: true }))
+      }
+    })
+
     test("normalizes Windows path variants to one glob", async () => {
       const { requests, ctx } = makeCtx()
 

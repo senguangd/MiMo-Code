@@ -1,6 +1,6 @@
-import { describe, expect } from "bun:test"
+import { describe, expect, test } from "bun:test"
 import { Effect, Layer } from "effect"
-import { Skill } from "../../src/skill"
+import { Skill, isBundledSkill } from "../../src/skill"
 import * as CrossSpawnSpawner from "../../src/effect/cross-spawn-spawner"
 import { provideInstance, provideTmpdirInstance, tmpdir } from "../fixture/fixture"
 import { testEffect } from "../lib/effect"
@@ -49,6 +49,13 @@ const withHome = <A, E, R>(home: string, self: Effect.Effect<A, E, R>) =>
   )
 
 describe("skill", () => {
+  test("classifies bundled skills by path boundary rather than string prefix", () => {
+    const root = path.join(path.parse(process.cwd()).root, "bundle")
+    expect(isBundledSkill(path.join(root, "skill", "SKILL.md"), [root])).toBe(true)
+    expect(isBundledSkill(path.join(`${root}-copy`, "skill", "SKILL.md"), [root])).toBe(false)
+    expect(isBundledSkill(path.join(root, "..cache", "skill", "SKILL.md"), [root])).toBe(true)
+  })
+
   it.live("discovers skills from .mimocode/skill/ directory", () =>
     provideTmpdirInstance(
       (dir) =>

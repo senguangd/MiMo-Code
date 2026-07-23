@@ -80,6 +80,26 @@ export function decodeFilePath(input: string) {
   }
 }
 
+function normalizeRoot(input: string) {
+  const normalized = input.replace(/\\/g, "/")
+  if (normalized === "/" || /^[A-Za-z]:\/$/.test(normalized)) return normalized
+  return normalized.replace(/\/+$/, "")
+}
+
+export function relativePathWithinRoot(root: string, input: string) {
+  const base = normalizeRoot(root)
+  if (!base) return
+  const file = input.replace(/\\/g, "/")
+  const windows = /^[A-Za-z]:/.test(base) || base.startsWith("//")
+  const target = windows ? file.toLowerCase() : file
+  const boundary = windows ? base.toLowerCase() : base
+
+  if (target === boundary) return ""
+  const prefix = boundary.endsWith("/") ? boundary : boundary + "/"
+  if (!target.startsWith(prefix)) return
+  return input.slice(prefix.length)
+}
+
 export function encodeFilePath(filepath: string): string {
   // Normalize Windows paths: convert backslashes to forward slashes
   let normalized = filepath.replace(/\\/g, "/")
@@ -107,18 +127,8 @@ export function createPathHelpers(scope: () => string) {
 
     let path = unquoteGitPath(decodeFilePath(stripQueryAndHash(stripFileProtocol(input))))
 
-    // Separator-agnostic prefix stripping for Cygwin/native Windows compatibility
-    // Only case-insensitive on Windows (drive letter or UNC paths)
-    const windows = /^[A-Za-z]:/.test(root) || root.startsWith("\\\\")
-    const canonRoot = windows ? root.replace(/\\/g, "/").toLowerCase() : root.replace(/\\/g, "/")
-    const canonPath = windows ? path.replace(/\\/g, "/").toLowerCase() : path.replace(/\\/g, "/")
-    if (
-      canonPath.startsWith(canonRoot) &&
-      (canonRoot.endsWith("/") || canonPath === canonRoot || canonPath[canonRoot.length] === "/")
-    ) {
-      // Slice from original path to preserve native separators
-      path = path.slice(root.length)
-    }
+    const relative = relativePathWithinRoot(root, path)
+    if (relative !== undefined) path = relative
 
     if (path.startsWith("./") || path.startsWith(".\\")) {
       path = path.slice(2)
