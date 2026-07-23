@@ -1,11 +1,11 @@
 import { randomUUID } from "node:crypto"
 import { Context, Effect } from "effect"
-import { and, Database, eq } from "@/storage"
+import { and, Database, eq, or } from "@/storage"
 import { ActorRegistryTable } from "@/actor/actor.sql"
 import { RuntimeLeaseTable } from "./lease.sql"
 import { ProcessIdentity } from "./process"
 
-export type ResourceType = "session-run" | "checkpoint" | "project-memory"
+export type ResourceType = "session-run" | "session-admin" | "checkpoint" | "project-memory"
 
 export type Key = {
   resourceType: ResourceType
@@ -27,8 +27,13 @@ export class LostError extends Error {
 }
 
 export class CancelledError extends Error {
-  constructor(readonly handle: Handle, readonly reason?: string) {
-    super(reason ?? `Runtime lease cancelled: ${handle.resourceType}:${handle.resourceID}:${handle.subresourceID ?? ""}`)
+  constructor(
+    readonly handle: Handle,
+    readonly reason?: string,
+  ) {
+    super(
+      reason ?? `Runtime lease cancelled: ${handle.resourceType}:${handle.resourceID}:${handle.subresourceID ?? ""}`,
+    )
   }
 }
 
@@ -53,6 +58,48 @@ export const acquire = Effect.fn("RuntimeLease.acquire")(function* (input: Key) 
         const now = Date.now()
         const row = db.select().from(RuntimeLeaseTable).where(where(input)).get()
         if (row && row.lease_id !== "" && row.expires_at > now) return undefined
+
+        // Session-wide management is mutually exclusive with every execution
+        // path that can mutate the session: actor runs and checkpoint writers.
+        // The check and lease insert happen under the same BEGIN IMMEDIATE
+        // transaction, so no conflicting owner can slip in after preflight.
+        if (input.resourceType === "session-admin") {
+          const running = db
+            .select()
+            .from(RuntimeLeaseTable)
+            .where(
+              and(
+                eq(RuntimeLeaseTable.resource_id, input.resourceID),
+                or(
+                  eq(RuntimeLeaseTable.resource_type, "session-run"),
+                  eq(RuntimeLeaseTable.resource_type, "checkpoint"),
+                ),
+              ),
+            )
+            .all()
+            .some(
+              (candidate) =>
+                (candidate.resource_type === "session-run" || candidate.resource_type === "checkpoint") &&
+                candidate.lease_id !== "" &&
+                candidate.expires_at > now,
+            )
+          if (running) return undefined
+        }
+        if (input.resourceType === "session-run" || input.resourceType === "checkpoint") {
+          const admin = db
+            .select()
+            .from(RuntimeLeaseTable)
+            .where(
+              and(
+                eq(RuntimeLeaseTable.resource_type, "session-admin"),
+                eq(RuntimeLeaseTable.resource_id, input.resourceID),
+                eq(RuntimeLeaseTable.subresource_id, ""),
+              ),
+            )
+            .get()
+          if (admin && admin.lease_id !== "" && admin.expires_at > now) return undefined
+        }
+
         if (input.resourceType === "session-run" && !row) {
           const actor = db
             .select()
@@ -140,11 +187,7 @@ export const active = Effect.fn("RuntimeLease.active")(function* (resourceType: 
   return yield* Effect.sync(() => {
     const now = Date.now()
     return Database.use((db) =>
-      db
-        .select()
-        .from(RuntimeLeaseTable)
-        .where(eq(RuntimeLeaseTable.resource_type, resourceType))
-        .all(),
+      db.select().from(RuntimeLeaseTable).where(eq(RuntimeLeaseTable.resource_type, resourceType)).all(),
     )
       .filter((row) => row.lease_id !== "" && row.expires_at > now)
       .map(

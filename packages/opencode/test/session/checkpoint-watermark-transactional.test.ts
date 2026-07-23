@@ -9,6 +9,7 @@ import { Actor, type AgentOutcome } from "../../src/actor/spawn"
 import { spawnRef } from "../../src/actor/spawn-ref"
 import { TaskRegistry } from "../../src/task/registry"
 import { SessionCheckpoint } from "../../src/session/checkpoint"
+import { prefixCaptureRef } from "../../src/session/prefix-capture-ref"
 import { Log } from "../../src/util"
 import { Plugin } from "../../src/plugin"
 import { provideTmpdirInstance } from "../fixture/fixture"
@@ -35,14 +36,21 @@ const controllableActor = Layer.effect(
   Actor.Service,
   Effect.gen(function* () {
     const prev = spawnRef.current
+    const prevPrefix = prefixCaptureRef.current
+    const emptyPrefix: NonNullable<typeof prefixCaptureRef.current> = () =>
+      Effect.succeed({ system: [], tools: {}, inheritedMessages: [], parentPermission: [] })
+    prefixCaptureRef.current = emptyPrefix
     let counter = 0
     const impl = Actor.Service.of({
       spawn: (input) =>
         Effect.gen(function* () {
           counter += 1
           const outcome = yield* Deferred.make<AgentOutcome>()
+          const settled = yield* Deferred.make<void>()
+          // This mock has no detached/postStop fiber; its execution container is settled immediately.
+          yield* Deferred.succeed(settled, undefined)
           outcomes.push(outcome)
-          return { actorID: `${input.agentType}-${counter}`, sessionID: input.sessionID, outcome }
+          return { actorID: `${input.agentType}-${counter}`, sessionID: input.sessionID, outcome, settled }
         }),
       cancel: () => Effect.void,
       getForkContext: () => Effect.succeed(undefined),
@@ -51,6 +59,7 @@ const controllableActor = Layer.effect(
     yield* Effect.addFinalizer(() =>
       Effect.sync(() => {
         if (spawnRef.current === impl) spawnRef.current = prev
+        if (prefixCaptureRef.current === emptyPrefix) prefixCaptureRef.current = prevPrefix
       }),
     )
     return impl
@@ -82,6 +91,11 @@ const it = testEffect(env)
 // array-length delta, so parallel tests never resolve each other's writer).
 function seedAndStartWriter() {
   return Effect.gen(function* () {
+    // SessionCheckpoint reaches the actor through spawnRef rather than a direct
+    // service dependency. Resolve our controllable Actor explicitly so this
+    // test never inherits a production actor installed by an earlier AppRuntime
+    // integration test in the same Bun process.
+    yield* Actor.Service
     const svc = yield* SessionCheckpoint.Service
     const ssn = yield* SessionNs.Service
     const info = yield* ssn.create({})

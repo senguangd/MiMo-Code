@@ -36,7 +36,10 @@ describe("RuntimeLease multiprocess stress", () => {
       }),
     )
     const results = await Promise.all(processes.map(output))
-    expect(results.every((result) => result.exit === 0)).toBe(true)
+    const failures = results
+      .map((result, index) => ({ index, exit: result.exit, stderr: result.stderr.trim() }))
+      .filter((result) => result.exit !== 0)
+    expect(failures).toEqual([])
     expect(results.every((result) => !result.stderr.includes("SQLITE_BUSY"))).toBe(true)
 
     const winners = results
@@ -50,5 +53,43 @@ describe("RuntimeLease multiprocess stress", () => {
     for (const winner of winners) counts.set(winner, (counts.get(winner) ?? 0) + 1)
     expect([...counts.keys()].sort((a, b) => a - b)).toEqual(Array.from({ length: 100 }, (_, index) => index))
     expect([...counts.values()].every((count) => count === 1)).toBe(true)
+  }, 60_000)
+  test("concurrent first startup serializes database migrations", async () => {
+    await using tmp = await tmpdir()
+    const db = path.join(tmp.path, "fresh-startup.db")
+    const processes = Array.from({ length: 8 }, () =>
+      Bun.spawn([process.execPath, worker, db, "1"], {
+        cwd: import.meta.dir,
+        stdout: "pipe",
+        stderr: "pipe",
+        env: process.env,
+      }),
+    )
+    const results = await Promise.all(processes.map(output))
+    const failures = results
+      .map((result, index) => ({ index, exit: result.exit, stderr: result.stderr.trim() }))
+      .filter((result) => result.exit !== 0)
+    expect(failures).toEqual([])
+    expect(results.every((result) => !result.stderr.includes("SQLITE_BUSY"))).toBe(true)
+    expect(results.flatMap((result) => result.stdout.match(/^WIN 0$/gm) ?? [])).toHaveLength(1)
+    expect(await Bun.file(`${db}.migrate.lock`).exists()).toBe(false)
+  }, 60_000)
+
+  test("a dead migration owner is reclaimed and its lock is removed", async () => {
+    await using tmp = await tmpdir()
+    const db = path.join(tmp.path, "stale-migration.db")
+    const lock = `${db}.migrate.lock`
+    await Bun.write(lock, JSON.stringify({ pid: 999_999, startedAt: 0, nonce: "stale" }))
+
+    const proc = Bun.spawn([process.execPath, worker, db, "1"], {
+      cwd: import.meta.dir,
+      stdout: "pipe",
+      stderr: "pipe",
+      env: process.env,
+    })
+    const result = await output(proc)
+    expect({ exit: result.exit, stderr: result.stderr.trim() }).toEqual({ exit: 0, stderr: expect.any(String) })
+    expect(result.stdout).toContain("WIN 0")
+    expect(await Bun.file(lock).exists()).toBe(false)
   }, 60_000)
 })

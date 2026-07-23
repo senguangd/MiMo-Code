@@ -6,7 +6,9 @@ import { Server } from "../../src/server/server"
 import { Instance } from "../../src/project/instance"
 import { Session } from "../../src/session"
 import { SessionRunState } from "../../src/session/run-state"
+import { SessionPrompt } from "../../src/session/prompt"
 import { SessionStatus } from "../../src/session/status"
+import { RuntimeLease } from "../../src/runtime/lease"
 import { AppRuntime } from "../../src/effect/app-runtime"
 import { Log } from "../../src/util"
 import { tmpdir } from "../fixture/fixture"
@@ -48,11 +50,7 @@ describe("POST /session/:sessionID/message busy-runner behavior", () => {
             // Occupy the main runner with an Effect that never resolves.
             // Forked so we can continue and issue the conflicting POST.
             yield* state
-              .startShell(
-                sess.id,
-                Effect.succeed({ info: {}, parts: [] } as never),
-                Effect.never as never,
-              )
+              .startShell(sess.id, Effect.succeed({ info: {}, parts: [] } as never), Effect.never as never)
               .pipe(Effect.forkChild)
 
             // Give the scheduler a tick so the occupant marks the runner busy.
@@ -84,7 +82,7 @@ describe("POST /session/:sessionID/message busy-runner behavior", () => {
     expect(status).toBe(409)
   })
 
-  test("POST /:sessionID/abort frees runner; subsequent POST is no longer rejected with 409", async () => {
+  test("POST /:sessionID/abort releases the ownership gate for the next prompt", async () => {
     await using tmp = await tmpdir({})
 
     const result = await Instance.provide({
@@ -96,19 +94,15 @@ describe("POST /session/:sessionID/message busy-runner behavior", () => {
             const sess = yield* sessions.create({ title: "busy-recover test" })
             const state = yield* SessionRunState.Service
 
-            yield* state
-              .startShell(
-                sess.id,
-                Effect.succeed({ info: {}, parts: [] } as never),
-                Effect.never as never,
-              )
+            const shell = yield* state
+              .startShell(sess.id, Effect.succeed({ info: {}, parts: [] } as never), Effect.never as never)
               .pipe(Effect.forkChild)
             yield* Effect.sleep("50 millis")
 
             const app = Server.Default().app
             const dirQuery = `?directory=${encodeURIComponent(tmp.path)}`
 
-            // 1. confirm busy → 409
+            // Confirm the HTTP route's ownership preflight reports 409.
             const first = yield* Effect.promise(async () =>
               app.request(`/session/${sess.id}/message${dirQuery}`, {
                 method: "POST",
@@ -117,32 +111,204 @@ describe("POST /session/:sessionID/message busy-runner behavior", () => {
               }),
             )
 
-            // 2. abort frees the runner
+            // Abort acknowledges immediately; the owner releases its lease during cleanup.
             const abort = yield* Effect.promise(async () =>
               app.request(`/session/${sess.id}/abort${dirQuery}`, { method: "POST" }),
             )
+            yield* Fiber.await(shell)
 
-            // Wait for runner.cancel to take effect.
-            yield* Effect.sleep("100 millis")
-
-            // 3. subsequent POST is no longer 409 — assert just status != 409.
-            //    (full success requires a real LLM; we only verify the contention
-            //    is gone, not the prompt outcome.)
-            const second = yield* Effect.promise(async () =>
-              app.request(`/session/${sess.id}/message${dirQuery}`, {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ parts: [{ type: "text", text: "second" }] }),
-              }),
-            )
-            return { firstStatus: first.status, abortStatus: abort.status, secondStatus: second.status }
+            // Exercise the exact preflight used by POST /message, then persist a
+            // noReply user turn without involving a real provider or response stream.
+            yield* state.assertNotBusy(sess.id)
+            const prompt = yield* SessionPrompt.Service
+            const second = yield* prompt.prompt({
+              sessionID: sess.id,
+              agent: "build",
+              noReply: true,
+              parts: [{ type: "text", text: "second" }],
+            })
+            return { firstStatus: first.status, abortStatus: abort.status, secondRole: second.info.role }
           }),
         ),
     })
 
     expect(result.firstStatus).toBe(409)
     expect(result.abortStatus).toBe(200)
-    expect(result.secondStatus).not.toBe(409)
+    expect(result.secondRole).toBe("user")
+  })
+
+  test("PATCH part is rejected while the session owner is active and leaves storage unchanged", async () => {
+    await using tmp = await tmpdir({})
+
+    const result = await Instance.provide({
+      directory: tmp.path,
+      fn: async () =>
+        AppRuntime.runPromise(
+          Effect.gen(function* () {
+            const sessions = yield* Session.Service
+            const state = yield* SessionRunState.Service
+            const prompt = yield* SessionPrompt.Service
+            const sess = yield* sessions.create({ title: "part-update ownership test" })
+            const seeded = yield* prompt.prompt({
+              sessionID: sess.id,
+              agent: "build",
+              noReply: true,
+              parts: [{ type: "text", text: "original" }],
+            })
+            const part = seeded.parts.find((candidate) => candidate.type === "text")
+            if (!part || part.type !== "text") throw new Error("seed text part missing")
+
+            const shell = yield* state
+              .startShell(sess.id, Effect.succeed({ info: {}, parts: [] } as never), Effect.never as never)
+              .pipe(Effect.forkChild)
+            yield* Effect.sleep("50 millis")
+
+            const app = Server.Default().app
+            const response = yield* Effect.promise(() =>
+              Promise.resolve(
+                app.request(
+                  `/session/${sess.id}/message/${seeded.info.id}/part/${part.id}?directory=${encodeURIComponent(tmp.path)}`,
+                  {
+                    method: "PATCH",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ ...part, text: "mutated" }),
+                  },
+                ),
+              ),
+            )
+            const stored = (yield* sessions.messages({ sessionID: sess.id }))
+              .flatMap((message) => message.parts)
+              .find((candidate) => candidate.id === part.id)
+
+            yield* state.cancel(sess.id)
+            yield* Fiber.await(shell)
+            return { status: response.status, text: stored?.type === "text" ? stored.text : undefined }
+          }),
+        ),
+    })
+
+    expect(result.status).toBe(409)
+    expect(result.text).toBe("original")
+  })
+
+  test("PATCH part is rejected while a background actor owns the session", async () => {
+    await using tmp = await tmpdir({})
+
+    const result = await Instance.provide({
+      directory: tmp.path,
+      fn: async () =>
+        AppRuntime.runPromise(
+          Effect.gen(function* () {
+            const sessions = yield* Session.Service
+            const prompt = yield* SessionPrompt.Service
+            const sess = yield* sessions.create({ title: "background ownership test" })
+            const seeded = yield* prompt.prompt({
+              sessionID: sess.id,
+              agent: "build",
+              noReply: true,
+              parts: [{ type: "text", text: "original" }],
+            })
+            const part = seeded.parts.find((candidate) => candidate.type === "text")
+            if (!part || part.type !== "text") throw new Error("seed text part missing")
+
+            const handle = yield* RuntimeLease.acquire({
+              resourceType: "session-run",
+              resourceID: sess.id,
+              subresourceID: "general-1",
+            })
+            if (!handle) throw new Error("background lease missing")
+
+            const app = Server.Default().app
+            const response = yield* Effect.promise(() =>
+              Promise.resolve(
+                app.request(
+                  `/session/${sess.id}/message/${seeded.info.id}/part/${part.id}?directory=${encodeURIComponent(tmp.path)}`,
+                  {
+                    method: "PATCH",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ ...part, text: "mutated" }),
+                  },
+                ),
+              ),
+            )
+            const stored = (yield* sessions.messages({ sessionID: sess.id }))
+              .flatMap((message) => message.parts)
+              .find((candidate) => candidate.id === part.id)
+            yield* RuntimeLease.release(handle)
+            return { status: response.status, text: stored?.type === "text" ? stored.text : undefined }
+          }),
+        ),
+    })
+
+    expect(result.status).toBe(409)
+    expect(result.text).toBe("original")
+  })
+
+  test("DELETE session is rejected while its main owner is active", async () => {
+    await using tmp = await tmpdir({})
+
+    const result = await Instance.provide({
+      directory: tmp.path,
+      fn: async () =>
+        AppRuntime.runPromise(
+          Effect.gen(function* () {
+            const sessions = yield* Session.Service
+            const state = yield* SessionRunState.Service
+            const sess = yield* sessions.create({ title: "session delete ownership test" })
+            const shell = yield* state
+              .startShell(sess.id, Effect.succeed({ info: {}, parts: [] } as never), Effect.never as never)
+              .pipe(Effect.forkChild)
+            yield* Effect.sleep("50 millis")
+
+            const app = Server.Default().app
+            const response = yield* Effect.promise(() =>
+              Promise.resolve(
+                app.request(`/session/${sess.id}?directory=${encodeURIComponent(tmp.path)}`, { method: "DELETE" }),
+              ),
+            )
+            const exists = Exit.isSuccess(yield* sessions.get(sess.id).pipe(Effect.exit))
+            yield* state.cancel(sess.id)
+            yield* Fiber.await(shell)
+            return { status: response.status, exists }
+          }),
+        ),
+    })
+
+    expect(result.status).toBe(409)
+    expect(result.exists).toBe(true)
+  })
+
+  test("DELETE session is rejected while its checkpoint writer lease is active", async () => {
+    await using tmp = await tmpdir({})
+
+    const result = await Instance.provide({
+      directory: tmp.path,
+      fn: async () =>
+        AppRuntime.runPromise(
+          Effect.gen(function* () {
+            const sessions = yield* Session.Service
+            const sess = yield* sessions.create({ title: "checkpoint delete ownership test" })
+            const checkpoint = yield* RuntimeLease.acquire({
+              resourceType: "checkpoint",
+              resourceID: sess.id,
+            })
+            if (!checkpoint) throw new Error("checkpoint lease missing")
+
+            const app = Server.Default().app
+            const response = yield* Effect.promise(() =>
+              Promise.resolve(
+                app.request(`/session/${sess.id}?directory=${encodeURIComponent(tmp.path)}`, { method: "DELETE" }),
+              ),
+            )
+            const exists = Exit.isSuccess(yield* sessions.get(sess.id).pipe(Effect.exit))
+            yield* RuntimeLease.release(checkpoint)
+            return { status: response.status, exists }
+          }),
+        ),
+    })
+
+    expect(result.status).toBe(409)
+    expect(result.exists).toBe(true)
   })
 
   test("POST /:sessionID/abort acknowledges before interrupted cleanup completes", async () => {
@@ -179,7 +345,7 @@ describe("POST /session/:sessionID/message busy-runner behavior", () => {
                 app.request(`/session/${sess.id}/abort${dirQuery}`, { method: "POST" }),
               ).pipe(Effect.forkChild)
               const abortExit = yield* Fiber.await(abort).pipe(Effect.timeout("1 second"))
-              const current = yield* status.get(sess.id)
+              const duringCleanup = yield* status.get(sess.id)
               const interruptionDelivered = yield* Deferred.isDone(interrupted)
 
               const repeated = yield* Effect.promise(async () =>
@@ -188,11 +354,13 @@ describe("POST /session/:sessionID/message busy-runner behavior", () => {
 
               yield* Deferred.succeed(cleanup, undefined)
               yield* Fiber.await(shell)
+              const afterCleanup = yield* status.get(sess.id)
 
               return {
                 abortStatus: abortExit && Exit.isSuccess(abortExit) ? abortExit.value.status : undefined,
                 repeatedStatus: repeated.status,
-                sessionStatus: current.type,
+                duringCleanupStatus: duringCleanup.type,
+                afterCleanupStatus: afterCleanup.type,
                 interruptionDelivered,
               }
             }).pipe(Effect.ensuring(Deferred.succeed(cleanup, undefined).pipe(Effect.ignore)))
@@ -202,7 +370,8 @@ describe("POST /session/:sessionID/message busy-runner behavior", () => {
 
     expect(result.abortStatus).toBe(200)
     expect(result.repeatedStatus).toBe(200)
-    expect(result.sessionStatus).toBe("idle")
+    expect(result.duringCleanupStatus).toBe("busy")
+    expect(result.afterCleanupStatus).toBe("idle")
     expect(result.interruptionDelivered).toBe(true)
   })
 })

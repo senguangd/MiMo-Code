@@ -61,4 +61,49 @@ describe("RuntimeLease", () => {
     await Effect.runPromise(RuntimeLease.release(second!))
   })
 
+  test("session admin ownership excludes actor and checkpoint leases in both directions", async () => {
+    const sessionID = "session-admin-conflict"
+    const actor = await Effect.runPromise(
+      RuntimeLease.acquire({ resourceType: "session-run", resourceID: sessionID, subresourceID: "general-1" }),
+    )
+    expect(actor).toBeDefined()
+    expect(
+      await Effect.runPromise(RuntimeLease.acquire({ resourceType: "session-admin", resourceID: sessionID })),
+    ).toBeUndefined()
+
+    await Effect.runPromise(RuntimeLease.release(actor!))
+    const checkpoint = await Effect.runPromise(
+      RuntimeLease.acquire({ resourceType: "checkpoint", resourceID: sessionID }),
+    )
+    expect(checkpoint).toBeDefined()
+    expect(
+      await Effect.runPromise(RuntimeLease.acquire({ resourceType: "session-admin", resourceID: sessionID })),
+    ).toBeUndefined()
+    await Effect.runPromise(RuntimeLease.release(checkpoint!))
+
+    const admin = await Effect.runPromise(
+      RuntimeLease.acquire({ resourceType: "session-admin", resourceID: sessionID }),
+    )
+    expect(admin).toBeDefined()
+    expect(
+      await Effect.runPromise(
+        RuntimeLease.acquire({ resourceType: "session-run", resourceID: sessionID, subresourceID: "main" }),
+      ),
+    ).toBeUndefined()
+    expect(
+      await Effect.runPromise(
+        RuntimeLease.acquire({ resourceType: "session-run", resourceID: sessionID, subresourceID: "explore-1" }),
+      ),
+    ).toBeUndefined()
+    expect(
+      await Effect.runPromise(RuntimeLease.acquire({ resourceType: "checkpoint", resourceID: sessionID })),
+    ).toBeUndefined()
+
+    await Effect.runPromise(RuntimeLease.release(admin!))
+    const next = await Effect.runPromise(
+      RuntimeLease.acquire({ resourceType: "session-run", resourceID: sessionID, subresourceID: "main" }),
+    )
+    expect(next).toBeDefined()
+    await Effect.runPromise(RuntimeLease.release(next!))
+  })
 })

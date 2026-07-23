@@ -39,8 +39,11 @@ const controllableActor = Layer.effect(
         Effect.gen(function* () {
           counter += 1
           const outcome = yield* Deferred.make<AgentOutcome>()
+          const settled = yield* Deferred.make<void>()
+          // This mock has no detached/postStop fiber; its execution container is settled immediately.
+          yield* Deferred.succeed(settled, undefined)
           outcomes.push(outcome)
-          return { actorID: `${input.agentType}-${counter}`, sessionID: input.sessionID, outcome }
+          return { actorID: `${input.agentType}-${counter}`, sessionID: input.sessionID, outcome, settled }
         }),
       cancel: () => Effect.void,
       getForkContext: () => Effect.succeed(undefined),

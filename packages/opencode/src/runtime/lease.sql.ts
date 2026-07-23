@@ -3,7 +3,7 @@ import { index, integer, primaryKey, sqliteTable, text } from "drizzle-orm/sqlit
 export const RuntimeLeaseTable = sqliteTable(
   "runtime_lease",
   {
-    resource_type: text().$type<"session-run" | "checkpoint" | "project-memory">().notNull(),
+    resource_type: text().$type<"session-run" | "session-admin" | "checkpoint" | "project-memory">().notNull(),
     resource_id: text().notNull(),
     subresource_id: text().notNull().default(""),
     owner_instance_id: text().notNull(),

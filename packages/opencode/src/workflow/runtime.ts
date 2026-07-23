@@ -1,7 +1,8 @@
-import { Context, Deferred, Effect, Exit, Fiber, Layer, Scope } from "effect"
+import { Context, Deferred, Effect, Exit, Fiber, Layer, Schedule, Scope } from "effect"
 import os from "node:os"
 import { createHash } from "node:crypto"
 import { spawnRef } from "@/actor/spawn-ref"
+import { ActorRegistry } from "@/actor/registry"
 import { workflowRef } from "./runtime-ref"
 import { Config } from "@/config"
 import { EffectBridge } from "@/effect"
@@ -14,12 +15,21 @@ import { InstanceRef } from "@/effect/instance-ref"
 import { Instance } from "@/project/instance"
 import { Identifier } from "@/id/id"
 import type { SessionID } from "@/session/schema"
+import { Session } from "@/session"
+import { SessionRunState } from "@/session/run-state"
 import type { ProviderID, ModelID } from "@/provider/schema"
 import { parseMeta } from "./meta"
 import { evalScript, type HostFn } from "./sandbox"
 import { makeFileHooks, resolveInWorkspace } from "./workspace"
 import { isInlineScript, resolveWorkflowScript } from "./resolve"
-import { WorkflowAgentFailed, WorkflowChildFailed, WorkflowFinished, WorkflowLog, WorkflowPhase, WorkflowStarted } from "./events"
+import {
+  WorkflowAgentFailed,
+  WorkflowChildFailed,
+  WorkflowFinished,
+  WorkflowLog,
+  WorkflowPhase,
+  WorkflowStarted,
+} from "./events"
 import { WorkflowPersistence, journalKeyBase } from "./persistence"
 import type { RunSummary } from "./persistence"
 import { Log, Lock } from "@/util"
@@ -112,7 +122,7 @@ function summarizeAgentResult(result: unknown): string | undefined {
   if (result === null || result === undefined) return undefined
   const unwrapped =
     typeof result === "object" && result !== null && "_worktree" in result
-      ? (result as { result?: unknown }).result ?? result
+      ? ((result as { result?: unknown }).result ?? result)
       : result
   // JSON.stringify can throw (cycles, BigInt). This runs on the host settle path
   // inside markAgentNode, so a throw would escape into the run — guard it: a result
@@ -126,7 +136,10 @@ function summarizeAgentResult(result: unknown): string | undefined {
   if (!text) return undefined
   // Preserve line breaks (collapse only runs of spaces/tabs) so a multi-paragraph
   // response renders as readable text in the card, then cap total length.
-  const trimmed = text.replace(/[ \t]+/g, " ").replace(/\n{3,}/g, "\n\n").trim()
+  const trimmed = text
+    .replace(/[ \t]+/g, " ")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim()
   if (!trimmed) return undefined
   return trimmed.length > RESULT_SUMMARY_MAX ? trimmed.slice(0, RESULT_SUMMARY_MAX - 1) + "…" : trimmed
 }
@@ -137,8 +150,11 @@ interface RunEntry {
   status: RunStatus
   deferred: Deferred.Deferred<RunOutcome>
   fiber: Fiber.Fiber<void> | undefined
-  childActorIDs: Set<string>
+  childActors: Map<string, SessionID> // actorID -> owning sessionID
   worktrees: Set<string> // worktree directories pending disposition, for cancel cleanup
+  worktreeSessions: Map<string, SessionID> // worktree directory -> child host session
+  isolatedHosts: number // isolated host promises not yet returned
+  reclaiming: boolean // cancellation/failure cleanup has started
   childRunIDs: Set<string> // child workflow runIDs, for recursive cancel/reclaim
   name: string
   running: number
@@ -244,9 +260,7 @@ interface AgentOpts {
 
 export interface Interface {
   readonly start: (input: StartInput) => Effect.Effect<{ runID: string }>
-  readonly status: (input: {
-    runID: string
-  }) => Effect.Effect<{
+  readonly status: (input: { runID: string }) => Effect.Effect<{
     status: RunStatus | "unknown"
     agentCount: number
     running: number
@@ -259,7 +273,10 @@ export interface Interface {
   readonly structure: (input: { runID: string }) => Effect.Effect<WorkflowStructure>
   readonly cancel: (input: { runID: string }) => Effect.Effect<void>
   readonly list: (input?: { sessionID?: SessionID }) => Effect.Effect<RunSummary[]>
-  readonly resume: (input: { runID: string; agentTimeoutMs?: number }) => Effect.Effect<{ runID: string; resumed: boolean }>
+  readonly resume: (input: {
+    runID: string
+    agentTimeoutMs?: number
+  }) => Effect.Effect<{ runID: string; resumed: boolean }>
 }
 
 export class Service extends Context.Service<Service, Interface>()("@opencode/WorkflowRuntime") {}
@@ -307,6 +324,9 @@ export const layer = Layer.effect(
     const bus = yield* Bus.Service
     const inbox = yield* Inbox.Service
     const worktree = yield* Worktree.Service
+    const sessions = yield* Session.Service
+    const actorRegistry = yield* ActorRegistry.Service
+    const runState = yield* SessionRunState.Service
     const provider = yield* Provider.Service
     // Layer-scoped so its requirement is discharged here (like Config below) and
     // does not leak into start/resume's effect signatures. Used by launch() to
@@ -442,28 +462,123 @@ export const layer = Layer.effect(
     // so a hung child actor cannot block reclaim indefinitely.
     const RECLAIM_WORKTREE_TIMEOUT_MS = 10_000
     const RECLAIM_ACTOR_TIMEOUT_MS = 5_000
-    const reclaim = (entry: RunEntry) =>
-      Effect.gen(function* () {
-        const actor = spawnRef.current
-        if (actor) {
+
+    // An isolated host session may outlive its root worker briefly when a
+    // postStop turn spawned background descendants. Drain every active actor in
+    // that session, then acquire the session-wide admin lease before deletion.
+    // The admin lease is the authoritative barrier against a raced actor or
+    // checkpoint writer: if either remains active, deletion fails closed.
+    const removeWorktreeSession = Effect.fn("WorkflowRuntime.removeWorktreeSession")(function* (sessionID: SessionID) {
+      const actor = spawnRef.current
+      if (actor) {
+        // A child can register while its parent cancellation is completing. Two
+        // deterministic passes cover that hand-off without an unbounded poll.
+        for (let pass = 0; pass < 2; pass++) {
+          const active = (yield* actorRegistry.listBySession(sessionID)).filter(
+            (item) => item.status === "pending" || item.status === "running",
+          )
+          if (active.length === 0) break
+          const activeIDs = new Set(active.map((item) => item.actorID))
+          const roots = active.filter((item) => !item.parentActorID || !activeIDs.has(item.parentActorID))
+          // Cyclic parent metadata should be impossible, but fail safe by
+          // cancelling the full active set rather than leaving it running.
+          const targets = roots.length > 0 ? roots : active
           yield* Effect.forEach(
-            [...entry.childActorIDs],
-            (childID) =>
-              actor.cancel(entry.sessionID, childID, "graceful").pipe(
+            targets,
+            (item) =>
+              actor.cancel(sessionID, item.actorID, "graceful").pipe(
                 Effect.timeout(RECLAIM_ACTOR_TIMEOUT_MS),
                 Effect.catchTag("TimeoutError", () =>
-                  Effect.sync(() => log.warn("actor cancel timed out during reclaim", { childID })),
+                  Effect.sync(() =>
+                    log.warn("actor cancel timed out before worktree-session removal", {
+                      sessionID,
+                      actorID: item.actorID,
+                    }),
+                  ),
                 ),
                 Effect.ignore,
               ),
             { concurrency: "unbounded", discard: true },
           )
         }
+      }
+      yield* runState.withSessionExclusive(sessionID, sessions.remove(sessionID))
+    })
+
+    const reclaim = (entry: RunEntry) =>
+      Effect.gen(function* () {
+        entry.reclaiming = true
+        // Freeze the known set before actor cancellation wakes host promises that
+        // may concurrently disposition and mutate the live tracking collection.
+        const knownWorktrees = new Set(entry.worktrees)
+        const actor = spawnRef.current
+        if (actor) {
+          yield* Effect.forEach(
+            [...entry.childActors],
+            ([childID, childSessionID]) =>
+              actor.cancel(childSessionID, childID, "graceful").pipe(
+                Effect.timeout(RECLAIM_ACTOR_TIMEOUT_MS),
+                Effect.catchTag("TimeoutError", () =>
+                  Effect.sync(() => log.warn("actor cancel timed out during reclaim", { childID, childSessionID })),
+                ),
+                Effect.ignore,
+              ),
+            { concurrency: "unbounded", discard: true },
+          )
+        }
+        const retained = new Set<string>()
+        const drainWorktreeSessions = () =>
+          Effect.forEach(
+            [...entry.worktreeSessions],
+            ([directory, sessionID]) =>
+              removeWorktreeSession(sessionID).pipe(
+                Effect.tap(() =>
+                  Effect.sync(() => {
+                    entry.worktreeSessions.delete(directory)
+                    retained.delete(directory)
+                  }),
+                ),
+                Effect.catchCause((cause) =>
+                  Effect.sync(() => {
+                    retained.add(directory)
+                    log.warn("worktree host session removal deferred", { sessionID, cause: String(cause) })
+                  }),
+                ),
+              ),
+            { concurrency: "unbounded", discard: true },
+          )
+        yield* drainWorktreeSessions()
+        // Interrupting the workflow fiber does not synchronously settle the
+        // Promise returned by a host agent() hook. That bridge may still be in
+        // spawnIsolated's disposition path and race the same Git worktree. Wait
+        // on the explicit isolated-host counter (bounded) before the final delete.
+        for (let attempt = 0; attempt < 100 && entry.isolatedHosts > 0; attempt++) {
+          yield* Effect.sleep("50 millis")
+        }
+        // A host that crossed the first scan can register its child session
+        // while reclaim waits. Drain again after all observable hosts settle; a
+        // failed session-admin acquisition keeps the associated worktree retained.
+        yield* drainWorktreeSessions()
+        if (entry.isolatedHosts > 0) {
+          for (const directory of entry.worktrees) retained.add(directory)
+          log.warn("isolated host bridge did not settle during reclaim; retaining worktrees", {
+            runID: entry.runID,
+            isolatedHosts: entry.isolatedHosts,
+          })
+        }
+        const removalCandidates = new Set([...knownWorktrees, ...entry.worktrees])
+        for (const directory of removalCandidates) entry.worktrees.add(directory)
         yield* Effect.forEach(
-          [...entry.worktrees],
+          [...removalCandidates].filter((directory) => !retained.has(directory)),
           (directory) =>
             worktree.remove({ directory }).pipe(
+              Effect.retry(Schedule.spaced("100 millis").pipe(Schedule.both(Schedule.recurs(20)))),
               Effect.timeout(RECLAIM_WORKTREE_TIMEOUT_MS),
+              Effect.tap(() =>
+                Effect.sync(() => {
+                  entry.worktrees.delete(directory)
+                }),
+              ),
               Effect.catchTag("TimeoutError", () =>
                 Effect.sync(() => log.warn("worktree remove timed out during reclaim", { directory })),
               ),
@@ -471,7 +586,6 @@ export const layer = Layer.effect(
             ),
           { concurrency: "unbounded", discard: true },
         )
-        entry.worktrees.clear()
         // Recurse into child workflow RUNS (populated by workflow()). Cancelling the
         // orchestrator tears down the whole tree — a child still "running" here is
         // cancelled via cancelEntry (mutually recursive with reclaim).
@@ -543,8 +657,11 @@ export const layer = Layer.effect(
         status: "running",
         deferred,
         fiber: undefined,
-        childActorIDs: new Set<string>(),
+        childActors: new Map<string, SessionID>(),
         worktrees: new Set<string>(),
+        worktreeSessions: new Map<string, SessionID>(),
+        isolatedHosts: 0,
+        reclaiming: false,
         childRunIDs: new Set<string>(),
         name,
         running: 0,
@@ -629,13 +746,15 @@ export const layer = Layer.effect(
       // Per-agent wall-clock timeout. Run-level default (OFF unless set); a per-call
       // opts.timeoutMs overrides it. Resolved per agent() call since opts is per-call.
       const runAgentTimeoutMs = input.agentTimeoutMs
-      // Race a child's outcome-await against the effective per-agent timeout. On a
-      // TRUE timeout: gracefully cancel that one child (the lever reclaim uses) and
+      // Race a child's complete lifecycle (deliverable + postStop settlement)
+      // against the effective per-agent timeout. On a TRUE timeout: gracefully
+      // cancel that one child (the lever reclaim uses) and
       // yield null — the never-throw sentinel the guest already tolerates, so a hung
       // agent can't stall a parallel/pipeline barrier. A genuine null deliverable
       // (agent failed fast) is NOT a timeout → no cancel. No timeout configured
       // (undefined / <=0) ⇒ await unbounded (current behavior, only scriptDeadline bounds).
       const awaitWithTimeout = <A>(
+        actorSessionID: SessionID,
         actorID: string,
         opts: AgentOpts,
         await_: Effect.Effect<A | null>,
@@ -653,7 +772,7 @@ export const layer = Layer.effect(
           Effect.flatMap((r) =>
             r === (STRAGGLER_TIMEOUT as unknown)
               ? (spawnRef.current
-                  ? spawnRef.current.cancel(input.sessionID, actorID, "graceful").pipe(Effect.ignore)
+                  ? spawnRef.current.cancel(actorSessionID, actorID, "graceful").pipe(Effect.ignore)
                   : Effect.void
                 ).pipe(
                   Effect.tap(() =>
@@ -736,7 +855,7 @@ export const layer = Layer.effect(
       const declaredPermissions = parsed.ok ? parsed.meta.permissions : undefined
       if (declaredPermissions && declaredPermissions.length) {
         for (const decl of declaredPermissions) {
-          const patterns = decl.patterns && decl.patterns.length ? decl.patterns : decl.always ?? ["*"]
+          const patterns = decl.patterns && decl.patterns.length ? decl.patterns : (decl.always ?? ["*"])
           yield* permissionService
             .ask({
               sessionID: input.sessionID,
@@ -828,8 +947,10 @@ export const layer = Layer.effect(
                 // it (the child runs detached in the actor scope, so interrupting
                 // the workflow fiber can't stop it) and leak an orphan. MR104 #2.
                 onActorID: (id) => {
-                  entry.childActorIDs.add(id)
+                  entry.childActors.set(id, input.sessionID)
                   onActorID?.(id)
+                  if (entry.reclaiming)
+                    Effect.runFork(actor.cancel(input.sessionID, id, "graceful").pipe(Effect.ignore))
                 },
                 ...(o.schema ? { format: { type: "json_schema" as const, schema: o.schema, retryCount: 2 } } : {}),
               })
@@ -840,27 +961,31 @@ export const layer = Layer.effect(
               // the whole await→extract. schema requested ⇒ structured ?? null (never
               // prose finalText: prose breaks `r.fields`-style scripts + our pipeline).
               const deliverable = yield* awaitWithTimeout(
+                input.sessionID,
                 spawned.actorID,
                 o,
-                Deferred.await(spawned.outcome).pipe(
-                  Effect.map((outcome) => {
-                    if (outcome.status !== "success") {
-                      reason = "actor-error"
-                      errorMessage = (outcome as { error?: string }).error
-                      return null
-                    }
-                    const v = o.schema
-                      ? (outcome.structured ?? null)
-                      : (outcome.structured ?? outcome.finalText ?? null)
-                    if (v === null) reason = "no-deliverable"
-                    return v
-                  }),
-                ),
+                Effect.gen(function* () {
+                  const outcome = yield* Deferred.await(spawned.outcome)
+                  const value =
+                    outcome.status !== "success"
+                      ? null
+                      : o.schema
+                        ? (outcome.structured ?? null)
+                        : (outcome.structured ?? outcome.finalText ?? null)
+                  if (outcome.status !== "success") {
+                    reason = "actor-error"
+                    errorMessage = (outcome as { error?: string }).error
+                  } else if (value === null) {
+                    reason = "no-deliverable"
+                  }
+                  yield* Deferred.await(spawned.settled)
+                  return value
+                }),
                 () => {
                   reason = "timeout"
                 },
               )
-              entry.childActorIDs.delete(spawned.actorID)
+              entry.childActors.delete(spawned.actorID)
               return deliverable
             }),
           )
@@ -880,7 +1005,7 @@ export const layer = Layer.effect(
       }
 
       // Isolated spawn: fresh worktree, file tools rebound to it via Instance.provide.
-      const spawnIsolated = async (
+      const spawnIsolatedInner = async (
         actor: NonNullable<typeof spawnRef.current>,
         prompt: string,
         o: AgentOpts,
@@ -891,27 +1016,38 @@ export const layer = Layer.effect(
         let reason: FailReason = "actor-error"
         let actorIDOut: string | undefined
         let errorMessage: string | undefined
-        // 1) Create + fully populate a worktree (createFromInfo awaits boot).
-        const info = await bridge
-          .promise(
-            Effect.gen(function* () {
-              const i = yield* worktree.makeWorktreeInfo()
-              yield* worktree.createFromInfo(i)
-              return i
-            }),
-          )
-          .catch((e) => {
-            errorMessage = e instanceof Error ? e.message : String(e)
-            return null
-          })
+        // 1) Allocate the directory identity, register it for cancellation,
+        // then create + fully populate it. createFromInfo can put the directory on
+        // disk before its boot sequence completes; registration must therefore
+        // happen before that first side effect, not after the awaited create.
+        const info = await bridge.promise(worktree.makeWorktreeInfo()).catch((e) => {
+          errorMessage = e instanceof Error ? e.message : String(e)
+          return null
+        })
         if (!info) {
           publishAgentFailed(o, "spawn-reject", { errorMessage })
           return { value: null, reason: "spawn-reject" as FailReason }
         }
-        // Register the worktree for cleanup the moment it exists on disk — BEFORE
-        // the spawn attempt. If spawn rejects or the agent fails, cancel-cleanup
-        // (and the disposition below) can still reclaim it; nothing orphans.
         entry.worktrees.add(info.directory)
+        const created = await bridge.promise(worktree.createFromInfo(info).pipe(Effect.as(true))).catch((e) => {
+          errorMessage = e instanceof Error ? e.message : String(e)
+          return false
+        })
+        if (!created) {
+          const removed = await bridge
+            .promise(worktree.remove({ directory: info.directory }).pipe(Effect.as(true)))
+            .catch(() => false)
+          if (removed) entry.worktrees.delete(info.directory)
+          publishAgentFailed(o, "spawn-reject", { errorMessage })
+          return { value: null, reason: "spawn-reject" as FailReason }
+        }
+        if (entry.reclaiming) {
+          const removed = await bridge
+            .promise(worktree.remove({ directory: info.directory }).pipe(Effect.as(true)))
+            .catch(() => false)
+          if (removed) entry.worktrees.delete(info.directory)
+          return { value: null, reason: "actor-error" as FailReason }
+        }
         const base = await bridge.promise(worktree.head(info.directory)).catch(() => "")
         // 2) A bridge bound to the worktree's InstanceContext: provide InstanceRef =
         //    worktree ctx so Effect-side reads resolve there; the Instance.provide
@@ -923,6 +1059,46 @@ export const layer = Layer.effect(
           fn: () => Promise.resolve(Instance.current),
         })
         const wtBridge = await bridge.promise(EffectBridge.make().pipe(Effect.provideService(InstanceRef, wtCtx)))
+        // One session has one canonical directory. Create a child host session
+        // rooted at the worktree, then run the workflow subagent in that session.
+        const parentSession = await bridge.promise(sessions.get(input.sessionID))
+        const childSession = await Instance.provide({
+          directory: info.directory,
+          fn: () =>
+            wtBridge.promise(
+              sessions.create({
+                parentID: input.sessionID,
+                title: `workflow: ${o.label ?? prompt.slice(0, 40)}`,
+                permission: parentSession.permission,
+              }),
+            ),
+        }).catch((e) => {
+          reason = "spawn-reject"
+          errorMessage = e instanceof Error ? e.message : String(e)
+          return null
+        })
+        if (!childSession) {
+          const removed = await bridge
+            .promise(worktree.remove({ directory: info.directory }).pipe(Effect.as(true)))
+            .catch(() => false)
+          if (removed) entry.worktrees.delete(info.directory)
+          publishAgentFailed(o, reason, { errorMessage })
+          return { value: null, reason }
+        }
+        entry.worktreeSessions.set(info.directory, childSession.id)
+        if (entry.reclaiming) {
+          const hostRemoved = await bridge
+            .promise(removeWorktreeSession(childSession.id).pipe(Effect.as(true)))
+            .catch(() => false)
+          if (hostRemoved) entry.worktreeSessions.delete(info.directory)
+          const removed = hostRemoved
+            ? await bridge
+                .promise(worktree.remove({ directory: info.directory }).pipe(Effect.as(true)))
+                .catch(() => false)
+            : false
+          if (removed) entry.worktrees.delete(info.directory)
+          return { value: null, reason: "actor-error" as FailReason }
+        }
         // 3) Spawn + await INSIDE Instance.provide({worktree}) — AsyncLocalStorage
         //    propagates the worktree dir across the actor's forked work fiber, so the
         //    agent's read/write/bash resolve to the worktree, not the parent tree.
@@ -944,7 +1120,8 @@ export const layer = Layer.effect(
                   }
                   const s = yield* actor.spawn({
                     mode: "subagent",
-                    sessionID: input.sessionID,
+                    sessionID: childSession.id,
+                    parentSessionID: input.sessionID,
                     agentType: o.agentType ?? "general",
                     description: spawnDescription(o),
                     task: prompt,
@@ -957,8 +1134,10 @@ export const layer = Layer.effect(
                     // reclaim set synchronously inside the spawn Effect, before its
                     // work fiber detaches, so a racing cancel never orphans it.
                     onActorID: (id) => {
-                      entry.childActorIDs.add(id)
+                      entry.childActors.set(id, childSession.id)
                       onActorID?.(id)
+                      if (entry.reclaiming)
+                        Effect.runFork(actor.cancel(childSession.id, id, "graceful").pipe(Effect.ignore))
                     },
                     ...(o.schema ? { format: { type: "json_schema" as const, schema: o.schema, retryCount: 2 } } : {}),
                   })
@@ -968,10 +1147,20 @@ export const layer = Layer.effect(
                   // `spawned` so the disposition below takes the same path as a
                   // spawn-reject/failure (worktree reclaimed, value null, failed++) —
                   // a hung isolated agent can't stall the barrier or leak a worktree.
-                  const outcome = yield* awaitWithTimeout(s.actorID, o, Deferred.await(s.outcome), () => {
-                    reason = "timeout"
-                  })
-                  entry.childActorIDs.delete(s.actorID)
+                  const outcome = yield* awaitWithTimeout(
+                    childSession.id,
+                    s.actorID,
+                    o,
+                    Effect.gen(function* () {
+                      const outcome = yield* Deferred.await(s.outcome)
+                      yield* Deferred.await(s.settled)
+                      return outcome
+                    }),
+                    () => {
+                      reason = "timeout"
+                    },
+                  )
+                  entry.childActors.delete(s.actorID)
                   if (outcome === null) return null
                   if (outcome.status !== "success") {
                     reason = "actor-error"
@@ -996,17 +1185,30 @@ export const layer = Layer.effect(
         //    remove it so nothing leaks on disk. Guard: an empty base means head()
         //    failed at create time; treat as CHANGED (never trust an unreliable
         //    pristine check to authorize a delete).
-        const succeeded = !!spawned && spawned.outcome.status === "success"
-        // Settle the counter once here — after `succeeded` is known and before any
-        // disposition branch — so it runs exactly once on every path (spawn-reject
-        // → spawned===null → failed++, keep, remove). Pairs with the running++ above.
-        // We REUSE the existing `succeeded` discriminant (read-only; the worktree
-        // disposition below owns it) rather than the returned deliverable: in the
-        // isolated path a successful agent's work is its worktree, so a status
-        // success is a success even when it returned no text.
-        if (spawned) await Instance.disposeDirectory(info.directory)
+        // Settle the counter once after the actor and host-session cleanup
+        // outcome are both known. A successful actor is not deliverable until its
+        // internal host session quiesces; otherwise the retained worktree remains
+        // protected but the workflow observes this agent as failed.
+        // Stop every actor and remove the host session before disposing the
+        // worktree Instance. The active actors own services in that Instance;
+        // tearing it down first would make cancellation race closed resources.
+        const hostRemoved = await bridge
+          .promise(removeWorktreeSession(childSession.id).pipe(Effect.as(true)))
+          .catch((error) => {
+            log.warn("worktree host session removal deferred", { sessionID: childSession.id, error: String(error) })
+            return false
+          })
+        if (hostRemoved) {
+          entry.worktreeSessions.delete(info.directory)
+          if (spawned) await Instance.disposeDirectory(info.directory)
+        } else {
+          reason = "actor-error"
+          errorMessage ??= "isolated host session did not quiesce"
+        }
+        const successfulOutcome = hostRemoved && spawned?.outcome.status === "success" ? spawned.outcome : undefined
+        const completed = successfulOutcome !== undefined
         entry.running--
-        if (succeeded) entry.succeeded++
+        if (completed) entry.succeeded++
         else {
           entry.failed++
           publishAgentFailed(o, reason, { actorID: actorIDOut, errorMessage })
@@ -1016,26 +1218,48 @@ export const layer = Layer.effect(
         // validated structured object — never prose finalText (see the shared-spawn
         // path above for why: prose breaks `r.fields`-style scripts + our pipeline
         // null-injection). schema requested ⇒ structured ?? null.
-        const value =
-          spawned && spawned.outcome.status === "success"
-            ? o.schema
-              ? (spawned.outcome.structured ?? null)
-              : (spawned.outcome.structured ?? spawned.outcome.finalText ?? null)
-            : null
+        const value = successfulOutcome
+          ? o.schema
+            ? (successfulOutcome.structured ?? null)
+            : (successfulOutcome.structured ?? successfulOutcome.finalText ?? null)
+          : null
         const pristine =
-          base !== "" && (await bridge.promise(worktree.isPristine(info.directory, base)).catch(() => false))
-        const keep = succeeded && !pristine
+          hostRemoved &&
+          base !== "" &&
+          (await bridge.promise(worktree.isPristine(info.directory, base)).catch(() => false))
+        // If host-session cleanup failed, preserve the worktree and its Instance:
+        // an active actor may still be using both. The session-admin lease is the
+        // final safety barrier; cleanup failure must never authorize deletion.
+        const keep = !hostRemoved || (completed && !pristine)
         if (!keep) {
-          await bridge.promise(worktree.remove({ directory: info.directory })).catch(() => undefined)
-          entry.worktrees.delete(info.directory)
-          return succeeded ? { value, reason: null } : { value: null, reason }
+          const removed = await bridge
+            .promise(worktree.remove({ directory: info.directory }).pipe(Effect.as(true)))
+            .catch(() => false)
+          if (removed) entry.worktrees.delete(info.directory)
+          return completed ? { value, reason: null } : { value: null, reason }
         }
         // keep: the worktree stays on disk and tracked until an integrate step or
         // cancel reclaims it; surface its branch so the script can act on it.
+        if (!completed) return { value: null, reason }
         const wt = { branch: info.branch, directory: info.directory, changed: true }
         if (value && typeof value === "object" && !Array.isArray(value))
           return { value: { ...(value as object), _worktree: wt }, reason: null }
         return { value: { _worktree: wt, result: value }, reason: null }
+      }
+
+      const spawnIsolated = async (
+        actor: NonNullable<typeof spawnRef.current>,
+        prompt: string,
+        o: AgentOpts,
+        resolvedModel: { providerID: ProviderID; modelID: ModelID } | undefined,
+        onActorID?: (id: string) => void,
+      ) => {
+        entry.isolatedHosts++
+        try {
+          return await spawnIsolatedInner(actor, prompt, o, resolvedModel, onActorID)
+        } finally {
+          entry.isolatedHosts--
+        }
       }
 
       // Per-call start times (host wall-clock) for the observability nodes' durationMs.
@@ -1115,7 +1339,9 @@ export const layer = Layer.effect(
                   // computed above (the key hashes the raw `o.model` ref, NOT the
                   // resolved struct, so resume keys stay stable across config changes).
                   // Never-throws: an unknown group falls back to input.model.
-                  const resolvedModel = await bridge.promise(resolveAgentModel(o.model, input.model, entry.warnedModelRefs))
+                  const resolvedModel = await bridge.promise(
+                    resolveAgentModel(o.model, input.model, entry.warnedModelRefs),
+                  )
                   last = await spawnShared(actor, promptStr, o, resolvedModel, setActorID)
                   if (last.value !== null) break // success
                   if (!last.reason || !RETRYABLE_REASONS.has(last.reason)) break // terminal
@@ -1169,7 +1395,12 @@ export const layer = Layer.effect(
               if (last.value !== null) break // success
               if (!last.reason || !RETRYABLE_REASONS.has(last.reason)) break // terminal
               if (attempt + 1 < maxAttempts) {
-                log.info("workflow isolated agent retry", { runID, reason: last.reason, next: attempt + 2, of: maxAttempts })
+                log.info("workflow isolated agent retry", {
+                  runID,
+                  reason: last.reason,
+                  next: attempt + 2,
+                  of: maxAttempts,
+                })
                 await new Promise((r) => setTimeout(r, backoffMs(attempt, baseMs, maxMs)))
               }
             }
@@ -1213,14 +1444,18 @@ export const layer = Layer.effect(
         entry.structure.push({ type: "phase", id: phaseId, title: String(title) })
         entry.currentPhaseId = phaseId
         Effect.runFork(WorkflowPersistence.recordPhase({ runID, phase: String(title) }).pipe(Effect.ignore))
-        Effect.runFork(WorkflowPersistence.appendJournal(runID, { t: "phase", title: String(title), pass }).pipe(Effect.ignore))
+        Effect.runFork(
+          WorkflowPersistence.appendJournal(runID, { t: "phase", title: String(title), pass }).pipe(Effect.ignore),
+        )
         Effect.runFork(bus.publish(WorkflowPhase, { sessionID: input.sessionID, runID, title: String(title) }))
         return undefined
       }
 
       const logHook: HostFn = (message: unknown) => {
         entry.transcript.push({ kind: "log", text: String(message) })
-        Effect.runFork(WorkflowPersistence.appendJournal(runID, { t: "log", msg: String(message), pass }).pipe(Effect.ignore))
+        Effect.runFork(
+          WorkflowPersistence.appendJournal(runID, { t: "log", msg: String(message), pass }).pipe(Effect.ignore),
+        )
         Effect.runFork(bus.publish(WorkflowLog, { sessionID: input.sessionID, runID, message: String(message) }))
         return undefined
       }
@@ -1254,14 +1489,20 @@ export const layer = Layer.effect(
           scheduleFlush(entry)
           return Promise.resolve(journal.results.get("wf:" + key))
         }
-        const childRunID = "wf_" + createHash("sha256").update(runID + key).digest("hex")
+        const childRunID =
+          "wf_" +
+          createHash("sha256")
+            .update(runID + key)
+            .digest("hex")
         return bridge.promise(
           Effect.gen(function* () {
             const childScript = isInlineScript(spec)
               ? spec
               : yield* Effect.promise(() => resolveWorkflowScript(spec, workspaceRoot, Instance.worktree))
             if (childScript === null)
-              return yield* Effect.die(new Error(`${WORKFLOW_STRUCTURAL_ERROR}: unknown workflow: ${JSON.stringify(spec)}`))
+              return yield* Effect.die(
+                new Error(`${WORKFLOW_STRUCTURAL_ERROR}: unknown workflow: ${JSON.stringify(spec)}`),
+              )
             // Nesting guards (T12) — LAUNCH path only (a journal HIT early-returned
             // above without deriving childName/childRunID, and a cached child already
             // completed in a prior pass, so re-validating would be wrong). The child's
@@ -1277,7 +1518,9 @@ export const layer = Layer.effect(
             // cycle and is bounded only by maxDepth.
             const childName = isInlineScript(spec) ? "inline:" + base.slice(0, 12) : spec
             if (depth + 1 > maxDepth) {
-              return yield* Effect.die(new Error(`${WORKFLOW_STRUCTURAL_ERROR}: workflow nesting exceeds maxDepth (${maxDepth})`))
+              return yield* Effect.die(
+                new Error(`${WORKFLOW_STRUCTURAL_ERROR}: workflow nesting exceeds maxDepth (${maxDepth})`),
+              )
             }
             if (lineage.includes(childName)) {
               return yield* Effect.die(
@@ -1397,7 +1640,12 @@ export const layer = Layer.effect(
         // is the motivating use case.
         const seed = createHash("sha1").update(runID).digest().readUInt32BE(0)
         const result = yield* Effect.tryPromise({
-          try: () => evalScript(body, hooks, { deadlineMs: input.scriptDeadlineMs ?? SCRIPT_DEADLINE_MS, args: input.args, seed }),
+          try: () =>
+            evalScript(body, hooks, {
+              deadlineMs: input.scriptDeadlineMs ?? SCRIPT_DEADLINE_MS,
+              args: input.args,
+              seed,
+            }),
           catch: (e) => (e instanceof Error ? e : new Error(String(e))),
         }).pipe(Effect.result)
 
@@ -1421,7 +1669,8 @@ export const layer = Layer.effect(
                 senderSessionID: input.sessionID,
                 senderActorID: "workflow",
                 type: "actor_notification",
-                content: `Workflow completed. run_id: ${runID}\n` + JSON.stringify(result.success ?? null).slice(0, 4000),
+                content:
+                  `Workflow completed. run_id: ${runID}\n` + JSON.stringify(result.success ?? null).slice(0, 4000),
               })
               .pipe(Effect.ignore)
           return
@@ -1602,6 +1851,9 @@ export const defaultLayer = layer.pipe(
   Layer.provide(Provider.defaultLayer),
   Layer.provide(Config.defaultLayer),
   Layer.provide(Permission.defaultLayer),
+  Layer.provide(Session.defaultLayer),
+  Layer.provide(ActorRegistry.defaultLayer),
+  Layer.provide(SessionRunState.defaultLayer),
 )
 
 export * as WorkflowRuntime from "./runtime"

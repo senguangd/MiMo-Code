@@ -5,7 +5,9 @@ process.env.MIMOCODE_DB = db
 const [{ Effect }, { RuntimeLease }] = await Promise.all([import("effect"), import("@/runtime/lease")])
 const rounds = Number(roundsRaw)
 if (rounds === 0) {
-  await Effect.runPromise(RuntimeLease.current({ resourceType: "session-run", resourceID: "bootstrap", subresourceID: "main" }))
+  const handle = await Effect.runPromise(RuntimeLease.acquire({ resourceType: "checkpoint", resourceID: "bootstrap" }))
+  if (!handle) throw new Error("bootstrap lease unavailable")
+  await Effect.runPromise(RuntimeLease.release(handle))
   console.log("READY")
   process.exit(0)
 }

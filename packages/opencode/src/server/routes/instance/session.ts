@@ -334,7 +334,7 @@ export const SessionRoutes = lazy(() =>
               },
             },
           },
-          ...errors(400, 404),
+          ...errors(400, 404, 409),
         },
       }),
       validator(
@@ -346,9 +346,15 @@ export const SessionRoutes = lazy(() =>
       async (c) =>
         jsonRequest("SessionRoutes.delete", c, function* () {
           const sessionID = c.req.valid("param").sessionID
+          const state = yield* SessionRunState.Service
           const svc = yield* Session.Service
-          yield* svc.remove(sessionID)
-          return true
+          return yield* state.withSessionExclusive(
+            sessionID,
+            Effect.gen(function* () {
+              yield* svc.remove(sessionID)
+              return true
+            }),
+          )
         }),
     )
     .patch(
@@ -787,13 +793,10 @@ export const SessionRoutes = lazy(() =>
                 },
                 { message: "Invalid cursor" },
               ),
-            agent_id: z
-              .string()
-              .optional()
-              .meta({
-                description:
-                  "Filter by message slice. Omitted = main-agent slice only (default). Pass a subagent's actor id to fetch its slice. Pass `*` to return every message regardless of slice.",
-              }),
+            agent_id: z.string().optional().meta({
+              description:
+                "Filter by message slice. Omitted = main-agent slice only (default). Pass a subagent's actor id to fetch its slice. Pass `*` to return every message regardless of slice.",
+            }),
           })
           .refine((value) => !value.before || value.limit !== undefined, {
             message: "before requires limit",
@@ -893,7 +896,7 @@ export const SessionRoutes = lazy(() =>
               },
             },
           },
-          ...errors(400, 404),
+          ...errors(400, 404, 409),
         },
       }),
       validator(
@@ -908,9 +911,8 @@ export const SessionRoutes = lazy(() =>
           const params = c.req.valid("param")
           const state = yield* SessionRunState.Service
           const session = yield* Session.Service
-          return yield* state.withExclusive(
+          return yield* state.withSessionExclusive(
             params.sessionID,
-            "main",
             Effect.gen(function* () {
               yield* session.removeMessage({
                 sessionID: params.sessionID,
@@ -935,7 +937,7 @@ export const SessionRoutes = lazy(() =>
               },
             },
           },
-          ...errors(400, 404),
+          ...errors(400, 404, 409),
         },
       }),
       validator(
@@ -951,9 +953,8 @@ export const SessionRoutes = lazy(() =>
           const params = c.req.valid("param")
           const state = yield* SessionRunState.Service
           const svc = yield* Session.Service
-          return yield* state.withExclusive(
+          return yield* state.withSessionExclusive(
             params.sessionID,
-            "main",
             Effect.gen(function* () {
               yield* svc.removePart({
                 sessionID: params.sessionID,
@@ -979,7 +980,7 @@ export const SessionRoutes = lazy(() =>
               },
             },
           },
-          ...errors(400, 404),
+          ...errors(400, 404, 409),
         },
       }),
       validator(
@@ -1000,8 +1001,9 @@ export const SessionRoutes = lazy(() =>
           )
         }
         return jsonRequest("SessionRoutes.updatePart", c, function* () {
+          const state = yield* SessionRunState.Service
           const svc = yield* Session.Service
-          return yield* svc.updatePart(body)
+          return yield* state.withSessionExclusive(params.sessionID, svc.updatePart(body))
         })
       },
     )

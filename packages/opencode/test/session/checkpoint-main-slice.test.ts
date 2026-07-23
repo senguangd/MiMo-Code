@@ -51,10 +51,12 @@ const recordingActor = Layer.effect(
         Effect.gen(function* () {
           captures.input = input
           const outcome = yield* Deferred.make<AgentOutcome>()
+          const settled = yield* Deferred.make<void>()
           return {
             actorID: `${input.agentType}-1`,
             sessionID: input.sessionID,
             outcome,
+            settled,
           }
         }),
       cancel: () => Effect.void,

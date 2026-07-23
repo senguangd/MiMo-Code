@@ -12,10 +12,7 @@ import { and, Database, eq } from "@/storage"
 export interface Interface {
   readonly assertNotBusy: (sessionID: SessionID) => Effect.Effect<void>
   readonly cancel: (sessionID: SessionID) => Effect.Effect<void>
-  readonly cancelActor: (
-    sessionID: SessionID,
-    agentID: string,
-  ) => Effect.Effect<"local" | "remote" | "idle">
+  readonly cancelActor: (sessionID: SessionID, agentID: string) => Effect.Effect<"local" | "remote" | "idle">
   readonly ensureRunning: (
     sessionID: SessionID,
     agentID: string,
@@ -33,11 +30,7 @@ export interface Interface {
     onInterrupt: Effect.Effect<MessageV2.WithParts>,
     work: Effect.Effect<MessageV2.WithParts>,
   ) => Effect.Effect<MessageV2.WithParts>
-  readonly withExclusive: <A, E, R>(
-    sessionID: SessionID,
-    agentID: string,
-    work: Effect.Effect<A, E, R>,
-  ) => Effect.Effect<A, E, R>
+  readonly withSessionExclusive: <A, E, R>(sessionID: SessionID, work: Effect.Effect<A, E, R>) => Effect.Effect<A, E, R>
 }
 
 export class Service extends Context.Service<Service, Interface>()("@opencode/SessionRunState") {}
@@ -111,27 +104,27 @@ export const layer = Layer.effect(
         yield* RuntimeLease.assertHandle(handle).pipe(Effect.orDie)
         const now = Date.now()
         yield* Effect.sync(() => {
-        const cancelled = Exit.isFailure(exit) && Cause.hasInterruptsOnly(exit.cause)
-        Database.use((db) =>
-          db
-            .update(ActorRegistryTable)
-            .set({
-              status: "idle",
-              last_outcome: Exit.isSuccess(exit) ? "success" : cancelled ? "cancelled" : "failure",
-              last_error: Exit.isFailure(exit) && !cancelled ? Cause.pretty(exit.cause) : null,
-              time_completed: now,
-              time_updated: now,
-            })
-            .where(
-              and(
-                eq(ActorRegistryTable.session_id, handle.resourceID as SessionID),
-                eq(ActorRegistryTable.actor_id, handle.subresourceID ?? "main"),
-                eq(ActorRegistryTable.instance_id, handle.ownerInstanceID),
-                eq(ActorRegistryTable.lease_fence, handle.fencingToken),
-              ),
-            )
-            .run(),
-        )
+          const cancelled = Exit.isFailure(exit) && Cause.hasInterruptsOnly(exit.cause)
+          Database.use((db) =>
+            db
+              .update(ActorRegistryTable)
+              .set({
+                status: "idle",
+                last_outcome: Exit.isSuccess(exit) ? "success" : cancelled ? "cancelled" : "failure",
+                last_error: Exit.isFailure(exit) && !cancelled ? Cause.pretty(exit.cause) : null,
+                time_completed: now,
+                time_updated: now,
+              })
+              .where(
+                and(
+                  eq(ActorRegistryTable.session_id, handle.resourceID as SessionID),
+                  eq(ActorRegistryTable.actor_id, handle.subresourceID ?? "main"),
+                  eq(ActorRegistryTable.instance_id, handle.ownerInstanceID),
+                  eq(ActorRegistryTable.lease_fence, handle.fencingToken),
+                ),
+              )
+              .run(),
+          )
         })
       })
 
@@ -142,14 +135,18 @@ export const layer = Layer.effect(
         if (inherited) return yield* work
         const handle = yield* RuntimeLease.acquire(key)
         if (!handle) throw new Session.BusyError(sessionID)
-        return yield* RuntimeLease.hold(
-          [handle],
-          work.pipe(Effect.onExit((exit) => settleActor(handle, exit))),
-        )
+        return yield* RuntimeLease.hold([handle], work.pipe(Effect.onExit((exit) => settleActor(handle, exit))))
       })
 
-    const withExclusive = <A, E, R>(sessionID: SessionID, agentID: string, work: Effect.Effect<A, E, R>) =>
-      leased(sessionID, agentID, work)
+    const withSessionExclusive = <A, E, R>(sessionID: SessionID, work: Effect.Effect<A, E, R>) =>
+      Effect.gen(function* () {
+        const key = { resourceType: "session-admin" as const, resourceID: sessionID }
+        const inherited = yield* RuntimeLease.current(key)
+        if (inherited) return yield* work
+        const handle = yield* RuntimeLease.acquire(key)
+        if (!handle) throw new Session.BusyError(sessionID)
+        return yield* RuntimeLease.hold([handle], work)
+      })
 
     const cancel = Effect.fn("SessionRunState.cancel")(function* (sessionID: SessionID) {
       const key = runnerKey(sessionID, "main")
@@ -159,19 +156,19 @@ export const layer = Layer.effect(
         yield* existing.interrupt
         return
       }
-      yield* RuntimeLease.requestCancel({
+      const requested = yield* RuntimeLease.requestCancel({
         resourceType: "session-run",
         resourceID: sessionID,
         subresourceID: "main",
         reason: "Session aborted by another client",
       })
-      yield* status.set(sessionID, { type: "idle" })
+      // A remote owner remains authoritative until its interrupted cleanup
+      // releases the lease. Publishing idle here would create a false turn-end
+      // edge for the TUI and cron bridge while the session is still busy.
+      if (!requested) yield* status.set(sessionID, { type: "idle" })
     })
 
-    const cancelActor = Effect.fn("SessionRunState.cancelActor")(function* (
-      sessionID: SessionID,
-      agentID: string,
-    ) {
+    const cancelActor = Effect.fn("SessionRunState.cancelActor")(function* (sessionID: SessionID, agentID: string) {
       const key = runnerKey(sessionID, agentID)
       const data = yield* InstanceState.get(state)
       const existing = data.runners.get(key)
@@ -217,7 +214,15 @@ export const layer = Layer.effect(
       return yield* (yield* runner(sessionID, "main", onInterrupt)).startShell(leased(sessionID, "main", work))
     })
 
-    return Service.of({ assertNotBusy, cancel, cancelActor, ensureRunning, startExclusive, startShell, withExclusive })
+    return Service.of({
+      assertNotBusy,
+      cancel,
+      cancelActor,
+      ensureRunning,
+      startExclusive,
+      startShell,
+      withSessionExclusive,
+    })
   }),
 )
 

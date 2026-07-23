@@ -35,7 +35,8 @@ const MODEL_PARAM_DESCRIPTION =
 const KNOWN_ACTOR_VERBS = ["run", "spawn", "status", "wait", "cancel", "send", "models"]
 
 function levenshteinActor(a: string, b: string): number {
-  const m = a.length, n = b.length
+  const m = a.length,
+    n = b.length
   if (m === 0) return n
   if (n === 0) return m
   const dp = Array.from({ length: m + 1 }, () => new Array(n + 1).fill(0))
@@ -60,8 +61,35 @@ function suggestActorVerb(input: string): string | undefined {
 // uses z.string() for subagent_type since the dynamic enum is only needed at
 // Zod validation time (inside execute), not at parse time.
 type ActorShellArgs =
-  | { operation: { action: "run"; subagent_type: string; description: string; prompt: string; model?: string; task_id?: string; actor_id?: string; timeout_ms?: number; command?: string; context?: "none" | "state" | "full"; output_schema?: Record<string, unknown> } }
-  | { operation: { action: "spawn"; subagent_type: string; description: string; prompt: string; model?: string; task_id?: string; actor_id?: string; command?: string; context?: "none" | "state" | "full"; output_schema?: Record<string, unknown> } }
+  | {
+      operation: {
+        action: "run"
+        subagent_type: string
+        description: string
+        prompt: string
+        model?: string
+        task_id?: string
+        actor_id?: string
+        timeout_ms?: number
+        command?: string
+        context?: "none" | "state" | "full"
+        output_schema?: Record<string, unknown>
+      }
+    }
+  | {
+      operation: {
+        action: "spawn"
+        subagent_type: string
+        description: string
+        prompt: string
+        model?: string
+        task_id?: string
+        actor_id?: string
+        command?: string
+        context?: "none" | "state" | "full"
+        output_schema?: Record<string, unknown>
+      }
+    }
   | { operation: { action: "status"; actor_id: string } }
   | { operation: { action: "wait"; actor_id: string; timeout_ms?: number } }
   | { operation: { action: "cancel"; actor_id: string } }
@@ -116,7 +144,13 @@ const mapActorVerb = Effect.fn("mapActorVerb")(function* (verb: string | undefin
         ["model", "task", "actor", "timeout", "command", "context", "output-schema"],
         line,
       )
-      if (rest.length !== 3) return yield* actorArityError("run", '<subagent_type> "<description>" "<prompt>" [--model <ref>] [--task <TID>] [--actor <id>] [--timeout <ms>] [--command <cmd>] [--context none|state|full] [--output-schema <json>]', rest, line)
+      if (rest.length !== 3)
+        return yield* actorArityError(
+          "run",
+          '<subagent_type> "<description>" "<prompt>" [--model <ref>] [--task <TID>] [--actor <id>] [--timeout <ms>] [--command <cmd>] [--context none|state|full] [--output-schema <json>]',
+          rest,
+          line,
+        )
       return {
         operation: {
           action: "run" as const,
@@ -141,7 +175,13 @@ const mapActorVerb = Effect.fn("mapActorVerb")(function* (verb: string | undefin
         ["model", "task", "actor", "command", "context", "output-schema"],
         line,
       )
-      if (rest.length !== 3) return yield* actorArityError("spawn", '<subagent_type> "<description>" "<prompt>" [--model <ref>] [--task <TID>] [--actor <id>] [--command <cmd>] [--context none|state|full] [--output-schema <json>]', rest, line)
+      if (rest.length !== 3)
+        return yield* actorArityError(
+          "spawn",
+          '<subagent_type> "<description>" "<prompt>" [--model <ref>] [--task <TID>] [--actor <id>] [--command <cmd>] [--context none|state|full] [--output-schema <json>]',
+          rest,
+          line,
+        )
       return {
         operation: {
           action: "spawn" as const,
@@ -192,8 +232,7 @@ const mapActorVerb = Effect.fn("mapActorVerb")(function* (verb: string | undefin
       const vision = args.includes("--vision")
       const withoutVision = args.filter((a) => a !== "--vision")
       const { flags, rest } = yield* extractNamedFlags(withoutVision, ["limit"], line)
-      if (rest.length !== 0)
-        return yield* actorArityError("models", "[--vision] [--limit <n>]", rest, line)
+      if (rest.length !== 0) return yield* actorArityError("models", "[--vision] [--limit <n>]", rest, line)
       return {
         operation: {
           action: "models" as const,
@@ -213,9 +252,7 @@ const mapActorVerb = Effect.fn("mapActorVerb")(function* (verb: string | undefin
   }
 })
 
-export function parseActorScript(
-  script: string,
-): Effect.Effect<ActorShellArgs[], unknown> {
+export function parseActorScript(script: string): Effect.Effect<ActorShellArgs[], unknown> {
   return Effect.gen(function* () {
     const argvList = yield* tokenize(script)
     const out: ActorShellArgs[] = []
@@ -344,15 +381,15 @@ export const ActorTool = Tool.define(
         .describe("(optional) Milliseconds to wait before returning { status: 'timeout' }. Default 600000 (10 min).")
 
       const runSchema = z.strictObject({
-        action: z.literal("run").describe("Spawn a subagent and block until it completes; the result is returned inline as the tool response."),
+        action: z
+          .literal("run")
+          .describe(
+            "Spawn a subagent and block until it completes; the result is returned inline as the tool response.",
+          ),
         description: z.string().min(1).describe("A short (3-5 words) description of the task."),
         prompt: z.string().min(1).describe("The task for the agent to perform."),
         subagent_type: subagentTypeEnum.describe("The type of specialized agent to use for this task."),
-        model: z
-          .string()
-          .min(1)
-          .optional()
-          .describe(MODEL_PARAM_DESCRIPTION),
+        model: z.string().min(1).optional().describe(MODEL_PARAM_DESCRIPTION),
         actor_id: z
           .string()
           .min(1)
@@ -384,22 +421,20 @@ export const ActorTool = Tool.define(
       })
 
       const spawnSchema = z.strictObject({
-        action: z.literal("spawn").describe("Spawn a subagent and return its actor_id immediately; result is delivered as a notification or via a separate `wait` call."),
+        action: z
+          .literal("spawn")
+          .describe(
+            "Spawn a subagent and return its actor_id immediately; result is delivered as a notification or via a separate `wait` call.",
+          ),
         description: z.string().min(1).describe("A short (3-5 words) description of the task."),
         prompt: z.string().min(1).describe("The task for the agent to perform."),
         subagent_type: subagentTypeEnum.describe("The type of specialized agent to use for this task."),
-        model: z
-          .string()
-          .min(1)
-          .optional()
-          .describe(MODEL_PARAM_DESCRIPTION),
+        model: z.string().min(1).optional().describe(MODEL_PARAM_DESCRIPTION),
         actor_id: z
           .string()
           .min(1)
           .optional()
-          .describe(
-            "(optional) If set, resume the specified prior actor session instead of creating a new one.",
-          ),
+          .describe("(optional) If set, resume the specified prior actor session instead of creating a new one."),
         command: z.string().min(1).optional().describe("(optional) The command that triggered this task."),
         context: z
           .enum(["none", "state", "full"])
@@ -462,8 +497,16 @@ export const ActorTool = Tool.define(
 
       const modelsSchema = z.strictObject({
         action: z.literal("models"),
-        vision: z.boolean().optional().describe("(optional) If true, list only vision-capable models (models that accept image input)."),
-        limit: z.number().int().positive().optional().describe("(optional) Max number of models to return. Default 50."),
+        vision: z
+          .boolean()
+          .optional()
+          .describe("(optional) If true, list only vision-capable models (models that accept image input)."),
+        limit: z
+          .number()
+          .int()
+          .positive()
+          .optional()
+          .describe("(optional) Max number of models to return. Default 50."),
       })
 
       const parameters = z.strictObject({
@@ -515,7 +558,7 @@ export const ActorTool = Tool.define(
           return undefined
         })
 
-        if (op.action ==="send") {
+        if (op.action === "send") {
           const inboxSvc = inboxServiceRef.current
           if (!inboxSvc) {
             return yield* Effect.fail(
@@ -559,7 +602,7 @@ export const ActorTool = Tool.define(
           }
         }
 
-        if (op.action ==="status") {
+        if (op.action === "status") {
           const found = yield* findActor(op.actor_id)
           if (!found) return unknownResponse("status", op.actor_id)
           const entry = found.entry
@@ -581,7 +624,7 @@ export const ActorTool = Tool.define(
           }
         }
 
-        if (op.action ==="wait") {
+        if (op.action === "wait") {
           const found = yield* findActor(op.actor_id)
           if (!found) return unknownResponse("wait", op.actor_id)
           const snap = yield* waiter.wait({
@@ -600,7 +643,7 @@ export const ActorTool = Tool.define(
           }
         }
 
-        if (op.action ==="cancel") {
+        if (op.action === "cancel") {
           const found = yield* findActor(op.actor_id)
           if (!found) return unknownResponse("cancel", op.actor_id)
           const entry = found.entry
@@ -650,11 +693,19 @@ export const ActorTool = Tool.define(
           const shown = ordered.slice(0, limit)
           const lines = shown.map((m) => `${m.providerID}/${m.id}${m.capabilities.input.image ? " (vision)" : ""}`)
           const header = op.vision ? `Vision-capable models` : `Available models`
-          const more = ordered.length > shown.length ? `\n… and ${ordered.length - shown.length} more (raise --limit)` : ""
-          const output = shown.length === 0
-            ? (op.vision ? "No vision-capable models are configured. Configure a vision model or use an OCR tool." : "No models are configured.")
-            : `${header} (${shown.length} of ${ordered.length}):\n${lines.join("\n")}${more}\nPass any of these to actor --model.`
-          return { title: header, output, metadata: { count: shown.length, total: ordered.length, vision: !!op.vision } as Record<string, any> }
+          const more =
+            ordered.length > shown.length ? `\n… and ${ordered.length - shown.length} more (raise --limit)` : ""
+          const output =
+            shown.length === 0
+              ? op.vision
+                ? "No vision-capable models are configured. Configure a vision model or use an OCR tool."
+                : "No models are configured."
+              : `${header} (${shown.length} of ${ordered.length}):\n${lines.join("\n")}${more}\nPass any of these to actor --model.`
+          return {
+            title: header,
+            output,
+            metadata: { count: shown.length, total: ordered.length, vision: !!op.vision } as Record<string, any>,
+          }
         }
 
         // op.action ==="run" or "spawn" — schema guarantees
@@ -681,13 +732,11 @@ export const ActorTool = Tool.define(
         }
 
         let prompt = op.prompt
-        const background = op.action ==="spawn"
+        const background = op.action === "spawn"
 
         // Inject checkpoint summaries for context="state" mode
         if (op.context === "state") {
-          const latest = yield* checkpoint
-            .loadLatest(ctx.sessionID)
-            .pipe(Effect.catch(() => Effect.succeed(undefined)))
+          const latest = yield* checkpoint.loadLatest(ctx.sessionID).pipe(Effect.catch(() => Effect.succeed(undefined)))
           if (latest) {
             prompt =
               [
@@ -750,6 +799,7 @@ export const ActorTool = Tool.define(
           tools: next.toolAllowlist ? [...next.toolAllowlist] : "INHERIT",
           model,
           background,
+          parentActorID: ctx.actorID,
           task_id: effectiveTaskId,
           onReady: ({ actorID, sessionID }) =>
             ctx.metadata({
@@ -761,7 +811,7 @@ export const ActorTool = Tool.define(
             : {}),
         })
 
-        if (op.action ==="spawn") {
+        if (op.action === "spawn") {
           return {
             title: op.description,
             metadata: { sessionId: spawnResult.sessionID, actorId: spawnResult.actorID, model },

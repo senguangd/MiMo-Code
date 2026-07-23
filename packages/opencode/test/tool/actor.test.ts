@@ -62,12 +62,16 @@ function installMockSpawn(onSpawn?: (input: SpawnInput) => void) {
           yield* actorReg.updateStatus(input.sessionID, actorID, { status: "running" }).pipe(Effect.ignore)
 
           const outcome = yield* Deferred.make<AgentOutcome>()
+          const settled = yield* Deferred.make<void>()
 
           // Synchronously complete the actor so waiter.wait resolves immediately.
-          yield* actorReg.updateStatus(input.sessionID, actorID, { status: "idle", lastOutcome: "success" }).pipe(Effect.ignore)
+          yield* actorReg
+            .updateStatus(input.sessionID, actorID, { status: "idle", lastOutcome: "success" })
+            .pipe(Effect.ignore)
           yield* Deferred.succeed(outcome, { status: "success", finalText: "done" })
+          yield* Deferred.succeed(settled, undefined)
 
-          return { actorID, sessionID: input.sessionID, outcome }
+          return { actorID, sessionID: input.sessionID, outcome, settled }
         }),
       cancel: () => Effect.void,
       getForkContext: () => Effect.succeed(undefined),
@@ -91,7 +95,11 @@ const it = testEffect(
     Truncate.defaultLayer,
     ToolRegistry.defaultLayer,
     ActorRegistry.defaultLayer,
-    ActorWaiter.layer.pipe(Layer.provide(Bus.defaultLayer), Layer.provide(ActorRegistry.defaultLayer), Layer.provide(Session.defaultLayer)),
+    ActorWaiter.layer.pipe(
+      Layer.provide(Bus.defaultLayer),
+      Layer.provide(ActorRegistry.defaultLayer),
+      Layer.provide(Session.defaultLayer),
+    ),
     Team.defaultLayer,
     SessionCheckpoint.defaultLayer,
     TaskRegistry.defaultLayer,
@@ -221,7 +229,8 @@ describe("tool.actor", () => {
           const build = yield* agent.get("build")
           const registry = yield* ToolRegistry.Service
           const description =
-            (yield* registry.tools({ ...ref, agent: build })).find((tool) => tool.id === ActorTool.id)?.description ?? ""
+            (yield* registry.tools({ ...ref, agent: build })).find((tool) => tool.id === ActorTool.id)?.description ??
+            ""
 
           expect(description).toContain("- alpha: Alpha agent")
           expect(description).not.toContain("- zebra: Zebra agent")
@@ -375,6 +384,44 @@ describe("tool.actor", () => {
     ),
   )
 
+  it.live("threads the current actor id into the spawned child parent relationship", () =>
+    provideTmpdirInstance(() =>
+      Effect.gen(function* () {
+        let captured: SpawnInput | undefined
+        yield* installMockSpawn((input) => {
+          captured = input
+        })
+        const { chat, assistant } = yield* seed()
+        const tool = yield* ActorTool
+        const def = yield* tool.init()
+
+        yield* def.execute(
+          {
+            operation: {
+              action: "spawn",
+              description: "nested child",
+              prompt: "continue in the background",
+              subagent_type: "general",
+            },
+          },
+          {
+            sessionID: chat.id,
+            messageID: assistant.id,
+            agent: "general",
+            actorID: "general-parent",
+            abort: new AbortController().signal,
+            extra: {},
+            messages: [],
+            metadata: () => Effect.void,
+            ask: () => Effect.void,
+          },
+        )
+
+        expect(captured?.parentActorID).toBe("general-parent")
+      }),
+    ),
+  )
+
   it.live("execute shapes child permissions for task, todowrite, and primary tools", () =>
     provideTmpdirInstance(
       () =>
@@ -517,13 +564,27 @@ describe("Actor tool subagent_type enum (F36)", () => {
         const wrap = (op: Record<string, unknown>) => params.safeParse(op)
 
         // run (sync) and spawn (async): operation envelope required; action/description/prompt/subagent_type required.
-        expect(wrap({ operation: { action: "run", description: "x", prompt: "y", subagent_type: "general" } }).success).toBe(true)
-        expect(wrap({ operation: { action: "spawn", description: "x", prompt: "y", subagent_type: "general" } }).success).toBe(true)
+        expect(
+          wrap({ operation: { action: "run", description: "x", prompt: "y", subagent_type: "general" } }).success,
+        ).toBe(true)
+        expect(
+          wrap({ operation: { action: "spawn", description: "x", prompt: "y", subagent_type: "general" } }).success,
+        ).toBe(true)
 
-        expect(wrap({ operation: { action: "run", description: "", prompt: "y", subagent_type: "general" } }).success).toBe(false)
-        expect(wrap({ operation: { action: "run", description: "x", prompt: "", subagent_type: "general" } }).success).toBe(false)
-        expect(wrap({ operation: { action: "run", description: "x", prompt: "y", subagent_type: "general", actor_id: "" } }).success).toBe(false)
-        expect(wrap({ operation: { action: "run", description: "x", prompt: "y", subagent_type: "general", junk: "z" } }).success).toBe(false)
+        expect(
+          wrap({ operation: { action: "run", description: "", prompt: "y", subagent_type: "general" } }).success,
+        ).toBe(false)
+        expect(
+          wrap({ operation: { action: "run", description: "x", prompt: "", subagent_type: "general" } }).success,
+        ).toBe(false)
+        expect(
+          wrap({ operation: { action: "run", description: "x", prompt: "y", subagent_type: "general", actor_id: "" } })
+            .success,
+        ).toBe(false)
+        expect(
+          wrap({ operation: { action: "run", description: "x", prompt: "y", subagent_type: "general", junk: "z" } })
+            .success,
+        ).toBe(false)
         expect(wrap({ operation: { action: "run", description: "x", prompt: "y" } }).success).toBe(false) // missing subagent_type
         expect(wrap({ operation: { action: "run", prompt: "y", subagent_type: "general" } }).success).toBe(false) // missing description
         expect(wrap({ description: "x", prompt: "y", subagent_type: "general" }).success).toBe(false) // missing operation envelope

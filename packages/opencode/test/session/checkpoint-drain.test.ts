@@ -41,10 +41,12 @@ const hangingActor = Layer.effect(
         Effect.gen(function* () {
           counter += 1
           const outcome = yield* Deferred.make<AgentOutcome>()
+          const settled = yield* Deferred.make<void>()
           return {
             actorID: `${input.agentType}-${counter}`,
             sessionID: input.sessionID,
             outcome,
+            settled,
           }
         }),
       cancel: () => Effect.void,

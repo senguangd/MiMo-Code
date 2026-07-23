@@ -10,6 +10,9 @@ import { Worktree } from "../../src/worktree"
 import { provideTmpdirServer } from "../fixture/fixture"
 import { testEffect } from "../lib/effect"
 import { WorkflowRuntime } from "../../src/workflow/runtime"
+import { spawnRef } from "../../src/actor/spawn-ref"
+import { ActorRegistry } from "../../src/actor/registry"
+import { RuntimeLease } from "../../src/runtime/lease"
 import { makeLayer, ref, providerCfg } from "./lib"
 
 // Worktree isolation lives in its own file: it boots a real Instance per isolated
@@ -28,246 +31,629 @@ const fileExists = (p: string) =>
     .catch(() => false)
 
 describe("WorkflowRuntime worktree isolation", () => {
-  it.live("an isolated agent's relative file write lands in its worktree, not the parent tree", () =>
-    provideTmpdirServer(
-      Effect.fnUntraced(function* ({ dir, llm }) {
-        const runtime = yield* WorkflowRuntime.Service
-        const session = yield* Session.Service
-        const parent = yield* session.create({
-          title: "wf isolate",
-          permission: [{ permission: "*", pattern: "*", action: "allow" }],
-        })
-        // The single agent writes a relative file (one tool call), then ends its turn.
-        yield* llm.tool("write", { file_path: "port.rs", content: "// rust" })
-        yield* llm.text("done")
-        // A worktree is a fresh checkout of HEAD; uncommitted files (like the
-        // fixture's mimocode.json provider config) do NOT propagate. Commit it so
-        // the isolated agent's worktree Instance can resolve the test provider.
-        yield* Effect.promise(() => $`git add -A && git commit -q -m wf-config`.cwd(dir).quiet().nothrow())
-        const script = [
-          `export const meta = { name: "t", description: "d" }`,
-          `return await agent("translate", { isolation: "worktree" })`,
-        ].join("\n")
-        const { runID } = yield* runtime.start({ script, sessionID: parent.id, parentActorID: "main", model: ref })
-        const outcome = yield* runtime.wait({ runID })
-        expect(outcome.status).toBe("completed")
-        const result = (outcome as { result: any }).result
-        // Changed worktree -> result is enveloped with _worktree carrying the dir.
-        expect(result?._worktree?.directory).toBeTruthy()
-        const wtDir = result._worktree.directory as string
-        let initialized = 0
-        yield* Effect.promise(() =>
-          Instance.provide({
-            directory: wtDir,
-            init: () => {
-              initialized++
-              return Promise.resolve()
-            },
-            fn: () => undefined,
-          }),
-        )
-        expect(initialized).toBe(1)
-        // The edit is in the worktree, NOT the parent project dir.
-        expect(yield* Effect.promise(() => fileExists(`${wtDir}/port.rs`))).toBe(true)
-        expect(yield* Effect.promise(() => fileExists(`${dir}/port.rs`))).toBe(false)
-        // Tear the kept worktree down via the service so the parent repo's
-        // .git/worktrees admin entry is gone before the fixture finalizer rm's the
-        // tmpdir. A lingering worktree pointer makes that rm retry (~28s) and trips
-        // the test timer; removing it here keeps teardown fast and deterministic.
-        yield* (yield* Worktree.Service).remove({ directory: wtDir }).pipe(Effect.ignore)
-      }),
-      { git: true, config: providerCfg },
-    ),
+  it.live(
+    "an isolated agent's relative file write lands in its worktree, not the parent tree",
+    () =>
+      provideTmpdirServer(
+        Effect.fnUntraced(function* ({ dir, llm }) {
+          const runtime = yield* WorkflowRuntime.Service
+          const session = yield* Session.Service
+          const parent = yield* session.create({
+            title: "wf isolate",
+            permission: [{ permission: "*", pattern: "*", action: "allow" }],
+          })
+          // The single agent writes a relative file (one tool call), then ends its turn.
+          yield* llm.tool("write", { file_path: "port.rs", content: "// rust" })
+          yield* llm.text("done")
+          // A worktree is a fresh checkout of HEAD; uncommitted files (like the
+          // fixture's mimocode.json provider config) do NOT propagate. Commit it so
+          // the isolated agent's worktree Instance can resolve the test provider.
+          yield* Effect.promise(() => $`git add -A && git commit -q -m wf-config`.cwd(dir).quiet().nothrow())
+          const script = [
+            `export const meta = { name: "t", description: "d" }`,
+            `return await agent("translate", { isolation: "worktree" })`,
+          ].join("\n")
+          const { runID } = yield* runtime.start({ script, sessionID: parent.id, parentActorID: "main", model: ref })
+          const outcome = yield* runtime.wait({ runID })
+          expect(outcome.status).toBe("completed")
+          const result = (outcome as { result: any }).result
+          // Changed worktree -> result is enveloped with _worktree carrying the dir.
+          expect(result?._worktree?.directory).toBeTruthy()
+          const wtDir = result._worktree.directory as string
+          // The worktree is the deliverable, but its internal host session is not.
+          // A completed isolated worker must not leak a child session row.
+          expect(yield* session.children(parent.id)).toHaveLength(0)
+          let initialized = 0
+          yield* Effect.promise(() =>
+            Instance.provide({
+              directory: wtDir,
+              init: () => {
+                initialized++
+                return Promise.resolve()
+              },
+              fn: () => undefined,
+            }),
+          )
+          expect(initialized).toBe(1)
+          // The edit is in the worktree, NOT the parent project dir.
+          expect(yield* Effect.promise(() => fileExists(`${wtDir}/port.rs`))).toBe(true)
+          expect(yield* Effect.promise(() => fileExists(`${dir}/port.rs`))).toBe(false)
+          // Tear the kept worktree down via the service so the parent repo's
+          // .git/worktrees admin entry is gone before the fixture finalizer rm's the
+          // tmpdir. A lingering worktree pointer makes that rm retry (~28s) and trips
+          // the test timer; removing it here keeps teardown fast and deterministic.
+          yield* (yield* Worktree.Service).remove({ directory: wtDir }).pipe(Effect.ignore)
+        }),
+        { git: true, config: providerCfg },
+      ),
     // Booting a fresh Instance inside the worktree (createFromInfo -> bootstrap)
     // is heavyweight; give it generous headroom over the default 5s test timeout.
     30000,
   )
 
-  it.live("a read-only isolated agent leaves no worktree behind", () =>
-    provideTmpdirServer(
-      Effect.fnUntraced(function* ({ dir, llm }) {
-        const runtime = yield* WorkflowRuntime.Service
-        const session = yield* Session.Service
-        const parent = yield* session.create({
-          title: "wf isolate clean",
-          permission: [{ permission: "*", pattern: "*", action: "allow" }],
-        })
-        yield* llm.text("done") // no tool call -> worktree untouched -> auto-removed
-        // Commit the fixture config so the worktree's Instance can resolve the provider.
-        yield* Effect.promise(() => $`git add -A && git commit -q -m wf-config`.cwd(dir).quiet().nothrow())
-        const script = [
-          `export const meta = { name: "t", description: "d" }`,
-          `return await agent("look", { isolation: "worktree" })`,
-        ].join("\n")
-        const { runID } = yield* runtime.start({ script, sessionID: parent.id, parentActorID: "main", model: ref })
-        const outcome = yield* runtime.wait({ runID })
-        expect(outcome.status).toBe("completed")
-        // Untouched (pristine) -> no envelope, just the plain finalText; tree removed.
-        expect((outcome as { result: any }).result).toBe("done")
-      }),
-      { git: true, config: providerCfg },
-    ),
+  it.live(
+    "a read-only isolated agent leaves no worktree behind",
+    () =>
+      provideTmpdirServer(
+        Effect.fnUntraced(function* ({ dir, llm }) {
+          const runtime = yield* WorkflowRuntime.Service
+          const session = yield* Session.Service
+          const parent = yield* session.create({
+            title: "wf isolate clean",
+            permission: [{ permission: "*", pattern: "*", action: "allow" }],
+          })
+          yield* llm.text("done") // no tool call -> worktree untouched -> auto-removed
+          // Commit the fixture config so the worktree's Instance can resolve the provider.
+          yield* Effect.promise(() => $`git add -A && git commit -q -m wf-config`.cwd(dir).quiet().nothrow())
+          const script = [
+            `export const meta = { name: "t", description: "d" }`,
+            `return await agent("look", { isolation: "worktree" })`,
+          ].join("\n")
+          const { runID } = yield* runtime.start({ script, sessionID: parent.id, parentActorID: "main", model: ref })
+          const outcome = yield* runtime.wait({ runID })
+          expect(outcome.status).toBe("completed")
+          // Untouched (pristine) -> no envelope, just the plain finalText; tree removed.
+          expect((outcome as { result: any }).result).toBe("done")
+        }),
+        { git: true, config: providerCfg },
+      ),
     30000,
   )
 
-  it.live("two concurrent isolated agents writing the same path land in different worktrees", () =>
-    provideTmpdirServer(
-      Effect.fnUntraced(function* ({ dir, llm }) {
-        const runtime = yield* WorkflowRuntime.Service
-        const session = yield* Session.Service
-        const parent = yield* session.create({
-          title: "wf isolate concurrent",
-          permission: [{ permission: "*", pattern: "*", action: "allow" }],
-        })
-        // Two agents racing on the same global LLM queue: bind each one's turns to
-        // its OWN prompt sentinel (the agent-scoped task echoed in the request body)
-        // so dispatch is deterministic regardless of which agent's request lands
-        // first. Plain FIFO push would interleave non-deterministically — one agent
-        // could consume the other's `text("done")` as its first turn and finish
-        // pristine. The sentinels are uppercase/underscore tokens that cannot occur
-        // in the system prompt or tool descriptions (a substring like "alpha" would
-        // false-match "alphanumeric" in the prompt and make BOTH matchers fire).
-        // Each agent: one write tool call (matched), then a final text turn (matched).
-        // Both write the SAME relative path on purpose — the property under test is
-        // that distinct worktrees keep them from clobbering each other.
-        const isA = (h: { body: unknown }) => JSON.stringify(h.body).includes("WF_TASK_ONE")
-        const isB = (h: { body: unknown }) => JSON.stringify(h.body).includes("WF_TASK_TWO")
-        yield* llm.toolMatch(isA, "write", { file_path: "port.rs", content: "// one" })
-        yield* llm.textMatch(isA, "done")
-        yield* llm.toolMatch(isB, "write", { file_path: "port.rs", content: "// two" })
-        yield* llm.textMatch(isB, "done")
-        yield* Effect.promise(() => $`git add -A && git commit -q -m wf-config`.cwd(dir).quiet().nothrow())
-        const script = [
-          `export const meta = { name: "t", description: "d" }`,
-          `const r = await parallel([`,
-          `  () => agent("WF_TASK_ONE", { isolation: "worktree" }),`,
-          `  () => agent("WF_TASK_TWO", { isolation: "worktree" }),`,
-          `])`,
-          `return r.map((x) => x && x._worktree ? x._worktree.directory : null)`,
-        ].join("\n")
-        const { runID } = yield* runtime.start({ script, sessionID: parent.id, parentActorID: "main", model: ref })
-        const outcome = yield* runtime.wait({ runID })
-        expect(outcome.status).toBe("completed")
-        const dirs = (outcome as { result: (string | null)[] }).result
-        expect(dirs.filter(Boolean).length).toBe(2)
-        expect(dirs[0]).not.toBe(dirs[1]) // disjoint trees — no clobber
-        // Teardown: both worktrees are CHANGED (kept) — remove them so the fixture's
-        // fs.rm doesn't hit the ~28s retry storm from live .git/worktrees entries.
-        const wt = yield* Worktree.Service
-        for (const d of dirs) if (d) yield* wt.remove({ directory: d }).pipe(Effect.ignore)
-      }),
-      { git: true, config: providerCfg },
-    ),
+  it.live(
+    "two concurrent isolated agents writing the same path land in different worktrees",
+    () =>
+      provideTmpdirServer(
+        Effect.fnUntraced(function* ({ dir, llm }) {
+          const runtime = yield* WorkflowRuntime.Service
+          const session = yield* Session.Service
+          const parent = yield* session.create({
+            title: "wf isolate concurrent",
+            permission: [{ permission: "*", pattern: "*", action: "allow" }],
+          })
+          // Two agents racing on the same global LLM queue: bind each one's turns to
+          // its OWN prompt sentinel (the agent-scoped task echoed in the request body)
+          // so dispatch is deterministic regardless of which agent's request lands
+          // first. Plain FIFO push would interleave non-deterministically — one agent
+          // could consume the other's `text("done")` as its first turn and finish
+          // pristine. The sentinels are uppercase/underscore tokens that cannot occur
+          // in the system prompt or tool descriptions (a substring like "alpha" would
+          // false-match "alphanumeric" in the prompt and make BOTH matchers fire).
+          // Each agent: one write tool call (matched), then a final text turn (matched).
+          // Both write the SAME relative path on purpose — the property under test is
+          // that distinct worktrees keep them from clobbering each other.
+          const isA = (h: { body: unknown }) => JSON.stringify(h.body).includes("WF_TASK_ONE")
+          const isB = (h: { body: unknown }) => JSON.stringify(h.body).includes("WF_TASK_TWO")
+          yield* llm.toolMatch(isA, "write", { file_path: "port.rs", content: "// one" })
+          yield* llm.textMatch(isA, "done")
+          yield* llm.toolMatch(isB, "write", { file_path: "port.rs", content: "// two" })
+          yield* llm.textMatch(isB, "done")
+          yield* Effect.promise(() => $`git add -A && git commit -q -m wf-config`.cwd(dir).quiet().nothrow())
+          const script = [
+            `export const meta = { name: "t", description: "d" }`,
+            `const r = await parallel([`,
+            `  () => agent("WF_TASK_ONE", { isolation: "worktree" }),`,
+            `  () => agent("WF_TASK_TWO", { isolation: "worktree" }),`,
+            `])`,
+            `return r.map((x) => x && x._worktree ? x._worktree.directory : null)`,
+          ].join("\n")
+          const { runID } = yield* runtime.start({ script, sessionID: parent.id, parentActorID: "main", model: ref })
+          const outcome = yield* runtime.wait({ runID })
+          expect(outcome.status).toBe("completed")
+          const dirs = (outcome as { result: (string | null)[] }).result
+          expect(dirs.filter(Boolean).length).toBe(2)
+          expect(dirs[0]).not.toBe(dirs[1]) // disjoint trees — no clobber
+          // Teardown: both worktrees are CHANGED (kept) — remove them so the fixture's
+          // fs.rm doesn't hit the ~28s retry storm from live .git/worktrees entries.
+          const wt = yield* Worktree.Service
+          for (const d of dirs) if (d) yield* wt.remove({ directory: d }).pipe(Effect.ignore)
+        }),
+        { git: true, config: providerCfg },
+      ),
     30000,
   )
 
-  it.live("cancel removes worktrees of in-flight isolated agents", () =>
-    provideTmpdirServer(
-      Effect.fnUntraced(function* ({ dir, llm }) {
-        const runtime = yield* WorkflowRuntime.Service
-        const session = yield* Session.Service
-        const parent = yield* session.create({
-          title: "wf isolate cancel",
-          permission: [{ permission: "*", pattern: "*", action: "allow" }],
-        })
-        // Controllable hang: agent parks on a Deferred, not Stream.never.
-        // Fiber.interrupt unwinds Deferred.await at the Effect level (no TCP
-        // cleanup), so cancel is fast and deterministic under any load.
-        const release = yield* Deferred.make<void>()
-        yield* llm.hangUntil(release)
-        yield* Effect.promise(() => $`git add -A && git commit -q -m wf-config`.cwd(dir).quiet().nothrow())
-        const script = [
-          `export const meta = { name: "t", description: "d" }`,
-          `return await agent("x", { isolation: "worktree" })`,
-        ].join("\n")
-        const { runID } = yield* runtime.start({ script, sessionID: parent.id, parentActorID: "main", model: ref })
-        yield* Effect.sleep("600 millis") // let the worktree get created + agent spawn
-        yield* runtime.cancel({ runID })
-        // Release the hang so the agent unwinds cleanly (no leaked fiber).
-        yield* Deferred.succeed(release, undefined)
-        const s = yield* runtime.status({ runID })
-        expect(s.status).toBe("cancelled")
-      }),
-      { git: true, config: providerCfg },
-    ),
+  it.live(
+    "cancel removes worktrees of in-flight isolated agents",
+    () =>
+      provideTmpdirServer(
+        Effect.fnUntraced(function* ({ dir, llm }) {
+          const runtime = yield* WorkflowRuntime.Service
+          const session = yield* Session.Service
+          const parent = yield* session.create({
+            title: "wf isolate cancel",
+            permission: [{ permission: "*", pattern: "*", action: "allow" }],
+          })
+          // Controllable hang: agent parks on a Deferred, not Stream.never.
+          // Fiber.interrupt unwinds Deferred.await at the Effect level (no TCP
+          // cleanup), so cancel is fast and deterministic under any load.
+          const release = yield* Deferred.make<void>()
+          yield* llm.hangUntil(release)
+          yield* Effect.promise(() => $`git add -A && git commit -q -m wf-config`.cwd(dir).quiet().nothrow())
+          const root = path.join(Global.Path.data, "worktree", Instance.project.id)
+          const script = [
+            `export const meta = { name: "t", description: "d" }`,
+            `return await agent("x", { isolation: "worktree" })`,
+          ].join("\n")
+          const { runID } = yield* runtime.start({ script, sessionID: parent.id, parentActorID: "main", model: ref })
+          yield* Effect.sleep("600 millis") // let the worktree get created + agent spawn
+          yield* runtime.cancel({ runID })
+          // Release the hang so the agent unwinds cleanly (no leaked fiber).
+          yield* Deferred.succeed(release, undefined)
+          const s = yield* runtime.status({ runID })
+          expect(s.status).toBe("cancelled")
+          expect(yield* session.children(parent.id)).toHaveLength(0)
+          const left = yield* Effect.promise(() => fsp.readdir(root).catch(() => [] as string[]))
+          expect(left).toHaveLength(0)
+        }),
+        { git: true, config: providerCfg },
+      ),
     30000,
   )
 
-  it.live("a deadline-fired run reclaims the in-flight isolated agent's worktree", () =>
-    provideTmpdirServer(
-      Effect.fnUntraced(function* ({ dir, llm }) {
-        const runtime = yield* WorkflowRuntime.Service
-        const session = yield* Session.Service
-        const parent = yield* session.create({
-          title: "wf reclaim on deadline",
-          permission: [{ permission: "*", pattern: "*", action: "allow" }],
-        })
-        yield* llm.hang // the isolated agent hangs → run will hit the deadline
-        yield* Effect.promise(() => $`git add -A && git commit -q -m wf-config`.cwd(dir).quiet().nothrow())
-        const root = path.join(Global.Path.data, "worktree", Instance.project.id)
-        const script = [
-          `export const meta = { name: "t", description: "d" }`,
-          `return await agent("x", { isolation: "worktree" })`,
-        ].join("\n")
-        const { runID } = yield* runtime.start({
-          script,
-          sessionID: parent.id,
-          parentActorID: "main",
-          model: ref,
-          scriptDeadlineMs: 2000,
-        })
-        const outcome = yield* runtime.wait({ runID })
-        expect(outcome.status).toBe("failed")
-        const left = yield* Effect.promise(() => fsp.readdir(root).catch(() => [] as string[]))
-        expect(left.length).toBe(0)
-      }),
-      { git: true, config: providerCfg },
-    ),
+  it.live(
+    "a deadline-fired run reclaims the in-flight isolated agent's worktree",
+    () =>
+      provideTmpdirServer(
+        Effect.fnUntraced(function* ({ dir, llm }) {
+          const runtime = yield* WorkflowRuntime.Service
+          const session = yield* Session.Service
+          const parent = yield* session.create({
+            title: "wf reclaim on deadline",
+            permission: [{ permission: "*", pattern: "*", action: "allow" }],
+          })
+          yield* llm.hang // the isolated agent hangs → run will hit the deadline
+          yield* Effect.promise(() => $`git add -A && git commit -q -m wf-config`.cwd(dir).quiet().nothrow())
+          const root = path.join(Global.Path.data, "worktree", Instance.project.id)
+          const script = [
+            `export const meta = { name: "t", description: "d" }`,
+            `return await agent("x", { isolation: "worktree" })`,
+          ].join("\n")
+          const { runID } = yield* runtime.start({
+            script,
+            sessionID: parent.id,
+            parentActorID: "main",
+            model: ref,
+            scriptDeadlineMs: 2000,
+          })
+          const outcome = yield* runtime.wait({ runID })
+          expect(outcome.status).toBe("failed")
+          const left = yield* Effect.promise(() => fsp.readdir(root).catch(() => [] as string[]))
+          expect(left.length).toBe(0)
+        }),
+        { git: true, config: providerCfg },
+      ),
     30000,
   )
 
-  it.live("a per-agent timeout reclaims the hung isolated agent's worktree; the run completes", () =>
-    provideTmpdirServer(
-      Effect.fnUntraced(function* ({ dir, llm }) {
-        const runtime = yield* WorkflowRuntime.Service
-        const session = yield* Session.Service
-        const parent = yield* session.create({
-          title: "wf isolate agent-timeout",
-          permission: [{ permission: "*", pattern: "*", action: "allow" }],
-        })
-        yield* llm.hang // the isolated agent hangs → its per-agent timeout fires
-        yield* Effect.promise(() => $`git add -A && git commit -q -m wf-config`.cwd(dir).quiet().nothrow())
-        const root = path.join(Global.Path.data, "worktree", Instance.project.id)
-        const script = [
-          `export const meta = { name: "t", description: "d" }`,
-          `return await agent("x", { isolation: "worktree" })`,
-        ].join("\n")
-        // agentTimeoutMs (NOT scriptDeadlineMs) bounds the hung agent. Unlike the
-        // deadline (which FAILS the run), a per-agent timeout resolves that agent to
-        // null and lets the run COMPLETE — and its in-flight worktree must be
-        // reclaimed via the isolated path's null→not-success disposition (the M3
-        // branch). scriptDeadline far above so a PASS proves the per-agent path fired.
-        const { runID } = yield* runtime.start({
-          script,
-          sessionID: parent.id,
-          parentActorID: "main",
-          model: ref,
-          agentTimeoutMs: 1500,
-          scriptDeadlineMs: 60000,
-        })
-        const outcome = yield* runtime.wait({ runID })
-        // Completed (graceful timeout→null), with the agent's deliverable nullish.
-        // (The host returns null; the sandbox marshals host null → guest undefined —
-        // same sentinel convention as the shared-path timeout test.)
-        expect(outcome.status).toBe("completed")
-        const result = (outcome as { result: unknown }).result
-        expect(result === null || result === undefined).toBe(true)
-        // No worktree leaked: the timed-out isolated agent's tree was removed.
-        const left = yield* Effect.promise(() => fsp.readdir(root).catch(() => [] as string[]))
-        expect(left.length).toBe(0)
-      }),
-      { git: true, config: providerCfg },
-    ),
+  it.live(
+    "a per-agent timeout reclaims the hung isolated agent's worktree; the run completes",
+    () =>
+      provideTmpdirServer(
+        Effect.fnUntraced(function* ({ dir, llm }) {
+          const runtime = yield* WorkflowRuntime.Service
+          const session = yield* Session.Service
+          const parent = yield* session.create({
+            title: "wf isolate agent-timeout",
+            permission: [{ permission: "*", pattern: "*", action: "allow" }],
+          })
+          yield* llm.hang // the isolated agent hangs → its per-agent timeout fires
+          yield* Effect.promise(() => $`git add -A && git commit -q -m wf-config`.cwd(dir).quiet().nothrow())
+          const root = path.join(Global.Path.data, "worktree", Instance.project.id)
+          const script = [
+            `export const meta = { name: "t", description: "d" }`,
+            `return await agent("x", { isolation: "worktree" })`,
+          ].join("\n")
+          // agentTimeoutMs (NOT scriptDeadlineMs) bounds the hung agent. Unlike the
+          // deadline (which FAILS the run), a per-agent timeout resolves that agent to
+          // null and lets the run COMPLETE — and its in-flight worktree must be
+          // reclaimed via the isolated path's null→not-success disposition (the M3
+          // branch). scriptDeadline far above so a PASS proves the per-agent path fired.
+          const { runID } = yield* runtime.start({
+            script,
+            sessionID: parent.id,
+            parentActorID: "main",
+            model: ref,
+            agentTimeoutMs: 1500,
+            scriptDeadlineMs: 60000,
+          })
+          const outcome = yield* runtime.wait({ runID })
+          // Completed (graceful timeout→null), with the agent's deliverable nullish.
+          // (The host returns null; the sandbox marshals host null → guest undefined —
+          // same sentinel convention as the shared-path timeout test.)
+          expect(outcome.status).toBe("completed")
+          const result = (outcome as { result: unknown }).result
+          expect(result === null || result === undefined).toBe(true)
+          // No worktree leaked: the timed-out isolated agent's tree was removed.
+          const left = yield* Effect.promise(() => fsp.readdir(root).catch(() => [] as string[]))
+          expect(left.length).toBe(0)
+        }),
+        { git: true, config: providerCfg },
+      ),
+    30000,
+  )
+  it.live(
+    "keeps the isolated host session until the actor is fully settled",
+    () =>
+      provideTmpdirServer(
+        Effect.fnUntraced(function* ({ dir }) {
+          const runtime = yield* WorkflowRuntime.Service
+          const session = yield* Session.Service
+          const parent = yield* session.create({
+            title: "wf isolate settlement",
+            permission: [{ permission: "*", pattern: "*", action: "allow" }],
+          })
+          yield* Effect.promise(() => $`git add -A && git commit -q -m wf-config`.cwd(dir).quiet().nothrow())
+
+          const settled = yield* Deferred.make<void>()
+          const spawned = yield* Deferred.make<{ sessionID: string; actorID: string }>()
+          const previous = spawnRef.current
+          const fake = {
+            spawn: (input: any) =>
+              Effect.gen(function* () {
+                const outcome = yield* Deferred.make<any>()
+                const actorID = "general-settlement"
+                input.onActorID?.(actorID)
+                yield* Deferred.succeed(outcome, { status: "success", finalText: "done" })
+                yield* Deferred.succeed(spawned, { sessionID: input.sessionID, actorID })
+                return { actorID, sessionID: input.sessionID, outcome, settled }
+              }),
+            cancel: () => Deferred.succeed(settled, undefined).pipe(Effect.asVoid),
+            getForkContext: () => Effect.succeed(undefined),
+          } as any
+
+          return yield* Effect.gen(function* () {
+            yield* Effect.sync(() => {
+              spawnRef.current = fake
+            })
+            const script = [
+              `export const meta = { name: "t", description: "d" }`,
+              `return await agent("x", { isolation: "worktree" })`,
+            ].join("\n")
+            const { runID } = yield* runtime.start({
+              script,
+              sessionID: parent.id,
+              parentActorID: "main",
+              model: ref,
+            })
+            yield* Deferred.await(spawned)
+            yield* Effect.sleep("100 millis")
+
+            expect((yield* runtime.status({ runID })).status).toBe("running")
+            expect(yield* session.children(parent.id)).toHaveLength(1)
+
+            yield* Deferred.succeed(settled, undefined)
+            expect((yield* runtime.wait({ runID, timeoutMs: 5_000 })).status).toBe("completed")
+            expect(yield* session.children(parent.id)).toHaveLength(0)
+          }).pipe(
+            Effect.ensuring(
+              Effect.gen(function* () {
+                yield* Deferred.succeed(settled, undefined).pipe(Effect.asVoid)
+                yield* Effect.sync(() => {
+                  spawnRef.current = previous
+                })
+              }),
+            ),
+          )
+        }),
+        { git: true, config: providerCfg },
+      ),
+    30000,
+  )
+  it.live(
+    "cancels residual background actors before deleting the isolated host session",
+    () =>
+      provideTmpdirServer(
+        Effect.fnUntraced(function* ({ dir }) {
+          const runtime = yield* WorkflowRuntime.Service
+          const session = yield* Session.Service
+          const registry = yield* ActorRegistry.Service
+          const parent = yield* session.create({
+            title: "wf isolate residual actor",
+            permission: [{ permission: "*", pattern: "*", action: "allow" }],
+          })
+          yield* Effect.promise(() => $`git add -A && git commit -q -m wf-config`.cwd(dir).quiet().nothrow())
+
+          const residualID = "general-residual"
+          const cancelled: string[] = []
+          let residualLease: RuntimeLease.Handle | undefined
+          let residualSessionID: string | undefined
+          let instanceReinitializedDuringCancel = 0
+          const previous = spawnRef.current
+          const fake = {
+            spawn: (input: any) =>
+              Effect.gen(function* () {
+                const outcome = yield* Deferred.make<any>()
+                const settled = yield* Deferred.make<void>()
+                const actorID = "general-root"
+                input.onActorID?.(actorID)
+                yield* Deferred.succeed(outcome, { status: "success", finalText: "done" })
+                yield* registry.register({
+                  sessionID: input.sessionID,
+                  actorID: residualID,
+                  mode: "subagent",
+                  parentActorID: actorID,
+                  agent: "general",
+                  description: "residual child",
+                  contextMode: "none",
+                  background: true,
+                  lifecycle: "ephemeral",
+                  tools: "INHERIT",
+                })
+                const lease = yield* RuntimeLease.acquire({
+                  resourceType: "session-run",
+                  resourceID: input.sessionID,
+                  subresourceID: residualID,
+                })
+                if (!lease) return yield* Effect.die("failed to acquire residual actor lease")
+                residualLease = lease
+                residualSessionID = input.sessionID
+                yield* Deferred.succeed(settled, undefined)
+                return { actorID, sessionID: input.sessionID, outcome, settled }
+              }),
+            cancel: (sessionID: any, actorID: string) =>
+              Effect.gen(function* () {
+                cancelled.push(actorID)
+                if (actorID !== residualID || !residualLease) return
+                const child = yield* session.get(sessionID)
+                yield* Effect.promise(() =>
+                  Instance.provide({
+                    directory: child.directory,
+                    init: () => {
+                      instanceReinitializedDuringCancel++
+                      return Promise.resolve()
+                    },
+                    fn: () => undefined,
+                  }),
+                )
+                yield* RuntimeLease.release(residualLease)
+                yield* registry
+                  .updateStatus(sessionID, actorID, { status: "idle", lastOutcome: "cancelled" })
+                  .pipe(Effect.ignore)
+              }),
+            getForkContext: () => Effect.succeed(undefined),
+          } as any
+
+          return yield* Effect.gen(function* () {
+            yield* Effect.sync(() => {
+              spawnRef.current = fake
+            })
+            const script = [
+              `export const meta = { name: "t", description: "d" }`,
+              `return await agent("x", { isolation: "worktree" })`,
+            ].join("\n")
+            const { runID } = yield* runtime.start({
+              script,
+              sessionID: parent.id,
+              parentActorID: "main",
+              model: ref,
+            })
+            expect((yield* runtime.wait({ runID, timeoutMs: 10_000 })).status).toBe("completed")
+            expect(cancelled).toContain(residualID)
+            expect(instanceReinitializedDuringCancel).toBe(0)
+            expect(yield* session.children(parent.id)).toHaveLength(0)
+            expect(residualSessionID).toBeDefined()
+            expect(
+              yield* RuntimeLease.owner({
+                resourceType: "session-run",
+                resourceID: residualSessionID!,
+                subresourceID: residualID,
+              }),
+            ).toBeUndefined()
+          }).pipe(
+            Effect.ensuring(
+              Effect.gen(function* () {
+                if (residualLease) yield* RuntimeLease.release(residualLease)
+                yield* Effect.sync(() => {
+                  spawnRef.current = previous
+                })
+              }),
+            ),
+          )
+        }),
+        { git: true, config: providerCfg },
+      ),
+    30000,
+  )
+
+  it.live(
+    "does not deliver a worktree while a residual actor still owns the host session",
+    () =>
+      provideTmpdirServer(
+        Effect.fnUntraced(function* ({ dir }) {
+          const runtime = yield* WorkflowRuntime.Service
+          const session = yield* Session.Service
+          const registry = yield* ActorRegistry.Service
+          const worktree = yield* Worktree.Service
+          const parent = yield* session.create({
+            title: "wf isolate non-quiescent host",
+            permission: [{ permission: "*", pattern: "*", action: "allow" }],
+          })
+          yield* Effect.promise(() => $`git add -A && git commit -q -m wf-config`.cwd(dir).quiet().nothrow())
+
+          const residualID = "general-stubborn"
+          let residualLease: RuntimeLease.Handle | undefined
+          let residualSessionID: string | undefined
+          let residualDirectory: string | undefined
+          const previous = spawnRef.current
+          const fake = {
+            spawn: (input: any) =>
+              Effect.gen(function* () {
+                const outcome = yield* Deferred.make<any>()
+                const settled = yield* Deferred.make<void>()
+                const actorID = "general-root-stubborn"
+                input.onActorID?.(actorID)
+                yield* Deferred.succeed(outcome, { status: "success", finalText: "done" })
+                yield* registry.register({
+                  sessionID: input.sessionID,
+                  actorID: residualID,
+                  mode: "subagent",
+                  parentActorID: actorID,
+                  agent: "general",
+                  description: "stubborn residual child",
+                  contextMode: "none",
+                  background: true,
+                  lifecycle: "ephemeral",
+                  tools: "INHERIT",
+                })
+                const lease = yield* RuntimeLease.acquire({
+                  resourceType: "session-run",
+                  resourceID: input.sessionID,
+                  subresourceID: residualID,
+                })
+                if (!lease) return yield* Effect.die("failed to acquire stubborn residual actor lease")
+                residualLease = lease
+                residualSessionID = input.sessionID
+                yield* Deferred.succeed(settled, undefined)
+                return { actorID, sessionID: input.sessionID, outcome, settled }
+              }),
+            // Deliberately refuse to release the residual lease. The workflow must
+            // preserve the host resources but fail the agent deliverable closed.
+            cancel: () => Effect.void,
+            getForkContext: () => Effect.succeed(undefined),
+          } as any
+
+          return yield* Effect.gen(function* () {
+            yield* Effect.sync(() => {
+              spawnRef.current = fake
+            })
+            const script = [
+              `export const meta = { name: "t", description: "d" }`,
+              `return await agent("x", { isolation: "worktree" })`,
+            ].join("\n")
+            const { runID } = yield* runtime.start({
+              script,
+              sessionID: parent.id,
+              parentActorID: "main",
+              model: ref,
+            })
+            const run = yield* runtime.wait({ runID, timeoutMs: 10_000 })
+            expect(run.status).toBe("completed")
+            expect(run.status === "completed" ? run.result : "unexpected").toBeUndefined()
+
+            const children = yield* session.children(parent.id)
+            expect(children).toHaveLength(1)
+            residualDirectory = children[0].directory
+            expect(yield* Effect.promise(() => fileExists(residualDirectory!))).toBe(true)
+            expect(residualSessionID).toBe(children[0].id)
+            expect(
+              yield* RuntimeLease.owner({
+                resourceType: "session-run",
+                resourceID: children[0].id,
+                subresourceID: residualID,
+              }),
+            ).toBeDefined()
+          }).pipe(
+            Effect.ensuring(
+              Effect.gen(function* () {
+                if (residualLease) yield* RuntimeLease.release(residualLease)
+                if (residualSessionID) {
+                  yield* registry
+                    .updateStatus(residualSessionID as any, residualID, {
+                      status: "idle",
+                      lastOutcome: "cancelled",
+                    })
+                    .pipe(Effect.ignore)
+                  yield* session.remove(residualSessionID as any).pipe(Effect.ignore)
+                }
+                if (residualDirectory) yield* worktree.remove({ directory: residualDirectory }).pipe(Effect.ignore)
+                yield* Effect.sync(() => {
+                  spawnRef.current = previous
+                })
+              }),
+            ),
+          )
+        }),
+        { git: true, config: providerCfg },
+      ),
+    30000,
+  )
+
+  it.live(
+    "agent timeout covers postStop settlement and reclaims the isolated host",
+    () =>
+      provideTmpdirServer(
+        Effect.fnUntraced(function* ({ dir }) {
+          const runtime = yield* WorkflowRuntime.Service
+          const session = yield* Session.Service
+          const parent = yield* session.create({
+            title: "wf isolate settlement timeout",
+            permission: [{ permission: "*", pattern: "*", action: "allow" }],
+          })
+          yield* Effect.promise(() => $`git add -A && git commit -q -m wf-config`.cwd(dir).quiet().nothrow())
+
+          const settled = yield* Deferred.make<void>()
+          const previous = spawnRef.current
+          const fake = {
+            spawn: (input: any) =>
+              Effect.gen(function* () {
+                const outcome = yield* Deferred.make<any>()
+                const actorID = "general-settlement-timeout"
+                input.onActorID?.(actorID)
+                yield* Deferred.succeed(outcome, { status: "success", finalText: "done" })
+                return { actorID, sessionID: input.sessionID, outcome, settled }
+              }),
+            cancel: () => Deferred.succeed(settled, undefined).pipe(Effect.asVoid),
+            getForkContext: () => Effect.succeed(undefined),
+          } as any
+
+          return yield* Effect.gen(function* () {
+            yield* Effect.sync(() => {
+              spawnRef.current = fake
+            })
+            const root = path.join(Global.Path.data, "worktree", Instance.project.id)
+            const script = [
+              `export const meta = { name: "t", description: "d" }`,
+              `return await agent("x", { isolation: "worktree" })`,
+            ].join("\n")
+            const { runID } = yield* runtime.start({
+              script,
+              sessionID: parent.id,
+              parentActorID: "main",
+              model: ref,
+              agentTimeoutMs: 300,
+              scriptDeadlineMs: 5_000,
+            })
+            const outcome = yield* runtime.wait({ runID, timeoutMs: 10_000 })
+            expect(outcome.status).toBe("completed")
+            const result = (outcome as { result: unknown }).result
+            expect(result === null || result === undefined).toBe(true)
+            expect(yield* session.children(parent.id)).toHaveLength(0)
+            const left = yield* Effect.promise(() => fsp.readdir(root).catch(() => [] as string[]))
+            expect(left).toHaveLength(0)
+          }).pipe(
+            Effect.ensuring(
+              Effect.gen(function* () {
+                yield* Deferred.succeed(settled, undefined).pipe(Effect.asVoid)
+                yield* Effect.sync(() => {
+                  spawnRef.current = previous
+                })
+              }),
+            ),
+          )
+        }),
+        { git: true, config: providerCfg },
+      ),
     30000,
   )
 })

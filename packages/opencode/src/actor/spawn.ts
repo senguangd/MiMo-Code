@@ -181,7 +181,10 @@ export interface SpawnInput {
 export interface SpawnResult {
   actorID: string
   sessionID: SessionID
+  /** Deliverable is available; postStop hooks may still be running. */
   outcome: Deferred.Deferred<AgentOutcome>
+  /** Entire actor fiber, including postStop hooks, has terminated. */
+  settled: Deferred.Deferred<void>
 }
 
 export interface Interface {
@@ -300,6 +303,7 @@ export const layer = Layer.effect(
     }) =>
       Effect.gen(function* () {
         const outcome = yield* Deferred.make<AgentOutcome>()
+        const settled = yield* Deferred.make<void>()
         const description = input.description ?? input.agentType
         // Auto-start the bound task: spawning an actor for a task IS that task
         // beginning work. Status transition is a structural side-effect of spawn,
@@ -326,33 +330,33 @@ export const layer = Layer.effect(
           cancelling.has(cancelKey(input.sessionID, input.actorID))
             ? Effect.void
             : input.background && input.agentType !== "checkpoint-writer"
-            ? inbox
-                .send({
-                  receiverSessionID: input.parentSessionID,
-                  receiverActorID: input.parentActorID ?? "main",
-                  senderSessionID: input.sessionID,
-                  senderActorID: input.actorID,
-                  type: "actor_notification",
-                  content: renderActorNotification({
-                    actorID: input.actorID,
-                    description,
-                    status,
-                    ...extra,
-                  }),
-                })
-                .pipe(Effect.ignore)
-                // Also give the user a visible signal (the child may be unfocused).
-                .pipe(
-                  Effect.andThen(
-                    Effect.promise(() =>
-                      Bus.publish(TuiEvent.ToastShow, {
-                        message: `Child "${description}" ${status}`,
-                        variant: status === "completed" ? "success" : status === "cancelled" ? "info" : "error",
-                      }),
-                    ).pipe(Effect.ignore),
-                  ),
-                )
-            : Effect.void
+              ? inbox
+                  .send({
+                    receiverSessionID: input.parentSessionID,
+                    receiverActorID: input.parentActorID ?? "main",
+                    senderSessionID: input.sessionID,
+                    senderActorID: input.actorID,
+                    type: "actor_notification",
+                    content: renderActorNotification({
+                      actorID: input.actorID,
+                      description,
+                      status,
+                      ...extra,
+                    }),
+                  })
+                  .pipe(Effect.ignore)
+                  // Also give the user a visible signal (the child may be unfocused).
+                  .pipe(
+                    Effect.andThen(
+                      Effect.promise(() =>
+                        Bus.publish(TuiEvent.ToastShow, {
+                          message: `Child "${description}" ${status}`,
+                          variant: status === "completed" ? "success" : status === "cancelled" ? "info" : "error",
+                        }),
+                      ).pipe(Effect.ignore),
+                    ),
+                  )
+              : Effect.void
 
         // Derive actor mode from spawn shape: peer creates a new session, subagent shares parent's
         const actorMode: "peer" | "subagent" = input.parentSessionID === input.sessionID ? "subagent" : "peer"
@@ -640,11 +644,12 @@ export const layer = Layer.effect(
               }),
           }),
         )
-        const boundWork = input.instanceRef
-          ? work.pipe(Effect.provideService(InstanceRef, input.instanceRef))
-          : work
-        const fiber = yield* boundWork.pipe(Effect.forkIn(scope))
-        return { fiber, outcome }
+        const boundWork = input.instanceRef ? work.pipe(Effect.provideService(InstanceRef, input.instanceRef)) : work
+        const fiber = yield* boundWork.pipe(
+          Effect.ensuring(Deferred.succeed(settled, undefined).pipe(Effect.asVoid)),
+          Effect.forkIn(scope),
+        )
+        return { fiber, outcome, settled }
       })
 
     const spawnPeer = Effect.fn("Actor.spawnPeer")(function* (input: SpawnInput) {
@@ -692,7 +697,7 @@ export const layer = Layer.effect(
       if (input.forkContext) {
         forkContexts.set(child.id, input.forkContext) // peer's actorID === child.id
       }
-      const { fiber, outcome } = yield* forkWork({
+      const { fiber, outcome, settled } = yield* forkWork({
         sessionID: child.id,
         parentSessionID: input.sessionID,
         parentActorID: input.parentActorID,
@@ -708,7 +713,7 @@ export const layer = Layer.effect(
         ...(instanceRef ? { instanceRef } : {}),
       })
       if (!input.background) yield* Fiber.join(fiber).pipe(Effect.ignore)
-      return { actorID: child.id, sessionID: child.id, outcome }
+      return { actorID: child.id, sessionID: child.id, outcome, settled }
     })
 
     const spawnSubagent = Effect.fn("Actor.spawnSubagent")(function* (input: SpawnInput) {
@@ -748,7 +753,7 @@ export const layer = Layer.effect(
         agentInfo?.mode === "subagent" && !agentInfo?.prompt && input.agentType !== "checkpoint-writer"
       const taskWithFormat = gateEligible ? input.task + RETURN_FORMAT_INSTRUCTION : input.task
 
-      const { fiber, outcome } = yield* forkWork({
+      const { fiber, outcome, settled } = yield* forkWork({
         sessionID: input.sessionID,
         parentSessionID: input.parentSessionID ?? input.sessionID,
         parentActorID: input.parentActorID,
@@ -765,7 +770,7 @@ export const layer = Layer.effect(
       })
       if (input.onReady) yield* Effect.ignore(input.onReady({ actorID, sessionID: input.sessionID }))
       if (!input.background) yield* Fiber.join(fiber).pipe(Effect.ignore)
-      return { actorID, sessionID: input.sessionID, outcome }
+      return { actorID, sessionID: input.sessionID, outcome, settled }
     })
 
     const spawn = Effect.fn("Actor.spawn")(function* (input: SpawnInput) {
@@ -785,12 +790,7 @@ export const layer = Layer.effect(
     // non-system peer/subagent) matches forkWork.notify so cancel/success/fail
     // stay a single contract with no double-notify. Best-effort: a missing row
     // or unresolved parent silently no-ops.
-    const notifyTerminal = (
-      sessionID: SessionID,
-      actorID: string,
-      actor: Actor | undefined,
-      status: "cancelled",
-    ) =>
+    const notifyTerminal = (sessionID: SessionID, actorID: string, actor: Actor | undefined, status: "cancelled") =>
       Effect.gen(function* () {
         if (!actor) return
         if (!actor.background) return
@@ -798,8 +798,7 @@ export const layer = Layer.effect(
         if (SYSTEM_SPAWNED_AGENT_TYPES.has(actor.agent)) return
         // Resolve the parent session: a peer runs in its own child session (notify
         // its parentID); a subagent shares the parent's session.
-        const parentSessionID =
-          actor.mode === "peer" ? (yield* session.get(sessionID)).parentID : sessionID
+        const parentSessionID = actor.mode === "peer" ? (yield* session.get(sessionID)).parentID : sessionID
         if (!parentSessionID) return
         yield* inbox
           .send({
@@ -883,8 +882,7 @@ export const layer = Layer.effect(
         if (!actor.background) return
         if (actor.mode !== "peer" && actor.mode !== "subagent") return
         if (SYSTEM_SPAWNED_AGENT_TYPES.has(actor.agent)) return
-        const parentSessionID =
-          actor.mode === "peer" ? (yield* session.get(actor.sessionID)).parentID : actor.sessionID
+        const parentSessionID = actor.mode === "peer" ? (yield* session.get(actor.sessionID)).parentID : actor.sessionID
         if (!parentSessionID) return
         yield* inbox
           .send({
