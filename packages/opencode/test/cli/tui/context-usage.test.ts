@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import type { AssistantMessage, Message, Part, UserMessage } from "@mimo-ai/sdk/v2"
+import type { AssistantMessage, Message, Part, UserMessage } from "@adp-ai/sdk/v2"
 import { resolveContextUsage } from "../../../src/cli/cmd/tui/util/context-usage"
 
 const sessionID = "ses_test"

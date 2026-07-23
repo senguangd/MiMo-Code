@@ -12,7 +12,7 @@ const nitroConfig: any = (() => {
       cloudflare: {
         nodeCompat: true,
         wrangler: {
-          name: "mimo-ai-enterprise",
+          name: "adp-ai-enterprise",
         },
       },
     }

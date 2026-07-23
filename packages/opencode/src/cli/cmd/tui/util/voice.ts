@@ -5,8 +5,8 @@ import z from "zod"
 
 const log = Log.create({ service: "tui.voice" })
 
-const DEFAULT_ASR_MODEL = "xiaomi/mimo-v2.5-asr"
-const DEFAULT_CONTROL_MODEL = "xiaomi/mimo-v2.5"
+const DEFAULT_ASR_MODEL = "xiaomi/adp-v2.5-asr"
+const DEFAULT_CONTROL_MODEL = "xiaomi/adp-v2.5"
 
 export type VoiceProviderConfig = {
   providerID: string
@@ -26,7 +26,7 @@ export function resolveCredentials(
   if (!apiKey) return { error: "no_key", providerID: config.providerID, model: config.model }
   const baseUrl = (provider.options?.baseURL as string)
     || Object.values(provider.models)[0]?.api?.url
-    || (config.providerID === "xiaomi" ? "https://api.xiaomimimo.com/v1" : undefined)
+    || (config.providerID === "xiaomi" ? "https://api.xiaomiadp.com/v1" : undefined)
   if (!baseUrl) return { error: "no_url", providerID: config.providerID, model: config.model }
   return { apiKey, baseUrl }
 }
@@ -198,7 +198,7 @@ export async function transcribeAudio(opts: {
   baseUrl: string
   model?: string
 }): Promise<string | null> {
-  const model = opts.model || "mimo-v2.5-asr"
+  const model = opts.model || "adp-v2.5-asr"
   const samples = opts.audio.length
   log.debug("transcribe request", { model, samples })
   const wavBuffer = encodeWav(opts.audio)
@@ -213,7 +213,7 @@ export async function transcribeAudio(opts: {
     headers: {
       "Content-Type": "application/json",
       "Authorization": `Bearer ${opts.apiKey}`,
-      "X-Mimo-Source": "mimocode-cli",
+      "X-Adp-Source": "adpcli-cli",
     },
     body: JSON.stringify({
       model,
@@ -292,7 +292,7 @@ const VoiceControlSchema = z.object({
 export type VoiceAction = z.infer<typeof VoiceActionSchema>
 export type VoiceControlResult = z.infer<typeof VoiceControlSchema>
 
-const VOICE_CONTROL_SYSTEM_PROMPT = `你是 MiMoCode（AI 编程助手）的语音输入助手。用户通过语音向输入框口述消息，这些消息将发送给 Code Agent 执行编程任务。用户可能使用中文或英文。
+const VOICE_CONTROL_SYSTEM_PROMPT = `你是 AdpCli（AI 编程助手）的语音输入助手。用户通过语音向输入框口述消息，这些消息将发送给 Code Agent 执行编程任务。用户可能使用中文或英文。
 
 ## 核心原则
 用户说的绝大多数内容是**给 Code Agent 的指令或描述**，必须原样转录为输入框内容。只有以下三种情况属于语音控制指令：
@@ -389,7 +389,7 @@ export async function processVoiceControl(opts: {
   availableAgents: string[]
   sendEnabled?: boolean
 }): Promise<VoiceControlResult | null> {
-  const model = opts.model || "mimo-v2.5"
+  const model = opts.model || "adp-v2.5"
   const samples = opts.audio.length
   log.debug("voice control request", { model, samples, agent: opts.currentAgent })
   const wavBuffer = encodeWav(opts.audio)
@@ -412,7 +412,7 @@ export async function processVoiceControl(opts: {
     headers: {
       "Content-Type": "application/json",
       "Authorization": `Bearer ${opts.apiKey}`,
-      "X-Mimo-Source": "mimocode-cli",
+      "X-Adp-Source": "adpcli-cli",
     },
     body: JSON.stringify({
       model,

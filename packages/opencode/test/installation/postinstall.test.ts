@@ -9,10 +9,10 @@ const SCRIPT_PATH = path.join(import.meta.dirname, "../../script/postinstall.mjs
 describe("postinstall", () => {
   const platform = os.platform() === "win32" ? "windows" : os.platform() === "darwin" ? "darwin" : "linux"
   const arch = os.arch()
-  const binaryName = platform === "windows" ? "mimo.exe" : "mimo"
-  const packageName = `@mimo-ai/mimocode-${platform}-${arch}`
+  const binaryName = platform === "windows" ? "adp.exe" : "adp"
+  const packageName = `@adp-ai/adpcli-${platform}-${arch}`
 
-  test("creates .mimocode binary cache from platform package", async () => {
+  test("creates .adpcli binary cache from platform package", async () => {
     if (os.platform() === "win32") return
     await using tmp = await tmpdir()
     const dir = tmp.path
@@ -36,7 +36,7 @@ describe("postinstall", () => {
 
     expect(result.exitCode).toBe(0)
 
-    const cached = path.join(binDir, ".mimocode")
+    const cached = path.join(binDir, ".adpcli")
     expect(fs.existsSync(cached)).toBe(true)
     expect(fs.readFileSync(cached)).toEqual(fakeBinary)
   })
@@ -60,7 +60,7 @@ describe("postinstall", () => {
     })
 
     const stdout = result.stdout.toString()
-    expect(stdout).toContain("Recommended: install MiMoCode natively for a better")
+    expect(stdout).toContain("Recommended: install AdpCli natively for a better")
     expect(stdout).toContain(os.platform() === "win32" ? "    irm" : "    curl")
   })
 
@@ -78,7 +78,7 @@ describe("postinstall", () => {
     })
 
     expect(result.exitCode).toBe(1)
-    expect(result.stdout.toString()).toContain("Recommended: install MiMoCode natively")
+    expect(result.stdout.toString()).toContain("Recommended: install AdpCli natively")
   })
 
   test("skips binary cache on windows but still prints notice", async () => {
@@ -92,7 +92,7 @@ describe("postinstall", () => {
     const result = Bun.spawnSync(["node", "postinstall.mjs"], { cwd: dir, env: process.env })
 
     expect(result.exitCode).toBe(0)
-    expect(result.stdout.toString()).toContain("Recommended: install MiMoCode natively")
-    expect(fs.existsSync(path.join(binDir, ".mimocode"))).toBe(false)
+    expect(result.stdout.toString()).toContain("Recommended: install AdpCli natively")
+    expect(fs.existsSync(path.join(binDir, ".adpcli"))).toBe(false)
   })
 })

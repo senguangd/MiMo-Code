@@ -1,20 +1,20 @@
 #!/usr/bin/env bun
-import { Script } from "@mimo-ai/script"
+import { Script } from "@adp-ai/script"
 
 const PACKAGES = [
-  "@mimo-ai/cli",
-  "@mimo-ai/mimocode-darwin-arm64",
-  "@mimo-ai/mimocode-darwin-x64",
-  "@mimo-ai/mimocode-darwin-x64-baseline",
-  "@mimo-ai/mimocode-linux-arm64",
-  "@mimo-ai/mimocode-linux-arm64-musl",
-  "@mimo-ai/mimocode-linux-x64",
-  "@mimo-ai/mimocode-linux-x64-baseline",
-  "@mimo-ai/mimocode-linux-x64-musl",
-  "@mimo-ai/mimocode-linux-x64-baseline-musl",
-  "@mimo-ai/mimocode-windows-arm64",
-  "@mimo-ai/mimocode-windows-x64",
-  "@mimo-ai/mimocode-windows-x64-baseline",
+  "@adp-ai/cli",
+  "@adp-ai/adpcli-darwin-arm64",
+  "@adp-ai/adpcli-darwin-x64",
+  "@adp-ai/adpcli-darwin-x64-baseline",
+  "@adp-ai/adpcli-linux-arm64",
+  "@adp-ai/adpcli-linux-arm64-musl",
+  "@adp-ai/adpcli-linux-x64",
+  "@adp-ai/adpcli-linux-x64-baseline",
+  "@adp-ai/adpcli-linux-x64-musl",
+  "@adp-ai/adpcli-linux-x64-baseline-musl",
+  "@adp-ai/adpcli-windows-arm64",
+  "@adp-ai/adpcli-windows-x64",
+  "@adp-ai/adpcli-windows-x64-baseline",
 ]
 
 const REGISTRIES = {
@@ -48,7 +48,7 @@ async function syncNpmmirror(packageName: string) {
   const res = await fetch(url, {
     method: "PUT",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ skipDependencies: true, tips: "MiMoCode release sync" }),
+    body: JSON.stringify({ skipDependencies: true, tips: "AdpCli release sync" }),
   })
   if (!res.ok) {
     const text = await res.text()
@@ -139,7 +139,7 @@ if (target && target !== "all" && !(target in REGISTRIES)) {
   process.exit(1)
 }
 
-console.log("═══ MiMoCode Registry Sync ═══")
+console.log("═══ AdpCli Registry Sync ═══")
 console.log(`Version: ${Script.version} (${Script.channel})`)
 console.log(`Packages: ${PACKAGES.length}`)
 

@@ -147,12 +147,12 @@ describe("ProviderTransform.maxOutputTokens", () => {
     release_date: "2026-01-01",
   }
 
-  test("uses 128K for mimo provider models", () => {
+  test("uses 128K for adp provider models", () => {
     expect(
       ProviderTransform.maxOutputTokens({
         ...baseModel,
-        id: ModelID.make("mimo-auto"),
-        providerID: ProviderID.make("mimo"),
+        id: ModelID.make("adp-auto"),
+        providerID: ProviderID.make("adp"),
       }),
     ).toBe(128_000)
   })
@@ -161,13 +161,13 @@ describe("ProviderTransform.maxOutputTokens", () => {
     expect(
       ProviderTransform.maxOutputTokens({
         ...baseModel,
-        id: ModelID.make("mimo-coder"),
+        id: ModelID.make("adp-clir"),
         providerID: ProviderID.make("xiaomi"),
       }),
     ).toBe(128_000)
   })
 
-  test("keeps the default cap for non-mimo models", () => {
+  test("keeps the default cap for non-adp models", () => {
     expect(ProviderTransform.maxOutputTokens({ ...baseModel, limit: { context: 1_000_000, output: 64_000 } })).toBe(
       32_000,
     )
@@ -1921,7 +1921,7 @@ describe("ProviderTransform.ensureTrailingUserMessage - safe proactive guard (ne
   })
   // Gateway exposing an Anthropic-backed model via a dotted id — the live-400 path
   // (gateway -> Bedrock). The guard is provider-agnostic so it applies here too.
-  const gatewayModel = withProvider("mimo", {
+  const gatewayModel = withProvider("adp", {
     id: "anthropic.claude-sonnet-4",
     url: "http://gateway.example/v1/messages",
     npm: "@ai-sdk/anthropic",
@@ -2290,7 +2290,7 @@ describe("ProviderTransform.message - strip openai metadata when store=false", (
       providerID: "opencode",
       api: {
         id: "opencode-test",
-        url: "https://api.mimocode.ai",
+        url: "https://api.adpcli.ai",
         npm: "@ai-sdk/openai-compatible",
       },
     }
@@ -4259,9 +4259,9 @@ describe("ProviderTransform.schema - moonshot combiner sibling type", () => {
     expect(result.properties.operation.anyOf[0].type).toBe("object")
   })
 
-  test("non-moonshot models keep the parent type (guards the mimo/MiniMax stringify mitigation, #1371)", () => {
-    const mimo = { providerID: "mimo", api: { id: "mimo-v2.5-pro", npm: "@ai-sdk/openai-compatible" } } as any
-    const result = ProviderTransform.schema(mimo, nested("oneOf")) as any
+  test("non-moonshot models keep the parent type (guards the adp/MiniMax stringify mitigation, #1371)", () => {
+    const adp = { providerID: "adp", api: { id: "adp-v2.5-pro", npm: "@ai-sdk/openai-compatible" } } as any
+    const result = ProviderTransform.schema(adp, nested("oneOf")) as any
     expect(result.properties.operation.type).toBe("object")
     expect(Array.isArray(result.properties.operation.oneOf)).toBe(true)
   })

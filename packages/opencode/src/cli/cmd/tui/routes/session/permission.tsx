@@ -4,7 +4,7 @@ import { Portal, useKeyboard, useRenderer, useTerminalDimensions, type JSX } fro
 import type { TextareaRenderable } from "@opentui/core"
 import { useKeybind } from "../../context/keybind"
 import { useTheme, selectedForeground } from "../../context/theme"
-import type { PermissionRequest } from "@mimo-ai/sdk/v2"
+import type { PermissionRequest } from "@adp-ai/sdk/v2"
 import { useSDK } from "../../context/sdk"
 import { SplitBorder } from "../../component/border"
 import { useSync } from "../../context/sync"
@@ -142,11 +142,11 @@ export function PermissionPrompt(props: { request: PermissionRequest }) {
           body={
             <Switch>
               <Match when={props.request.always.length === 1 && props.request.always[0] === "*"}>
-                <TextBody title={"This will allow " + props.request.permission + " until MiMoCode is restarted."} />
+                <TextBody title={"This will allow " + props.request.permission + " until AdpCli is restarted."} />
               </Match>
               <Match when={true}>
                 <box paddingLeft={1} gap={1}>
-                  <text fg={theme.textMuted}>This will allow the following patterns until MiMoCode is restarted</text>
+                  <text fg={theme.textMuted}>This will allow the following patterns until AdpCli is restarted</text>
                   <box>
                     <For each={props.request.always}>
                       {(pattern) => (
@@ -524,7 +524,7 @@ function RejectPrompt(props: { onConfirm: (message: string) => void; onCancel: (
           <text fg={theme.text}>Reject permission</text>
         </box>
         <box paddingLeft={1}>
-          <text fg={theme.textMuted}>Tell MiMoCode what to do differently</text>
+          <text fg={theme.textMuted}>Tell AdpCli what to do differently</text>
         </box>
       </box>
       <box

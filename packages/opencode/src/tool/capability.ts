@@ -1,5 +1,5 @@
 import type { Tool as AITool } from "ai"
-import { TOOL_CAPABILITIES, type ToolCapability } from "@mimo-ai/plugin/tool"
+import { TOOL_CAPABILITIES, type ToolCapability } from "@adp-ai/plugin/tool"
 export type Metadata = {
   capabilities?: readonly ToolCapability[]
   internal?: boolean

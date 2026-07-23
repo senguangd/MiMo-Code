@@ -3,13 +3,13 @@ import { Effect } from "effect"
 import { HttpClient } from "effect/unstable/http"
 import * as Tool from "../tool"
 import * as McpExa from "../mcp-exa"
-import * as MimoWebsearch from "./mimo"
+import * as AdpWebsearch from "./adp"
 import { Provider } from "@/provider"
 import type { Backend } from "./backend"
 import DESCRIPTION from "./websearch.txt"
 
 const WEBFETCH_FALLBACK =
-  "Web search unavailable. Use `webfetch` with a relevant URL instead, or enable the Web Search plugin at https://platform.xiaomimimo.com/console/plugin."
+  "Web search unavailable. Use `webfetch` with a relevant URL instead, or enable the Web Search plugin at https://platform.xiaomiadp.com/console/plugin."
 const MAX_TIMEOUT = 120 * 1000 // 2 minutes
 
 const Parameters = z.object({
@@ -69,12 +69,12 @@ export const WebSearchTool = Tool.define(
               ? yield* Effect.catchCause(
                   Effect.gen(function* () {
                     if (!model) return undefined
-                    return yield* MimoWebsearch.call(
+                    return yield* AdpWebsearch.call(
                       http,
                       model.api.url,
                       backend.apiKey,
                       params.query,
-                      "mimo-v2.5",
+                      "adp-v2.5",
                       timeout ?? "30 seconds",
                     )
                   }),

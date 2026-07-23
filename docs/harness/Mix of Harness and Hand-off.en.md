@@ -1,6 +1,6 @@
 # Mix of Harness && Hand-off
 
-**In one line**: package **Codex CLI** and **Claude Code CLI** as callable executors exposed through skills, so that when MiMoCode falls into a "low-yield loop," it can pause the current turn and let the user hand the work to another harness with one action. The control plane remains in the MiMoCode session, while the execution plane runs in the selected harness—the two planes are decoupled.
+**In one line**: package **Codex CLI** and **Claude Code CLI** as callable executors exposed through skills, so that when AdpCli falls into a "low-yield loop," it can pause the current turn and let the user hand the work to another harness with one action. The control plane remains in the AdpCli session, while the execution plane runs in the selected harness—the two planes are decoupled.
 
 Supported harnesses: **Codex CLI** && **Claude Code CLI**.
 
@@ -10,9 +10,9 @@ Supported harnesses: **Codex CLI** && **Claude Code CLI**.
 
 When a single harness encounters a task it is inherently poor at, it almost never recovers on its own: Codex is more optimistic and tends to declare completion too early; Claude Code explores in greater detail, but under explicit instructions it can get stuck repeatedly rewriting similar diffs. The real failure signal is not that "one step failed," but that **spending more tokens still produces no progress**—the same file is edited repeatedly, the same bash command is retried unchanged, or the ratio of exploration to modification does not improve.
 
-Mix of Harness (MoH below) addresses this problem by turning each harness into an executor that MiMoCode can launch through a skill and run as a subprocess. A **Try-Best detector** monitors the health of the current turn; once it detects a low-yield loop, it pauses the turn and lets the user choose a more suitable harness to take over.
+Mix of Harness (MoH below) addresses this problem by turning each harness into an executor that AdpCli can launch through a skill and run as a subprocess. A **Try-Best detector** monitors the health of the current turn; once it detects a low-yield loop, it pauses the turn and lets the user choose a more suitable harness to take over.
 
-**Core boundary**: MoH **does not switch the session's provider/model**. After selecting "hand off to Codex CLI" or "hand off to Claude Code CLI," the session remains the original MiMoCode session with the original model. The model is simply instructed to load the corresponding skill and delegate execution to the selected harness. Context, task panels, memory, and approval routing therefore do not need to be rebuilt.
+**Core boundary**: MoH **does not switch the session's provider/model**. After selecting "hand off to Codex CLI" or "hand off to Claude Code CLI," the session remains the original AdpCli session with the original model. The model is simply instructed to load the corresponding skill and delegate execution to the selected harness. Context, task panels, memory, and approval routing therefore do not need to be rebuilt.
 
 ---
 
@@ -56,7 +56,7 @@ rather than making the model look up a combination of flags itself. Cross-platfo
 
 ## 3. The Five MoH Modes
 
-Different tasks need different orchestration structures. MoH currently supports the following five modes. **Fallback is MiMoCode's default mode**—the path that automatically enables Try-Best detection and Hand-off.
+Different tasks need different orchestration structures. MoH currently supports the following five modes. **Fallback is AdpCli's default mode**—the path that automatically enables Try-Best detection and Hand-off.
 
 ### 3.1 Single
 
@@ -69,13 +69,13 @@ Run a single harness directly, followed by a validator. Suitable when a harness 
 ### 3.2 Fallback (default)
 
 ```
-Task → MiMoCode
+Task → AdpCli
           │ failure/stall
           ▼
         Codex / Claude Code
 ```
 
-MiMoCode first attempts the work itself. After a failure or stall signal is detected, the user chooses another harness to take over. Common rules for detecting failure/stall include:
+AdpCli first attempts the work itself. After a failure or stall signal is detected, the user chooses another harness to take over. Common rules for detecting failure/stall include:
 
 - N consecutive failures from the same class of tool
 - No file changes for more than X minutes
@@ -93,7 +93,7 @@ Claude Code research
        ↓ HandoffPacket
 Codex implementation
        ↓ Patch
-MiMoCode review
+AdpCli review
        ↓ Findings
 Codex repair
 ```
@@ -193,7 +193,7 @@ Inspect the harness result and workspace changes, ensure its validation is compl
 
 Key points:
 
-- **Control plane = original session**: the task panel, approval routing, context, and memory remain in the MiMoCode session; the harness is only a launched subprocess.
+- **Control plane = original session**: the task panel, approval routing, context, and memory remain in the AdpCli session; the harness is only a launched subprocess.
 - **Execution plane = selected harness**: the actual research, implementation, repair, and validation must all happen in this subprocess. The system reminder explicitly forbids using the harness "only as a reference" or returning immediately after launching it.
 - **The original model remains present**: it loads the skill, packages the work for the harness, supervises it to completion, and reports the final result to the user. It does not surrender control; it becomes the harness's runtime supervisor.
 
@@ -205,13 +205,13 @@ Selecting "keep the current model but use a different strategy" sends no reminde
 
 ### 5.1 Master Switch
 
-- **Environment variable `MIMOCODE_ENABLE_TRY_BEST_HANDOFF`** (default: `true`)
+- **Environment variable `ADPCLI_ENABLE_TRY_BEST_HANDOFF`** (default: `true`)
   - Set to `false` or `0` → disable the entire loop detection, turn pausing, and hand-off dialog capability.
   - Defined in `packages/opencode/src/flag/flag.ts`.
 
 ### 5.2 Thresholds (`experimental.try_best`)
 
-Detection thresholds can be overridden individually in `mimocode.json` / config:
+Detection thresholds can be overridden individually in `adpcli.json` / config:
 
 ```json
 {

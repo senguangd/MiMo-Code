@@ -1,6 +1,6 @@
 import path from "node:path"
 import { Global } from "@/global"
-import { AppFileSystem } from "@mimo-ai/shared/filesystem"
+import { AppFileSystem } from "@adp-ai/shared/filesystem"
 import { formatHomePath } from "@/util/format"
 
 export function normalizePermissionPath(input?: string, cwd = process.cwd(), home = Global.Path.home) {

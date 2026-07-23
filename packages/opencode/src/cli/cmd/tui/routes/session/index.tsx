@@ -30,7 +30,7 @@ import type {
   UserMessage,
   TextPart,
   ReasoningPart,
-} from "@mimo-ai/sdk/v2"
+} from "@adp-ai/sdk/v2"
 import { useLocal } from "@tui/context/local"
 import { Locale } from "@/util"
 import type { Tool } from "@/tool"
@@ -329,7 +329,7 @@ export function Session() {
         ...logo,
         ``,
         `  ${weak("Session")}${UI.Style.TEXT_NORMAL_BOLD}${title}${UI.Style.TEXT_NORMAL}`,
-        `  ${weak("Continue")}${UI.Style.TEXT_NORMAL_BOLD}mimo -s ${session()?.id}${UI.Style.TEXT_NORMAL}`,
+        `  ${weak("Continue")}${UI.Style.TEXT_NORMAL_BOLD}adp -s ${session()?.id}${UI.Style.TEXT_NORMAL}`,
         ``,
       ].join("\n"),
     )
@@ -413,14 +413,14 @@ export function Session() {
 
   const local = useLocal()
 
-  // Free "mimo-auto" channel: on a rate-limit / queue ("too many requests"),
+  // Free "adp-auto" channel: on a rate-limit / queue ("too many requests"),
   // nudge the user toward a Token Plan — at most once per 24h.
   event.on("session.status", (evt) => {
     if (evt.properties.sessionID !== route.sessionID) return
     if (evt.properties.status.type !== "retry") return
     if (!SessionRetry.isRateLimitMessage(evt.properties.status.message)) return
     const model = local.model.current()
-    if (!model || model.providerID !== "mimo" || model.modelID !== "mimo-auto") return
+    if (!model || model.providerID !== "adp" || model.modelID !== "adp-auto") return
     if (dialog.stack.length > 0) return
 
     const seen = kv.get(QUEUE_TOKEN_PLAN_LAST_SEEN_AT)
@@ -1477,7 +1477,7 @@ function UserMessage(props: {
   // Detect + parse it into a compact status card instead of showing raw XML.
   // Gated on the orchestrator flag so non-orchestrator sessions are untouched.
   const actorNotification = createMemo(() => {
-    if (!Flag.MIMOCODE_EXPERIMENTAL_ORCHESTRATOR) return undefined
+    if (!Flag.ADPCLI_EXPERIMENTAL_ORCHESTRATOR) return undefined
     return props.parts.flatMap((x) => {
       if (x.type !== "text" || !x.synthetic) return []
       const parsed = parseActorNotification(x.text)
@@ -1622,8 +1622,8 @@ function AssistantMessage(props: { message: AssistantMessage; parts: Part[]; las
   const [copyHover, setCopyHover] = createSignal(false)
   const messages = createMemo(() => sync.data.message[props.message.sessionID]?.[props.message.agentID ?? "main"] ?? [])
   const model = createMemo(() =>
-    props.message.modelID === "mimo-auto"
-      ? t("tui.model.mimo_auto.name")
+    props.message.modelID === "adp-auto"
+      ? t("tui.model.adp_auto.name")
       : Model.name(ctx.providers(), props.message.providerID, props.message.modelID),
   )
 
@@ -2017,7 +2017,7 @@ function TextPart(props: { last: boolean; part: TextPart; message: AssistantMess
     <Show when={hasContent()}>
       <box id={"text-" + props.part.id} paddingLeft={3} marginTop={1} flexShrink={0}>
         <Switch>
-          <Match when={Flag.MIMOCODE_EXPERIMENTAL_MARKDOWN}>
+          <Match when={Flag.ADPCLI_EXPERIMENTAL_MARKDOWN}>
             <markdown
               syntaxStyle={syntax()}
               streaming={isStreaming()}
@@ -2028,7 +2028,7 @@ function TextPart(props: { last: boolean; part: TextPart; message: AssistantMess
               bg={theme.background}
             />
           </Match>
-          <Match when={!Flag.MIMOCODE_EXPERIMENTAL_MARKDOWN}>
+          <Match when={!Flag.ADPCLI_EXPERIMENTAL_MARKDOWN}>
             <code
               filetype="markdown"
               drawUnstyledText={false}

@@ -29,7 +29,7 @@ const Query = Schema.Struct({
 
 const Headers = Schema.Struct({
   authorization: Schema.optional(Schema.String),
-  "x-mimocode-directory": Schema.optional(Schema.String),
+  "x-adpcli-directory": Schema.optional(Schema.String),
 })
 
 class Unauthorized extends Schema.TaggedErrorClass<Unauthorized>()(
@@ -68,13 +68,13 @@ const auth = Layer.succeed(
   Authorization.of({
     basic: (effect, { credential }) =>
       Effect.gen(function* () {
-        if (!Flag.MIMOCODE_SERVER_PASSWORD) return yield* effect
+        if (!Flag.ADPCLI_SERVER_PASSWORD) return yield* effect
 
-        const user = Flag.MIMOCODE_SERVER_USERNAME ?? "mimocode"
+        const user = Flag.ADPCLI_SERVER_USERNAME ?? "adpcli"
         if (credential.username !== user) {
           return yield* new Unauthorized({ message: "Unauthorized" })
         }
-        if (Redacted.value(credential.password) !== Flag.MIMOCODE_SERVER_PASSWORD) {
+        if (Redacted.value(credential.password) !== Flag.ADPCLI_SERVER_PASSWORD) {
           return yield* new Unauthorized({ message: "Unauthorized" })
         }
         return yield* effect
@@ -95,7 +95,7 @@ const instance = (directoryAccess?: DirectoryAccessPolicy) =>
         Effect.gen(function* () {
           const query = yield* HttpServerRequest.schemaSearchParams(Query)
           const headers = yield* HttpServerRequest.schemaHeaders(Headers)
-          const raw = query.directory || headers["x-mimocode-directory"] || process.cwd()
+          const raw = query.directory || headers["x-adpcli-directory"] || process.cwd()
           const workspace = query.workspace || undefined
           const directory = resolveDirectory(raw)
 

@@ -2,7 +2,7 @@ import { Flag } from "@/flag/flag"
 import { Global } from "@/global"
 import { isAllowedRoot } from "@/server/allowed-root"
 import { Filesystem } from "@/util"
-import { AppFileSystem } from "@mimo-ai/shared/filesystem"
+import { AppFileSystem } from "@adp-ai/shared/filesystem"
 import path from "node:path"
 
 export type DirectoryAccessPolicy = "cwd" | "host"
@@ -23,7 +23,7 @@ export function resolveDirectory(input: string) {
 
 export function directoryAccessPolicy(policy?: DirectoryAccessPolicy): DirectoryAccessPolicy {
   if (policy) return policy
-  return Flag.MIMOCODE_SERVER_PASSWORD ? "host" : "cwd"
+  return Flag.ADPCLI_SERVER_PASSWORD ? "host" : "cwd"
 }
 
 export function isDirectoryAllowed(directory: string, policy?: DirectoryAccessPolicy) {
@@ -31,7 +31,7 @@ export function isDirectoryAllowed(directory: string, policy?: DirectoryAccessPo
 
   const target = Filesystem.resolve(directory)
   const cwd = Filesystem.resolve(process.cwd())
-  const orchestrator = Flag.MIMOCODE_EXPERIMENTAL_ORCHESTRATOR
+  const orchestrator = Flag.ADPCLI_EXPERIMENTAL_ORCHESTRATOR
     ? Filesystem.resolve(path.join(Global.Path.data, "orchestrator"))
     : undefined
 

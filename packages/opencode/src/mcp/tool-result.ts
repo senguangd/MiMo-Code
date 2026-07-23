@@ -34,7 +34,7 @@ function containsSerializedBlock(output: string, serialized: string) {
 }
 
 /**
- * Converts a standard MCP CallToolResult into MiMoCode's model-facing text,
+ * Converts a standard MCP CallToolResult into AdpCli's model-facing text,
  * attachments, and lossless client metadata.
  *
  * MCP servers should normally include a serialized copy of `structuredContent`

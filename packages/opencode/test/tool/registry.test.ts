@@ -18,9 +18,9 @@ afterEach(async () => {
 })
 
 describe("tool.registry", () => {
-  test("loads tools from singular and plural .mimocode directories", async () => {
+  test("loads tools from singular and plural .adpcli directories", async () => {
     await using tmp = await tmpdir()
-    const opencode = path.join(tmp.path, ".mimocode")
+    const opencode = path.join(tmp.path, ".adpcli")
     const singular = path.join(opencode, "tool")
     const plural = path.join(opencode, "tools")
     await Promise.all([fs.mkdir(singular, { recursive: true }), fs.mkdir(plural, { recursive: true })])
@@ -50,7 +50,7 @@ describe("tool.registry", () => {
   it.live("loads tools with external dependencies without crashing", () =>
     provideTmpdirInstance((dir) =>
       Effect.gen(function* () {
-        const opencode = path.join(dir, ".mimocode")
+        const opencode = path.join(dir, ".adpcli")
         const tools = path.join(opencode, "tools")
         yield* Effect.promise(() => fs.mkdir(tools, { recursive: true }))
         yield* Effect.promise(() =>
@@ -59,7 +59,7 @@ describe("tool.registry", () => {
             JSON.stringify({
               name: "custom-tools",
               dependencies: {
-                "@mimo-ai/plugin": "^0.0.0",
+                "@adp-ai/plugin": "^0.0.0",
                 cowsay: "^1.6.0",
               },
             }),
@@ -74,7 +74,7 @@ describe("tool.registry", () => {
               packages: {
                 "": {
                   dependencies: {
-                    "@mimo-ai/plugin": "^0.0.0",
+                    "@adp-ai/plugin": "^0.0.0",
                     cowsay: "^1.6.0",
                   },
                 },

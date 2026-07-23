@@ -57,12 +57,12 @@ function create(opts: { cors?: string[]; directoryAccess?: DirectoryAccessPolicy
 
   const runtime = adapter.create(app)
 
-  if (Flag.MIMOCODE_WORKSPACE_ID) {
+  if (Flag.ADPCLI_WORKSPACE_ID) {
     return {
       app: app
         .use(
           InstanceMiddleware(
-            Flag.MIMOCODE_WORKSPACE_ID ? WorkspaceID.make(Flag.MIMOCODE_WORKSPACE_ID) : undefined,
+            Flag.ADPCLI_WORKSPACE_ID ? WorkspaceID.make(Flag.ADPCLI_WORKSPACE_ID) : undefined,
             opts.directoryAccess,
           ),
         )
@@ -119,9 +119,9 @@ export async function listen(opts: {
   directoryAccess?: DirectoryAccessPolicy
 }): Promise<Listener> {
   const isLoopback = opts.hostname === "127.0.0.1" || opts.hostname === "localhost" || opts.hostname === "::1"
-  if (!isLoopback && !Flag.MIMOCODE_SERVER_PASSWORD && !opts.noAuth) {
+  if (!isLoopback && !Flag.ADPCLI_SERVER_PASSWORD && !opts.noAuth) {
     throw new Error(
-      "Refusing to bind to non-loopback address without MIMOCODE_SERVER_PASSWORD. " +
+      "Refusing to bind to non-loopback address without ADPCLI_SERVER_PASSWORD. " +
         "Set the environment variable or pass noAuth to explicitly allow unauthenticated access.",
     )
   }

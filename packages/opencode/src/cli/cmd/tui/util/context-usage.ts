@@ -1,4 +1,4 @@
-import type { Message, Part } from "@mimo-ai/sdk/v2"
+import type { Message, Part } from "@adp-ai/sdk/v2"
 
 type Estimate = {
   tokens: number

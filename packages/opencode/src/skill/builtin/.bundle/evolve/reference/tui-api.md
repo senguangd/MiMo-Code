@@ -6,7 +6,7 @@ The module must **default-export an object with a `tui()` function** — a named
 `export const tui` will fail to load with "must default export an object with tui()".
 
 ```tsx
-import type { TuiPlugin, TuiPluginModule } from "@mimo-ai/plugin/tui"
+import type { TuiPlugin, TuiPluginModule } from "@adp-ai/plugin/tui"
 
 const tui: TuiPlugin = async (api, options, meta) => {
   // api — the full TUI plugin API
@@ -28,11 +28,11 @@ File extension should be `.tsx` (JSX support for UI components).
 
 Files are auto-discovered from two directories at TUI startup:
 
-- `~/.config/mimocode/tui/*.{ts,tsx,js}` — global
-- `<project>/.mimocode/tui/*.{ts,tsx,js}` — project-local
+- `~/.config/adpcli/tui/*.{ts,tsx,js}` — global
+- `<project>/.adpcli/tui/*.{ts,tsx,js}` — project-local
 
-Plugins can also be declared in `tui.json` (global `~/.config/mimocode/tui.json`
-or project `.mimocode/tui.json`) via the `plugin` array (file URLs or npm specs).
+Plugins can also be declared in `tui.json` (global `~/.config/adpcli/tui.json`
+or project `.adpcli/tui.json`) via the `plugin` array (file URLs or npm specs).
 Either way, a **restart is required** — TUI plugins are only scanned at startup.
 
 ## Rendering model — opentui, NOT HTML
@@ -214,7 +214,7 @@ const keys = api.keybind.create(
 SDK client for server communication.
 
 ```ts
-// The full @mimo-ai/sdk client — same as what plugins get on server side
+// The full @adp-ai/sdk client — same as what plugins get on server side
 const sessions = await api.client.session.list()
 const messages = await api.client.session.messages(sessionID)
 ```
@@ -252,7 +252,7 @@ api.lifecycle.onDispose(() => {
 ## Complete Example
 
 ```tsx
-import type { TuiPlugin, TuiPluginModule } from "@mimo-ai/plugin/tui"
+import type { TuiPlugin, TuiPluginModule } from "@adp-ai/plugin/tui"
 
 const tui: TuiPlugin = async (api) => {
   // Register a command

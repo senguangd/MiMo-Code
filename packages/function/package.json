@@ -1,5 +1,5 @@
 {
-  "name": "@mimo-ai/function",
+  "name": "@adp-ai/function",
   "version": "0.1.6",
   "$schema": "https://json.schemastore.org/package.json",
   "private": true,

@@ -19,7 +19,7 @@ import { SessionCwd } from "./session-cwd"
 import { Snapshot } from "@/snapshot"
 import { assertWriteAllowed, askEditUnlessMemory } from "./external-directory"
 import { assertFileRead } from "./read-state"
-import { AppFileSystem } from "@mimo-ai/shared/filesystem"
+import { AppFileSystem } from "@adp-ai/shared/filesystem"
 import { Flag } from "@/flag/flag"
 import { AtomicWrite } from "./atomic-write"
 
@@ -661,8 +661,8 @@ export function replace(content: string, oldString: string, newString: string, r
   }
 
   // Default: pure exact match with explicit, actionable errors. Set
-  // MIMOCODE_ENABLE_FUZZY_EDIT=true to opt into the legacy fuzzy fallback chain.
-  if (!Flag.MIMOCODE_ENABLE_FUZZY_EDIT) {
+  // ADPCLI_ENABLE_FUZZY_EDIT=true to opt into the legacy fuzzy fallback chain.
+  if (!Flag.ADPCLI_ENABLE_FUZZY_EDIT) {
     const firstIndex = content.indexOf(oldString)
     if (firstIndex === -1) {
       throw new Error(buildNotFoundError(content, oldString))
@@ -679,7 +679,7 @@ export function replace(content: string, oldString: string, newString: string, r
     return content.substring(0, firstIndex) + newString + content.substring(firstIndex + oldString.length)
   }
 
-  // Fuzzy fallback chain (opt-in via MIMOCODE_ENABLE_FUZZY_EDIT)
+  // Fuzzy fallback chain (opt-in via ADPCLI_ENABLE_FUZZY_EDIT)
   let notFound = true
 
   for (const replacer of [

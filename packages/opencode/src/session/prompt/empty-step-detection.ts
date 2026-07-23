@@ -19,7 +19,7 @@ import type { MessageV2 } from "../message-v2"
  * than spin forever.
  */
 
-export const EMPTY_STEP_MAX_RECOVERY = Flag.MIMOCODE_EMPTY_STEP_MAX_RECOVERY
+export const EMPTY_STEP_MAX_RECOVERY = Flag.ADPCLI_EMPTY_STEP_MAX_RECOVERY
 
 /**
  * Is this assistant step an empty / no-op tool call?

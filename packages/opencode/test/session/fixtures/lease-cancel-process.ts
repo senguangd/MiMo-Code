@@ -1,6 +1,6 @@
 const [db, sessionID, actorID] = process.argv.slice(2)
 if (!db || !sessionID || !actorID) throw new Error("missing args")
-process.env.MIMOCODE_DB = db
+process.env.ADPCLI_DB = db
 const [{ Effect }, { RuntimeLease }] = await Promise.all([import("effect"), import("@/runtime/lease")])
 const requested = await Effect.runPromise(
   RuntimeLease.requestCancel({

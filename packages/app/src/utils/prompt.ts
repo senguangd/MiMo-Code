@@ -1,4 +1,4 @@
-import type { AgentPart as MessageAgentPart, FilePart, Part, TextPart } from "@mimo-ai/sdk/v2"
+import type { AgentPart as MessageAgentPart, FilePart, Part, TextPart } from "@adp-ai/sdk/v2"
 import type { AgentPart, FileAttachmentPart, ImageAttachmentPart, Prompt } from "@/context/prompt"
 import { relativePathWithinRoot } from "@/context/file/path"
 

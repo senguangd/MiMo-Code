@@ -24,7 +24,7 @@ import { Todo } from "../../src/session/todo"
 import { Session } from "../../src/session"
 import { LLM } from "../../src/session/llm"
 import { MessageV2 } from "../../src/session/message-v2"
-import { AppFileSystem } from "@mimo-ai/shared/filesystem"
+import { AppFileSystem } from "@adp-ai/shared/filesystem"
 import { SessionPrune } from "../../src/session/prune"
 import { SessionSummary } from "../../src/session/summary"
 import { Instruction } from "../../src/session/instruction"
@@ -854,7 +854,7 @@ it.live("injects orchestrator system prompt for agent 'orchestrator'", () =>
       yield* prompt.loop({ sessionID: session.id })
 
       const inputs = yield* llm.inputs
-      expect(JSON.stringify(inputs)).toContain("MiMoCode Orchestrator")
+      expect(JSON.stringify(inputs)).toContain("AdpCli Orchestrator")
     }),
     { git: true, config: providerCfg },
   ),

@@ -35,7 +35,7 @@ describe("try-best handoff", () => {
   test("excludes the current model family", () => {
     expect(handoffTargets("openai", "gpt-5-codex")).toEqual(["claude"])
     expect(handoffTargets("anthropic", "claude-sonnet-4")).toEqual(["codex"])
-    expect(handoffTargets("mimo", "mimo-v2")).toEqual(["codex", "claude"])
+    expect(handoffTargets("adp", "adp-v2")).toEqual(["codex", "claude"])
   })
 
   test("recovers handoff detection from the persisted synthetic part", () => {
@@ -46,8 +46,8 @@ describe("try-best handoff", () => {
         metadata: {
           origin: {
             kind: "try_best",
-            providerID: "mimo",
-            modelID: "mimo-v2",
+            providerID: "adp",
+            modelID: "adp-v2",
             incident: {
               reason: "bash_retry",
               evidence: { tool: "bash", command: "bun run ./test/123.ts", count: 3 },
@@ -57,8 +57,8 @@ describe("try-best handoff", () => {
       }),
     ).toEqual({
       sessionID: "ses_1",
-      providerID: "mimo",
-      modelID: "mimo-v2",
+      providerID: "adp",
+      modelID: "adp-v2",
       reason: "bash_retry",
       evidence: { tool: "bash", command: "bun run ./test/123.ts", count: 3 },
     })

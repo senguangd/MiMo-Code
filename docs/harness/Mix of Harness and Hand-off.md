@@ -1,6 +1,6 @@
 # Mix of Harness && Hand-off 机制
 
-**一句话总结**：把 **Codex CLI** 与 **Claude Code CLI** 作为可调用的执行器封装成 skill，让 MiMoCode 在自己陷入"低收益循环"时能够把当前 turn 暂停、由用户一键把工作交给另一个 harness 继续。控制平面仍在 MiMoCode 会话里，执行平面在选中的 harness 里——两个平面解耦。
+**一句话总结**：把 **Codex CLI** 与 **Claude Code CLI** 作为可调用的执行器封装成 skill，让 AdpCli 在自己陷入"低收益循环"时能够把当前 turn 暂停、由用户一键把工作交给另一个 harness 继续。控制平面仍在 AdpCli 会话里，执行平面在选中的 harness 里——两个平面解耦。
 
 支持的 harness：**Codex CLI** && **Claude Code CLI**。
 
@@ -10,9 +10,9 @@
 
 单一 harness 在遇到"它本来就不擅长"的任务时几乎不会自救：Codex 更乐观、容易过早宣告完成；Claude Code 探索更细，但在明确指令下容易陷入相似 diff 反复重写。真正的失败信号不是"某一步错了"，而是**继续烧 token 也换不来 progress**——同一文件被反复编辑、同一条 bash 命令原样重试、探索/修改的比例上不去。
 
-Mix of Harness（下称 MoH）解决的是这个问题：把每个 harness 都做成可以由 MiMoCode 通过 skill 拉起、以子进程形式跑的执行器；配合 **Try-Best 检测器**监控当前 turn 的健康度，一旦命中低收益循环就暂停 turn、让用户选一个更合适的 harness 接手。
+Mix of Harness（下称 MoH）解决的是这个问题：把每个 harness 都做成可以由 AdpCli 通过 skill 拉起、以子进程形式跑的执行器；配合 **Try-Best 检测器**监控当前 turn 的健康度，一旦命中低收益循环就暂停 turn、让用户选一个更合适的 harness 接手。
 
-**核心边界**：MoH **不切换会话的 provider/model**。选择"交给 Codex CLI"或"交给 Claude Code CLI"之后，会话仍然是原来的 MiMoCode 会话、原来的模型，只是被要求加载对应 skill、把执行权委派给选中的 harness。这样上下文、任务面板、记忆、审批路由都不用重建。
+**核心边界**：MoH **不切换会话的 provider/model**。选择"交给 Codex CLI"或"交给 Claude Code CLI"之后，会话仍然是原来的 AdpCli 会话、原来的模型，只是被要求加载对应 skill、把执行权委派给选中的 harness。这样上下文、任务面板、记忆、审批路由都不用重建。
 
 ---
 
@@ -56,7 +56,7 @@ codex exec \
 
 ## 3. MoH 的五种模式
 
-不同任务需要的编排结构不同。当前 MoH 支持以下五种，其中 **Fallback 是 MiMoCode 的默认模式**——也就是自动接入 Try-Best 检测 + Hand-off 的那一路。
+不同任务需要的编排结构不同。当前 MoH 支持以下五种，其中 **Fallback 是 AdpCli 的默认模式**——也就是自动接入 Try-Best 检测 + Hand-off 的那一路。
 
 ### 3.1 Single
 
@@ -69,13 +69,13 @@ Task → Codex → Validator
 ### 3.2 Fallback（默认）
 
 ```
-Task → MiMoCode
+Task → AdpCli
           │ 失败/停滞
           ▼
         Codex / Claude Code
 ```
 
-MiMoCode 首选自己动手；命中失败/停滞信号后由用户挑选另一个 harness 接手。触发失败/停滞的常见规则：
+AdpCli 首选自己动手；命中失败/停滞信号后由用户挑选另一个 harness 接手。触发失败/停滞的常见规则：
 
 - 连续 N 次同类工具失败
 - 超过 X 分钟无文件变化
@@ -93,7 +93,7 @@ Claude Code 调研
        ↓ HandoffPacket
 Codex 实现
        ↓ Patch
-MiMoCode 审查
+AdpCli 审查
        ↓ Findings
 Codex 修复
 ```
@@ -193,7 +193,7 @@ Inspect the harness result and workspace changes, ensure its validation is compl
 
 关键点：
 
-- **控制平面 = 原会话**：任务面板、审批路由、上下文、记忆都在 MiMoCode 会话里；harness 只是被拉起来的子进程。
+- **控制平面 = 原会话**：任务面板、审批路由、上下文、记忆都在 AdpCli 会话里；harness 只是被拉起来的子进程。
 - **执行平面 = 选中的 harness**：真正的调研、实现、修复、验证都要在这个子进程里完成。system-reminder 显式禁止"只是把 harness 当参考"，也禁止"launch 完 harness 就 return"。
 - **原模型仍然在场**：负责调用 skill、把工作打包给 harness、监督到完成、把最终结果汇报给用户。它不是把控制权交出去，而是变成 harness 的运行时监工。
 
@@ -205,13 +205,13 @@ Inspect the harness result and workspace changes, ensure its validation is compl
 
 ### 5.1 总开关
 
-- **环境变量 `MIMOCODE_ENABLE_TRY_BEST_HANDOFF`**（默认 `true`）
+- **环境变量 `ADPCLI_ENABLE_TRY_BEST_HANDOFF`**（默认 `true`）
   - 设为 `false` 或 `0` → 关闭 loop 检测、turn 暂停、handoff dialog 全套能力。
   - 定义见 `packages/opencode/src/flag/flag.ts`。
 
 ### 5.2 阈值（`experimental.try_best`）
 
-在 `mimocode.json` / config 里可以逐项覆盖检测阈值：
+在 `adpcli.json` / config 里可以逐项覆盖检测阈值：
 
 ```json
 {

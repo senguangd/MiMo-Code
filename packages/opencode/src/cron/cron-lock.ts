@@ -3,7 +3,7 @@ import { join } from "path"
 import { mkdir, readFile, rename, unlink, writeFile, open } from "fs/promises"
 import { readFileSync } from "fs"
 import { Log } from "@/util"
-import { ensureMimocodeGitignore } from "@/config/gitignore"
+import { ensureAdpcliGitignore } from "@/config/gitignore"
 
 const log = Log.create({ service: "cron-lock" })
 
@@ -15,7 +15,7 @@ export type LockInfo = {
 
 const PROC_STARTED_AT = Date.now() - Math.floor(process.uptime() * 1000)
 
-export const getLockFilePath = (dir?: string) => join(dir ?? process.cwd(), ".mimocode", ".cron-lock")
+export const getLockFilePath = (dir?: string) => join(dir ?? process.cwd(), ".adpcli", ".cron-lock")
 
 const parseLockInfo = (raw: string): LockInfo | null => {
   const obj = Effect.runSync(
@@ -204,7 +204,7 @@ export const tryAcquireSchedulerLock = (opts?: { dir?: string; lockIdentity?: st
     }).pipe(Effect.orElseSucceed(() => undefined))
 
     yield* Effect.tryPromise({
-      try: () => ensureMimocodeGitignore(join(path, "..")),
+      try: () => ensureAdpcliGitignore(join(path, "..")),
       catch: () => undefined,
     }).pipe(Effect.orElseSucceed(() => undefined))
 

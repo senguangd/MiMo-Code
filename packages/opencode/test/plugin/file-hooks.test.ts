@@ -4,8 +4,8 @@ import fs from "fs"
 import path from "path"
 import { tmpdir } from "../fixture/fixture"
 
-const disableDefault = process.env.MIMOCODE_DISABLE_DEFAULT_PLUGINS
-process.env.MIMOCODE_DISABLE_DEFAULT_PLUGINS = "1"
+const disableDefault = process.env.ADPCLI_DISABLE_DEFAULT_PLUGINS
+process.env.ADPCLI_DISABLE_DEFAULT_PLUGINS = "1"
 
 const { Plugin } = await import("../../src/plugin/index")
 const { Instance } = await import("../../src/project/instance")
@@ -16,10 +16,10 @@ afterEach(async () => {
 
 afterAll(() => {
   if (disableDefault === undefined) {
-    delete process.env.MIMOCODE_DISABLE_DEFAULT_PLUGINS
+    delete process.env.ADPCLI_DISABLE_DEFAULT_PLUGINS
     return
   }
-  process.env.MIMOCODE_DISABLE_DEFAULT_PLUGINS = disableDefault
+  process.env.ADPCLI_DISABLE_DEFAULT_PLUGINS = disableDefault
 })
 
 function hookSource(marker: string) {
@@ -46,14 +46,14 @@ const triggerTransform = () =>
   })
 
 describe("plugin file hooks", () => {
-  test("loads hooks from .mimocode/hooks and picks up external edits without reload call", async () => {
+  test("loads hooks from .adpcli/hooks and picks up external edits without reload call", async () => {
     await using tmp = await tmpdir({
       init: async (dir) => {
-        await Bun.write(path.join(dir, ".mimocode", "hooks", "greet.ts"), hookSource("v1"))
-        await Bun.write(path.join(dir, "mimocode.json"), '{}')
+        await Bun.write(path.join(dir, ".adpcli", "hooks", "greet.ts"), hookSource("v1"))
+        await Bun.write(path.join(dir, "adpcli.json"), '{}')
       },
     })
-    const hookFile = path.join(tmp.path, ".mimocode", "hooks", "greet.ts")
+    const hookFile = path.join(tmp.path, ".adpcli", "hooks", "greet.ts")
 
     const out = await Instance.provide({
       directory: tmp.path,
@@ -79,8 +79,8 @@ describe("plugin file hooks", () => {
   test("detects newly added hook files", async () => {
     await using tmp = await tmpdir({
       init: async (dir) => {
-        await fs.promises.mkdir(path.join(dir, ".mimocode", "hooks"), { recursive: true })
-        await Bun.write(path.join(dir, "mimocode.json"), '{}')
+        await fs.promises.mkdir(path.join(dir, ".adpcli", "hooks"), { recursive: true })
+        await Bun.write(path.join(dir, "adpcli.json"), '{}')
       },
     })
 
@@ -91,7 +91,7 @@ describe("plugin file hooks", () => {
           const first = yield* triggerTransform()
           expect(first.system).toEqual([])
 
-          fs.writeFileSync(path.join(tmp.path, ".mimocode", "hooks", "late.ts"), hookSource("late"))
+          fs.writeFileSync(path.join(tmp.path, ".adpcli", "hooks", "late.ts"), hookSource("late"))
           yield* Effect.promise(() => Bun.sleep(1200))
 
           return yield* triggerTransform()
@@ -109,9 +109,9 @@ describe("plugin file hooks", () => {
     await using tmp = await tmpdir({
       init: async (dir) => {
         const sink = path.join(dir, "events.log")
-        await Bun.write(path.join(dir, "mimocode.json"), '{}')
+        await Bun.write(path.join(dir, "adpcli.json"), '{}')
         await Bun.write(
-          path.join(dir, ".mimocode", "hooks", "listener.ts"),
+          path.join(dir, ".adpcli", "hooks", "listener.ts"),
           [
             "import fs from 'fs'",
             "export default {",

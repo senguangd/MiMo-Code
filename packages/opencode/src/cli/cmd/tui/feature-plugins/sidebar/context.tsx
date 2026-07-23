@@ -1,5 +1,5 @@
-import type { AssistantMessage, SessionStatus } from "@mimo-ai/sdk/v2"
-import type { TuiPlugin, TuiPluginApi, TuiPluginModule } from "@mimo-ai/plugin/tui"
+import type { AssistantMessage, SessionStatus } from "@adp-ai/sdk/v2"
+import type { TuiPlugin, TuiPluginApi, TuiPluginModule } from "@adp-ai/plugin/tui"
 import { Show, createEffect, createMemo, createSignal, onCleanup } from "solid-js"
 import { completedTPS, formatTPS, streamingTPS } from "./tps"
 import { resolveContextUsage, type ContextUsage } from "../../util/context-usage"

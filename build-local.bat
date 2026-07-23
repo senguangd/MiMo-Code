@@ -9,19 +9,19 @@ REM
 REM If no version is provided, uses 0.1.6.
 REM
 REM Environment variables (optional):
-REM   MIMOCODE_CHANNEL - Set channel name (default: current git branch)
-REM   MIMOCODE_BUMP    - Bump version: major, minor, or patch
-REM   MIMOCODE_RELEASE - Set to any value for release build
+REM   ADPCLI_CHANNEL - Set channel name (default: current git branch)
+REM   ADPCLI_BUMP    - Bump version: major, minor, or patch
+REM   ADPCLI_RELEASE - Set to any value for release build
 
 if "%1"=="" (
-  set MIMOCODE_VERSION=0.1.6
+  set ADPCLI_VERSION=0.1.6
 ) else (
-  set MIMOCODE_VERSION=%1
+  set ADPCLI_VERSION=%1
 )
 
 echo ========================================
-echo MiMo Code local Windows build
-echo Version: %MIMOCODE_VERSION%
+echo Adp Cli local Windows build
+echo Version: %ADPCLI_VERSION%
 echo Embed Web UI: yes
 echo ========================================
 echo.
@@ -59,7 +59,7 @@ if %errorlevel% neq 0 (
 
 echo.
 echo [4/4] Generated exe:
-where /r packages\opencode\dist mimo.exe
+where /r packages\opencode\dist adp.exe
 
 echo.
 echo Done.

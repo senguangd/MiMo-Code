@@ -1,6 +1,6 @@
 # Mix of Harness && Hand-off の仕組み
 
-**一言で言えば**：**Codex CLI** と **Claude Code CLI** を呼び出し可能な実行器として skill にラップし、MiMoCode が「低収益ループ」に陥ったとき、現在の turn を一時停止して、ユーザーがワンクリックで別の harness に作業を引き継げるようにする仕組みです。制御プレーンは MiMoCode セッションに残り、実行プレーンは選択した harness で動作します。この 2 つのプレーンは分離されています。
+**一言で言えば**：**Codex CLI** と **Claude Code CLI** を呼び出し可能な実行器として skill にラップし、AdpCli が「低収益ループ」に陥ったとき、現在の turn を一時停止して、ユーザーがワンクリックで別の harness に作業を引き継げるようにする仕組みです。制御プレーンは AdpCli セッションに残り、実行プレーンは選択した harness で動作します。この 2 つのプレーンは分離されています。
 
 対応 harness：**Codex CLI** && **Claude Code CLI**。
 
@@ -10,9 +10,9 @@
 
 単一の harness は、そもそも不得意なタスクに遭遇しても、ほとんど自力で立て直せません。Codex は楽観的で完了を早まって宣言しやすく、Claude Code はより細かく探索しますが、明確な指示のもとでは似た diff を何度も書き直す状態に陥りがちです。本当の失敗シグナルは「ある手順が失敗した」ことではなく、**token を使い続けても progress が得られない**ことです。同じファイルを繰り返し編集する、同じ bash コマンドをそのまま再試行する、探索と変更の比率が改善しない、といった状態が該当します。
 
-Mix of Harness（以下 MoH）は、各 harness を MiMoCode が skill 経由で起動し、サブプロセスとして実行できる実行器にすることで、この問題を解決します。**Try-Best 検出器**が現在の turn の健全性を監視し、低収益ループを検出すると turn を一時停止して、より適切な harness をユーザーに選んでもらいます。
+Mix of Harness（以下 MoH）は、各 harness を AdpCli が skill 経由で起動し、サブプロセスとして実行できる実行器にすることで、この問題を解決します。**Try-Best 検出器**が現在の turn の健全性を監視し、低収益ループを検出すると turn を一時停止して、より適切な harness をユーザーに選んでもらいます。
 
-**中核となる境界**：MoH は**セッションの provider/model を切り替えません**。「Codex CLI に引き継ぐ」または「Claude Code CLI に引き継ぐ」を選んだ後も、セッションは元の MiMoCode セッション、モデルも元のモデルのままです。対応する skill をロードし、選択した harness に実行を委譲するよう指示されるだけです。そのため、コンテキスト、タスクパネル、メモリ、承認ルーティングを再構築する必要はありません。
+**中核となる境界**：MoH は**セッションの provider/model を切り替えません**。「Codex CLI に引き継ぐ」または「Claude Code CLI に引き継ぐ」を選んだ後も、セッションは元の AdpCli セッション、モデルも元のモデルのままです。対応する skill をロードし、選択した harness に実行を委譲するよう指示されるだけです。そのため、コンテキスト、タスクパネル、メモリ、承認ルーティングを再構築する必要はありません。
 
 ---
 
@@ -56,7 +56,7 @@ codex exec \
 
 ## 3. MoH の 5 つのモード
 
-タスクによって必要なオーケストレーション構造は異なります。現在の MoH は次の 5 モードに対応しており、**Fallback が MiMoCode のデフォルトモード**です。つまり、Try-Best 検出と Hand-off が自動的に組み込まれる経路です。
+タスクによって必要なオーケストレーション構造は異なります。現在の MoH は次の 5 モードに対応しており、**Fallback が AdpCli のデフォルトモード**です。つまり、Try-Best 検出と Hand-off が自動的に組み込まれる経路です。
 
 ### 3.1 Single
 
@@ -69,13 +69,13 @@ Task → Codex → Validator
 ### 3.2 Fallback（デフォルト）
 
 ```
-Task → MiMoCode
+Task → AdpCli
           │ 失敗/停滞
           ▼
         Codex / Claude Code
 ```
 
-MiMoCode が最初に自分で作業します。失敗/停滞シグナルを検出すると、ユーザーが別の harness を選んで引き継がせます。一般的な検出ルールは次のとおりです。
+AdpCli が最初に自分で作業します。失敗/停滞シグナルを検出すると、ユーザーが別の harness を選んで引き継がせます。一般的な検出ルールは次のとおりです。
 
 - 同種ツールが N 回連続で失敗
 - X 分を超えてファイル変更がない
@@ -93,7 +93,7 @@ Claude Code が調査
        ↓ HandoffPacket
 Codex が実装
        ↓ Patch
-MiMoCode がレビュー
+AdpCli がレビュー
        ↓ Findings
 Codex が修正
 ```
@@ -193,7 +193,7 @@ Inspect the harness result and workspace changes, ensure its validation is compl
 
 要点：
 
-- **制御プレーン = 元のセッション**：タスクパネル、承認ルーティング、コンテキスト、メモリはすべて MiMoCode セッションに残り、harness は起動されたサブプロセスにすぎません。
+- **制御プレーン = 元のセッション**：タスクパネル、承認ルーティング、コンテキスト、メモリはすべて AdpCli セッションに残り、harness は起動されたサブプロセスにすぎません。
 - **実行プレーン = 選択した harness**：実際の調査、実装、修正、検証はすべてこのサブプロセス内で完了させます。system-reminder は「harness を参考として使うだけ」や「harness の launch 後すぐ return する」ことを明示的に禁止します。
 - **元のモデルも引き続き存在**：skill の呼び出し、harness への作業のパッケージング、完了までの監督、ユーザーへの最終結果報告を担当します。制御権を手放すのではなく、harness のランタイム監督者になります。
 
@@ -205,13 +205,13 @@ Inspect the harness result and workspace changes, ensure its validation is compl
 
 ### 5.1 マスタースイッチ
 
-- **環境変数 `MIMOCODE_ENABLE_TRY_BEST_HANDOFF`**（デフォルト `true`）
+- **環境変数 `ADPCLI_ENABLE_TRY_BEST_HANDOFF`**（デフォルト `true`）
   - `false` または `0` に設定 → loop 検出、turn の一時停止、handoff dialog の全機能を無効化。
   - 定義は `packages/opencode/src/flag/flag.ts`。
 
 ### 5.2 しきい値（`experimental.try_best`）
 
-`mimocode.json` / config で検出しきい値を個別に上書きできます。
+`adpcli.json` / config で検出しきい値を個別に上書きできます。
 
 ```json
 {

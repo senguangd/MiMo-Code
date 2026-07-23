@@ -1,7 +1,7 @@
 #!/usr/bin/env bun
 import { $ } from "bun"
 import pkg from "../package.json"
-import { Script } from "@mimo-ai/script"
+import { Script } from "@adp-ai/script"
 import { fileURLToPath } from "url"
 
 const dir = fileURLToPath(new URL("..", import.meta.url))
@@ -42,20 +42,20 @@ await Bun.file(`./dist/${pkg.name}/package.json`).write(
     {
       name: pkg.name,
       version: version,
-      description: "MiMo Code: Where Models and Agents Co-Evolve",
+      description: "Adp Cli: Where Models and Agents Co-Evolve",
       license: "MIT",
-      author: "Xiaomi MiMo Team",
-      homepage: "https://mimo.xiaomi.com/coder",
+      author: "Xiaomi Adp Team",
+      homepage: "https://adp.xiaomi.com/coder",
       repository: {
         type: "git",
-        url: "git+https://github.com/XiaomiMiMo/MiMo-Code.git",
+        url: "git+https://github.com/XiaomiAdp/Adp-Cli.git",
       },
       bugs: {
-        url: "https://github.com/XiaomiMiMo/MiMo-Code/issues",
+        url: "https://github.com/XiaomiAdp/Adp-Cli/issues",
       },
-      keywords: ["ai", "cli", "code", "xiaomi", "mimo", "mimocode"],
+      keywords: ["ai", "cli", "code", "xiaomi", "adp", "adpcli"],
       bin: {
-        mimo: "./bin/mimo",
+        adp: "./bin/adp",
       },
       scripts: {
         postinstall: "bun ./postinstall.mjs || node ./postinstall.mjs",

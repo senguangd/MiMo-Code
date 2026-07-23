@@ -11,7 +11,7 @@ Responses API frequently saw:
   `session/classify.ts:108-116` labels `think-only` / `"empty output"`.
 - **`reasoning part rs_… not found`** — a server-side Responses API rejection, seen even
   when the user's config already set `include: ["reasoning.encrypted_content"]`, and
-  specifically against a **custom `baseURL` proxy** (MiMo Router), not `api.openai.com`.
+  specifically against a **custom `baseURL` proxy** (Adp Router), not `api.openai.com`.
 
 Initial hypotheses that were **ruled out**:
 - "ai-sdk too old" — false. `ai@6.0.168`, `@ai-sdk/openai@3.0.53` are current and identical
@@ -31,7 +31,7 @@ items must be echoed back on every turn, and the SDK drops any reasoning input i
 `encrypted_content` (`@ai-sdk/openai` dist `convert-to-openai-responses-input`: "Reasoning parts
 without encrypted content are not supported when store is false").
 
-1. **Missing `include` in base options.** MiMoCode's base `options()` set `store:false` +
+1. **Missing `include` in base options.** AdpCli's base `options()` set `store:false` +
    `reasoningEffort:medium` + `reasoningSummary:auto` for `@ai-sdk/openai`, but only set
    `include: ["reasoning.encrypted_content"]` when `providerID` started with `opencode` (or inside
    an explicitly-selected reasoning variant). Without `include`, OpenAI never returns
@@ -47,7 +47,7 @@ without encrypted content are not supported when store is false").
    the `rs_` reference. This code came from early upstream but upstream **refactored it away** in
    PR #31429 (commit `a86ecf3bb`, "adjust item id stripping to happen prior to request signing"):
    they moved it into the transform layer and strip only the `itemId` key from `providerOptions`,
-   before serialization. MiMoCode's fork was stuck on the old implementation.
+   before serialization. AdpCli's fork was stuck on the old implementation.
 
 3. **8 ai-sdk provider deps behind upstream.** Not the cause of the above, but a maintenance gap;
    the notable ones carry real fixes (openrouter duplicate tool-call; google Vertex
@@ -72,8 +72,8 @@ without encrypted content are not supported when store is false").
   on the openai SDK still strips via the `openai` key. Preserves `reasoningEncryptedContent` and all
   other options.
   - Deliberate divergence from upstream: dropped `@ai-sdk/amazon-bedrock/mantle` from the npm list
-    (MiMoCode uses `@ai-sdk/amazon-bedrock`, and the old code never stripped bedrock). Kept
-    `openai` + `azure` to match prior MiMoCode behavior.
+    (AdpCli uses `@ai-sdk/amazon-bedrock`, and the old code never stripped bedrock). Kept
+    `openai` + `azure` to match prior AdpCli behavior.
 - `test/provider/transform.test.ts`: rewrote the "strip openai metadata when store=false" suite to
   assert the new behavior (itemId stripped for openai/azure when store≠true; encrypted content and
   other options preserved; store:true keeps id; non-openai/azure npm untouched; azure namespace).
@@ -141,7 +141,7 @@ xai stayed at 3.0.82 (already matched upstream).
 
 Upstream also has a signature/redactedData-aware reasoning filter in `normalizeMessages`
 (preserves empty-text reasoning parts carrying a `signature`/`redactedData`) plus an
-`@ai-sdk/google@3.0.73` patch (pops empty Gemini `model` entries). MiMoCode's filter
+`@ai-sdk/google@3.0.73` patch (pops empty Gemini `model` entries). AdpCli's filter
 (`transform.ts` normalizeMessages, anthropic/bedrock branch) still drops `text===""` reasoning
 parts. This is an independent robustness improvement for thinking/thoughtSignature multi-turn — not
 required by the bumps — and was intentionally left for separate evaluation.

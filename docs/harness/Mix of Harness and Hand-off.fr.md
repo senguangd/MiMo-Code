@@ -1,6 +1,6 @@
 # Mécanisme Mix of Harness && Hand-off
 
-**En une phrase** : encapsuler **Codex CLI** et **Claude Code CLI** sous forme d'exécuteurs appelables via des skills, afin que MiMoCode puisse suspendre le turn courant lorsqu'il tombe dans une « boucle à faible rendement » et permettre à l'utilisateur de confier le travail en un clic à un autre harness. Le plan de contrôle reste dans la session MiMoCode, tandis que le plan d'exécution se trouve dans le harness sélectionné — les deux plans sont découplés.
+**En une phrase** : encapsuler **Codex CLI** et **Claude Code CLI** sous forme d'exécuteurs appelables via des skills, afin que AdpCli puisse suspendre le turn courant lorsqu'il tombe dans une « boucle à faible rendement » et permettre à l'utilisateur de confier le travail en un clic à un autre harness. Le plan de contrôle reste dans la session AdpCli, tandis que le plan d'exécution se trouve dans le harness sélectionné — les deux plans sont découplés.
 
 Harness pris en charge : **Codex CLI** && **Claude Code CLI**.
 
@@ -10,9 +10,9 @@ Harness pris en charge : **Codex CLI** && **Claude Code CLI**.
 
 Face à une tâche pour laquelle il est intrinsèquement peu adapté, un harness unique ne se rétablit presque jamais seul : Codex est plus optimiste et tend à annoncer la fin trop tôt ; Claude Code explore plus finement, mais peut réécrire en boucle des diff similaires sous des instructions explicites. Le véritable signal d'échec n'est pas qu'« une étape a échoué », mais que **continuer à consommer des tokens ne produit aucun progrès** : le même fichier est modifié à répétition, la même commande bash est réessayée sans changement, ou le rapport exploration/modification ne s'améliore pas.
 
-Mix of Harness (MoH ci-après) résout ce problème en transformant chaque harness en exécuteur que MiMoCode peut lancer via un skill et exécuter comme sous-processus. Un **détecteur Try-Best** surveille la santé du turn courant ; dès qu'il détecte une boucle à faible rendement, il suspend le turn et laisse l'utilisateur choisir un harness plus approprié pour prendre le relais.
+Mix of Harness (MoH ci-après) résout ce problème en transformant chaque harness en exécuteur que AdpCli peut lancer via un skill et exécuter comme sous-processus. Un **détecteur Try-Best** surveille la santé du turn courant ; dès qu'il détecte une boucle à faible rendement, il suspend le turn et laisse l'utilisateur choisir un harness plus approprié pour prendre le relais.
 
-**Limite fondamentale** : MoH **ne change pas le provider/model de la session**. Après avoir choisi « confier à Codex CLI » ou « confier à Claude Code CLI », la session reste la session MiMoCode d'origine avec son modèle d'origine. Celui-ci doit simplement charger le skill correspondant et déléguer l'exécution au harness choisi. Le contexte, le panneau des tâches, la mémoire et le routage des approbations n'ont donc pas à être reconstruits.
+**Limite fondamentale** : MoH **ne change pas le provider/model de la session**. Après avoir choisi « confier à Codex CLI » ou « confier à Claude Code CLI », la session reste la session AdpCli d'origine avec son modèle d'origine. Celui-ci doit simplement charger le skill correspondant et déléguer l'exécution au harness choisi. Le contexte, le panneau des tâches, la mémoire et le routage des approbations n'ont donc pas à être reconstruits.
 
 ---
 
@@ -56,7 +56,7 @@ plutôt que de laisser le modèle rechercher lui-même la combinaison de flags. 
 
 ## 3. Les cinq modes de MoH
 
-Les tâches exigent des structures d'orchestration différentes. MoH prend actuellement en charge les cinq modes suivants. **Fallback est le mode par défaut de MiMoCode** : c'est le chemin qui active automatiquement la détection Try-Best et le Hand-off.
+Les tâches exigent des structures d'orchestration différentes. MoH prend actuellement en charge les cinq modes suivants. **Fallback est le mode par défaut de AdpCli** : c'est le chemin qui active automatiquement la détection Try-Best et le Hand-off.
 
 ### 3.1 Single
 
@@ -69,13 +69,13 @@ Un seul harness s'exécute directement, suivi d'un validator. Adapté lorsque le
 ### 3.2 Fallback (par défaut)
 
 ```
-Task → MiMoCode
+Task → AdpCli
           │ échec/blocage
           ▼
         Codex / Claude Code
 ```
 
-MiMoCode essaie d'abord d'effectuer le travail lui-même. Après un signal d'échec/blocage, l'utilisateur choisit un autre harness. Règles courantes :
+AdpCli essaie d'abord d'effectuer le travail lui-même. Après un signal d'échec/blocage, l'utilisateur choisit un autre harness. Règles courantes :
 
 - N échecs consécutifs d'outils de même type
 - Aucune modification de fichier pendant plus de X minutes
@@ -93,7 +93,7 @@ Recherche par Claude Code
        ↓ HandoffPacket
 Implémentation par Codex
        ↓ Patch
-Revue par MiMoCode
+Revue par AdpCli
        ↓ Findings
 Correction par Codex
 ```
@@ -193,7 +193,7 @@ Inspect the harness result and workspace changes, ensure its validation is compl
 
 Points essentiels :
 
-- **Plan de contrôle = session d'origine** : panneau des tâches, routage des approbations, contexte et mémoire restent dans MiMoCode ; le harness n'est qu'un sous-processus lancé.
+- **Plan de contrôle = session d'origine** : panneau des tâches, routage des approbations, contexte et mémoire restent dans AdpCli ; le harness n'est qu'un sous-processus lancé.
 - **Plan d'exécution = harness sélectionné** : recherche, implémentation, correction et validation doivent avoir lieu dans ce sous-processus. Le system-reminder interdit explicitement de n'utiliser le harness « que comme référence » ou de return juste après son launch.
 - **Le modèle d'origine reste présent** : il charge le skill, prépare le travail pour le harness, le supervise jusqu'à la fin et rapporte le résultat. Il ne cède pas le contrôle, mais devient le superviseur d'exécution du harness.
 
@@ -205,13 +205,13 @@ Choisir « conserver le modèle actuel mais changer de stratégie » n'envoie au
 
 ### 5.1 Interrupteur principal
 
-- **Variable d'environnement `MIMOCODE_ENABLE_TRY_BEST_HANDOFF`** (`true` par défaut)
+- **Variable d'environnement `ADPCLI_ENABLE_TRY_BEST_HANDOFF`** (`true` par défaut)
   - `false` ou `0` → désactive la détection de boucle, la suspension du turn et le dialog de handoff.
   - Définie dans `packages/opencode/src/flag/flag.ts`.
 
 ### 5.2 Seuils (`experimental.try_best`)
 
-Chaque seuil peut être remplacé dans `mimocode.json` / config :
+Chaque seuil peut être remplacé dans `adpcli.json` / config :
 
 ```json
 {

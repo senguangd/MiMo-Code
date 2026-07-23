@@ -2,7 +2,7 @@ import os from "os"
 import { Global } from "@/global"
 import { InstallationChannel, InstallationVersion } from "@/installation/version"
 import { getInstallationID } from "@/metrics/installation"
-import { MIMOCODE_PROCESS_ROLE, MIMOCODE_RUN_ID } from "./mimo-process"
+import { ADPCLI_PROCESS_ROLE, ADPCLI_RUN_ID } from "./adp-process"
 
 function username() {
   if (process.env.USER) return process.env.USER
@@ -51,12 +51,12 @@ export async function getEnvInfo() {
       data: Global.Path.data,
       config: Global.Path.config,
     },
-    mimocode: {
+    adpcli: {
       version: InstallationVersion,
       channel: InstallationChannel,
       installation_id: await getInstallationID(),
-      run_id: MIMOCODE_RUN_ID,
-      process_role: MIMOCODE_PROCESS_ROLE,
+      run_id: ADPCLI_RUN_ID,
+      process_role: ADPCLI_PROCESS_ROLE,
     },
   }
 }

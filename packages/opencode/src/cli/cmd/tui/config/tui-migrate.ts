@@ -10,7 +10,7 @@ import * as ConfigPaths from "@/config/paths"
 
 const log = Log.create({ service: "tui.migrate" })
 
-const TUI_SCHEMA_URL = "https://mimo.xiaomi.com/mimocode/tui.json"
+const TUI_SCHEMA_URL = "https://adp.xiaomi.com/adpcli/tui.json"
 
 const LegacyTheme = TuiInfo.shape.theme.optional()
 const LegacyRecord = z.record(z.string(), z.unknown()).optional()
@@ -29,13 +29,13 @@ interface MigrateInput {
 }
 
 /**
- * Migrates tui-specific keys (theme, keybinds, tui) from mimocode.json files
+ * Migrates tui-specific keys (theme, keybinds, tui) from adpcli.json files
  * into dedicated tui.json files. Migration is performed per-directory and
  * skips only locations where a tui.json already exists.
  */
 export async function migrateTuiConfig(input: MigrateInput) {
-  const mimocode = await mimocodeFiles(input)
-  for (const file of mimocode) {
+  const adpcli = await adpcliFiles(input)
+  for (const file of adpcli) {
     const source = await Filesystem.readText(file).catch((error) => {
       log.warn("failed to read config for tui migration", { path: file, error })
       return undefined
@@ -131,15 +131,15 @@ async function backupAndStripLegacy(file: string, source: string) {
     })
 }
 
-async function mimocodeFiles(input: { directories: string[]; cwd: string }) {
+async function adpcliFiles(input: { directories: string[]; cwd: string }) {
   const files = [
-    ...ConfigPaths.fileInDirectory(Global.Path.config, "mimocode"),
-    ...(await Filesystem.findUp(["mimocode.json", "mimocode.jsonc"], input.cwd, undefined, { rootFirst: true })),
+    ...ConfigPaths.fileInDirectory(Global.Path.config, "adpcli"),
+    ...(await Filesystem.findUp(["adpcli.json", "adpcli.jsonc"], input.cwd, undefined, { rootFirst: true })),
   ]
   for (const dir of unique(input.directories)) {
-    files.push(...ConfigPaths.fileInDirectory(dir, "mimocode"))
+    files.push(...ConfigPaths.fileInDirectory(dir, "adpcli"))
   }
-  if (Flag.MIMOCODE_CONFIG) files.push(Flag.MIMOCODE_CONFIG)
+  if (Flag.ADPCLI_CONFIG) files.push(Flag.ADPCLI_CONFIG)
 
   const existing = await Promise.all(
     unique(files).map(async (file) => {

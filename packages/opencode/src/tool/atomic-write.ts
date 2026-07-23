@@ -3,7 +3,7 @@ import { randomUUID } from "node:crypto"
 import * as fs from "node:fs/promises"
 import { Effect } from "effect"
 import { Global } from "@/global"
-import { AppFileSystem } from "@mimo-ai/shared/filesystem"
+import { AppFileSystem } from "@adp-ai/shared/filesystem"
 import { RuntimeLease } from "@/runtime/lease"
 
 export function isMemoryPath(filePath: string) {

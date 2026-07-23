@@ -1,24 +1,24 @@
-<h1 align="center">MiMoCode</h1>
+<h1 align="center">AdpCli</h1>
 
 <p align="center">
-  <img src="assets/readme/mimocode-banner.png" alt="MiMoCode" width="700">
+  <img src="assets/readme/adpcli-banner.png" alt="AdpCli" width="700">
 </p>
 
-<p align="center"><strong>MiMo Code: Where Models and Agents Co-Evolve</strong></p>
+<p align="center"><strong>Adp Cli: Where Models and Agents Co-Evolve</strong></p>
 
 <p align="center">
   <a href="README.zh.md">中文</a> | English
 </p>
 
 <p align="center">
-  <a href="https://mimo.xiaomi.com/coder">Website</a> | <a href="https://mimo.xiaomi.com/en/blog/mimo-code-long-horizon">Blog</a>
+  <a href="https://adp.xiaomi.com/coder">Website</a> | <a href="https://adp.xiaomi.com/en/blog/adp-cli-long-horizon">Blog</a>
 </p>
 
 ---
 
-MiMoCode is a terminal-native AI coding assistant. It can read and write code, run commands, manage Git, and use a persistent memory system to keep a deep understanding of your project across sessions while continuously improving itself.
+AdpCli is a terminal-native AI coding assistant. It can read and write code, run commands, manage Git, and use a persistent memory system to keep a deep understanding of your project across sessions while continuously improving itself.
 
-MiMo Auto is built in as a free-for-limited-time channel, so you can start with zero configuration. MiMoCode also supports connecting to any mainstream LLM provider API.
+Adp Auto is built in as a free-for-limited-time channel, so you can start with zero configuration. AdpCli also supports connecting to any mainstream LLM provider API.
 
 ---
 
@@ -32,15 +32,15 @@ curl -fsSL https://cli.adp.grcbtest/install | bash
 powershell -ep Bypass -c "irm https://cli.adp.grcbtest/install.ps1 | iex"
 
 # Or install via npm (all platforms)
-npm install -g @mimo-ai/cli
+npm install -g @adp-ai/cli
 
 # Run
-mimo
+adp
 ```
 
 The first launch guides you through configuration automatically. Supported options:
-- **MiMo Auto (free for a limited time)** — anonymous channel, zero configuration
-- **Xiaomi MiMo Platform** — OAuth login
+- **Adp Auto (free for a limited time)** — anonymous channel, zero configuration
+- **Xiaomi Adp Platform** — OAuth login
 - **Import from Claude Code** — migrate existing authentication in one step
 - **Custom Provider** — add any OpenAI-compatible API in the TUI
 
@@ -57,7 +57,7 @@ sudo apt install xsel
 <summary><strong>Windows: garbled CJK (Chinese/Japanese/Korean) output in the shell</strong></summary>
 
 On Windows with a non-UTF-8 system locale (e.g. zh-CN, whose active code page is 936/GBK),
-command output containing CJK characters may appear garbled (mojibake). MiMoCode forces
+command output containing CJK characters may appear garbled (mojibake). AdpCli forces
 UTF-8 output for spawned PowerShell/cmd subprocesses. If you still encounter garbled output
 in cases this does not yet cover, enable Windows' system-wide UTF-8 support:
 
@@ -72,11 +72,11 @@ some older non-Unicode programs to display incorrectly, so treat it as a workaro
 
 ---
 
-## MiMo Ecosystem
+## Adp Ecosystem
 
-Beyond MiMoCode, Xiaomi MiMo models also work in other agents and coding tools like Cursor, Cline, and Zed.
+Beyond AdpCli, Xiaomi Adp models also work in other agents and coding tools like Cursor, Cline, and Zed.
 
-**[awesome-mimo-agent](https://github.com/XiaomiMiMo/awesome-mimo-agent)** collects setup guides for using MiMo in those tools — worth a look if you want to try MiMo elsewhere. Contributions welcome: open a PR to add your own setup.
+**[awesome-adp-agent](https://github.com/XiaomiAdp/awesome-adp-agent)** collects setup guides for using Adp in those tools — worth a look if you want to try Adp elsewhere. Contributions welcome: open a PR to add your own setup.
 
 ---
 
@@ -129,7 +129,7 @@ Compose mode provides a structured workflow for specs-driven development. It inc
 
 Workflows are deterministic JavaScript scripts that orchestrate multiple agents in a sandboxed runtime. Unlike agent conversations, workflows encode fixed phase sequences with bounded retries and automatic parallelization — fire-and-forget execution with no user interaction required.
 
-MiMoCode ships with three built-in workflows:
+AdpCli ships with three built-in workflows:
 
 | Workflow | Phases | Description |
 |----------|--------|-------------|
@@ -139,11 +139,11 @@ MiMoCode ships with three built-in workflows:
 
 The compose workflow complements the compose agent: use the **workflow** when requirements are clear and tasks split cleanly (deterministic, parallel, non-interactive); use the **agent** when you need to redirect mid-flow or inject judgment between steps (conversational, interactive).
 
-**Custom workflows:** Place a `.js` file in `.mimocode/workflows/` or `.claude/workflows/` to define your own, or override a built-in by using the same name (e.g. `.mimocode/workflows/compose.js`).
+**Custom workflows:** Place a `.js` file in `.adpcli/workflows/` or `.claude/workflows/` to define your own, or override a built-in by using the same name (e.g. `.adpcli/workflows/compose.js`).
 
 ### Builtin Skills
 
-Skills are reusable instruction sets that teach agents how to handle specific tasks (e.g. generating PDFs, writing academic papers, searching arXiv). MiMoCode ships with the following builtin skills:
+Skills are reusable instruction sets that teach agents how to handle specific tasks (e.g. generating PDFs, writing academic papers, searching arXiv). AdpCli ships with the following builtin skills:
 
 | Skill | Description |
 |-------|-------------|
@@ -159,17 +159,17 @@ Skills are reusable instruction sets that teach agents how to handle specific ta
 | `skill-creator` | Interactive guide for creating and improving agent skills |
 | `evolve` | Total self-modification — rewrite any layer of the agent: tools, behavior hooks, knowledge, workflows, even the UI |
 | `loop` | Schedule recurring prompts on a fixed cadence |
-| `mimocode` | Self-documenting reference for MiMoCode features and config |
+| `adpcli` | Self-documenting reference for AdpCli features and config |
 
-**Overriding a builtin skill:** Create a skill with the same `name` in your project (`.mimocode/skills/<name>/SKILL.md`) or personal skill directory (`~/.claude/skills/`, `~/.opencode/skills/`, etc.). User skills discovered later in the scan order override builtins with the same name.
+**Overriding a builtin skill:** Create a skill with the same `name` in your project (`.adpcli/skills/<name>/SKILL.md`) or personal skill directory (`~/.claude/skills/`, `~/.opencode/skills/`, etc.). User skills discovered later in the scan order override builtins with the same name.
 
 <details>
 <summary><strong>Disabling builtin skills via environment variables</strong></summary>
 
 | Variable | Effect |
 |----------|--------|
-| `MIMOCODE_DISABLE_BUILTIN_SKILLS=true` | Disable all builtin skills |
-| `MIMOCODE_DISABLE_OFFICIAL_SKILLS=true` | Disable only the office/media skills: `docx-official`, `pdf-official`, `pptx-official`, `xlsx-official`, `html-to-video-pipeline` |
+| `ADPCLI_DISABLE_BUILTIN_SKILLS=true` | Disable all builtin skills |
+| `ADPCLI_DISABLE_OFFICIAL_SKILLS=true` | Disable only the office/media skills: `docx-official`, `pdf-official`, `pptx-official`, `xlsx-official`, `html-to-video-pipeline` |
 
 When disabled, the corresponding skills are removed from the agent's available skill list entirely — they will not appear in context and cannot be invoked.
 
@@ -177,7 +177,7 @@ When disabled, the corresponding skills are removed from the agent's available s
 
 ### Voice Input
 
-Real-time streaming voice input powered by TenVAD and MiMo ASR. Activate with `/voice`, then speak — audio is segmented by pauses and transcribed incrementally into the input. Available for MiMo logged-in users. Requires `sox` (`brew install sox` on macOS, other platforms similar).
+Real-time streaming voice input powered by TenVAD and Adp ASR. Activate with `/voice`, then speak — audio is segmented by pauses and transcribed incrementally into the input. Available for Adp logged-in users. Requires `sox` (`brew install sox` on macOS, other platforms similar).
 
 <details>
 <summary><strong>WSLg audio setup</strong></summary>
@@ -205,9 +205,9 @@ export PULSE_SERVER=tcp:127.0.0.1:4713
 </details>
 
 <details>
-<summary><strong>Non-MiMo voice providers (OpenRouter, internal API, etc.)</strong></summary>
+<summary><strong>Non-Adp voice providers (OpenRouter, internal API, etc.)</strong></summary>
 
-Voice input can route through other OpenAI-compatible providers via the `voice` config field. The ASR model (`mimo-v2.5-asr`) is only available on MiMo's platform; voice control mode (`mimo-v2.5`) is available on OpenRouter and compatible relay platforms.
+Voice input can route through other OpenAI-compatible providers via the `voice` config field. The ASR model (`adp-v2.5-asr`) is only available on Adp's platform; voice control mode (`adp-v2.5`) is available on OpenRouter and compatible relay platforms.
 
 **OpenRouter (voice control only):**
 
@@ -215,7 +215,7 @@ Use `/connect` to sign in to OpenRouter, then add to your config:
 ```jsonc
 {
   "voice": {
-    "control_model": "openrouter/xiaomi/mimo-v2.5"
+    "control_model": "openrouter/xiaomi/adp-v2.5"
   }
 }
 ```
@@ -230,21 +230,21 @@ Use `/connect` to sign in to OpenRouter, then add to your config:
         "apiKey": "sk-..."
       },
       "models": {
-        "xiaomi/mimo-v2.5-asr": { "name": "MiMo-V2.5-ASR" },
-        "xiaomi/mimo-v2.5": { "name": "MiMo-V2.5" }
+        "xiaomi/adp-v2.5-asr": { "name": "Adp-V2.5-ASR" },
+        "xiaomi/adp-v2.5": { "name": "Adp-V2.5" }
       }
     }
   },
   "voice": {
-    "asr_model": "internal/xiaomi/mimo-v2.5-asr",
-    "control_model": "internal/xiaomi/mimo-v2.5"
+    "asr_model": "internal/xiaomi/adp-v2.5-asr",
+    "control_model": "internal/xiaomi/adp-v2.5"
   }
 }
 ```
 
 Custom providers must register at least one model in their `models` field to be recognized. The model names in `voice.*_model` are sent directly to the API — they don't need to match the registered model keys exactly.
 
-> **Note:** Models registered under a custom provider will appear in the model selection list. Don't use ASR-only models (e.g. `mimo-v2.5-asr`) as your primary coding model.
+> **Note:** Models registered under a custom provider will appear in the model selection list. Don't use ASR-only models (e.g. `adp-v2.5-asr`) as your primary coding model.
 
 </details>
 
@@ -257,26 +257,26 @@ Custom providers must register at least one model in their `models` field to be 
 
 ## Configuration
 
-MiMoCode uses JSON/JSONC config files with published JSON Schemas for autocompletion and validation.
+AdpCli uses JSON/JSONC config files with published JSON Schemas for autocompletion and validation.
 
 ### File Locations
 
 | File | Project-level | Global |
 |------|--------------|--------|
-| Main config | `.mimocode/mimocode.jsonc` | `~/.config/mimocode/mimocode.json` |
-| TUI config | `.mimocode/tui.json` | `~/.config/mimocode/tui.json` |
-| Auth credentials | — | `~/.local/share/mimocode/auth.json` |
+| Main config | `.adpcli/adpcli.jsonc` | `~/.config/adpcli/adpcli.json` |
+| TUI config | `.adpcli/tui.json` | `~/.config/adpcli/tui.json` |
+| Auth credentials | — | `~/.local/share/adpcli/auth.json` |
 
-> On Windows, XDG paths fall under `%LOCALAPPDATA%\mimocode\`. You can override all paths with `MIMOCODE_HOME`.
+> On Windows, XDG paths fall under `%LOCALAPPDATA%\adpcli\`. You can override all paths with `ADPCLI_HOME`.
 
 ### JSON Schemas
 
-MiMoCode auto-injects a `$schema` field when it first loads your config, so your editor gets completions and validation out of the box:
+AdpCli auto-injects a `$schema` field when it first loads your config, so your editor gets completions and validation out of the box:
 
 | Config | Schema URL |
 |--------|-----------|
-| `mimocode.jsonc` / `mimocode.json` | `https://mimo.xiaomi.com/mimocode/config.json` |
-| `tui.json` | `https://mimo.xiaomi.com/mimocode/tui.json` |
+| `adpcli.jsonc` / `adpcli.json` | `https://adp.xiaomi.com/adpcli/config.json` |
+| `tui.json` | `https://adp.xiaomi.com/adpcli/tui.json` |
 
 <details>
 <summary><strong>VS Code / Cursor: trust the schema domain</strong></summary>
@@ -286,7 +286,7 @@ Add to your `settings.json` so the editor can download schemas for autocompletio
 ```json
 {
   "json.schemaDownload.trustedDomains": {
-    "https://mimo.xiaomi.com/": true
+    "https://adp.xiaomi.com/": true
   }
 }
 ```
@@ -296,15 +296,15 @@ Add to your `settings.json` so the editor can download schemas for autocompletio
 <details>
 <summary><strong>Data directories</strong></summary>
 
-Beyond config files, MiMoCode stores runtime data under XDG paths (or `$MIMOCODE_HOME`):
+Beyond config files, AdpCli stores runtime data under XDG paths (or `$ADPCLI_HOME`):
 
 | Directory | Default (Linux) | Contents |
 |-----------|----------------|----------|
-| data | `~/.local/share/mimocode/` | SQLite database, auth credentials (`auth.json`), memory, logs |
-| state | `~/.local/state/mimocode/` | TUI preferences (`kv.json`), recent models (`model.json`) |
-| cache | `~/.cache/mimocode/` | Language servers, cached model catalog, skills |
+| data | `~/.local/share/adpcli/` | SQLite database, auth credentials (`auth.json`), memory, logs |
+| state | `~/.local/state/adpcli/` | TUI preferences (`kv.json`), recent models (`model.json`) |
+| cache | `~/.cache/adpcli/` | Language servers, cached model catalog, skills |
 
-To remove stored credentials, delete `auth.json` from the data directory. On macOS, XDG data defaults to `~/Library/Application Support/mimocode/`.
+To remove stored credentials, delete `auth.json` from the data directory. On macOS, XDG data defaults to `~/Library/Application Support/adpcli/`.
 
 </details>
 
@@ -323,16 +323,16 @@ Max Mode (parallel best-of-N reasoning with judge selection) can be enabled via 
 
 By default, reading or writing files outside the project working directory triggers an
 `external_directory` permission prompt — including the system temp directory. This is
-intentional: MiMoCode does not silently widen permissions, so you stay in control of what
+intentional: AdpCli does not silently widen permissions, so you stay in control of what
 the model can touch outside your project.
 
 The temp directory comes up often because most models reach for it as scratch space (e.g.
 a quick script, a throwaway data file). If you trust your environment and would rather not
 be prompted each time, you can opt in by allowing it in your config:
 
-```json title=".mimocode/mimocode.json"
+```json title=".adpcli/adpcli.json"
 {
-  "$schema": "https://mimo.xiaomi.com/mimocode/config.json",
+  "$schema": "https://adp.xiaomi.com/adpcli/config.json",
   "permission": {
     "external_directory": {
       "/tmp/**": "allow"
@@ -358,13 +358,13 @@ everything the agent does instead of confirming each action:
 
 ```bash
 # TUI — prompts once for an explicit confirmation on startup
-mimo --dangerously-skip-permissions
+adp --dangerously-skip-permissions
 
 # Headless
-mimo run --dangerously-skip-permissions "your prompt"
+adp run --dangerously-skip-permissions "your prompt"
 
 # Or via environment variable (any surface)
-MIMOCODE_DANGEROUSLY_SKIP_PERMISSIONS=1 mimo
+ADPCLI_DANGEROUSLY_SKIP_PERMISSIONS=1 adp
 ```
 
 This injects an **allow-all base underneath your config**, so a tool with no rule
@@ -394,7 +394,7 @@ bun turbo typecheck      # Type check
 
 ## Relationship to OpenCode
 
-MiMoCode is built as a fork of [OpenCode](https://github.com/anomalyco/opencode). It keeps all core OpenCode capabilities (multiple providers, TUI, LSP, MCP, plugins) and adds persistent memory, intelligent context management, subagent orchestration, goal-driven autonomous loops, compose workflows, and self-improvement via dream/distill.
+AdpCli is built as a fork of [OpenCode](https://github.com/anomalyco/opencode). It keeps all core OpenCode capabilities (multiple providers, TUI, LSP, MCP, plugins) and adds persistent memory, intelligent context management, subagent orchestration, goal-driven autonomous loops, compose workflows, and self-improvement via dream/distill.
 
 ---
 
@@ -414,6 +414,6 @@ Scan the QR code to join the community group chat:
 
 Source code is licensed under the [MIT License](./LICENSE).
 
-Use of MiMoCode is also subject to the [Use Restrictions](./USE_RESTRICTIONS.md).
-Use of Xiaomi MiMo-hosted services is subject to the [MiMo Terms of Service](https://platform.xiaomimimo.com/docs/terms/user-agreement).
-Use of the MiMo name, logo, and trademarks is subject to the MiMo Trademark Policy.
+Use of AdpCli is also subject to the [Use Restrictions](./USE_RESTRICTIONS.md).
+Use of Xiaomi Adp-hosted services is subject to the [Adp Terms of Service](https://platform.xiaomiadp.com/docs/terms/user-agreement).
+Use of the Adp name, logo, and trademarks is subject to the Adp Trademark Policy.

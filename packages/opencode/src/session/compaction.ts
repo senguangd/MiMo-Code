@@ -36,7 +36,7 @@ function overflowFallbackSummary(input: {
     "## Compaction fallback",
     "",
     "The previous conversation was too large for the configured compaction model to summarize safely.",
-    "MiMoCode preserved continuity by installing this deterministic fallback summary instead of stopping the session.",
+    "AdpCli preserved continuity by installing this deterministic fallback summary instead of stopping the session.",
     "",
     "## What was preserved",
     "",

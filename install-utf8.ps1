@@ -1,9 +1,9 @@
 #@build-remove Run `bun script/build-install-ps1.ts` to convert install-utf8.ps1 -> install.ps1 (ASCII-safe)
 <#
 .SYNOPSIS
-    MiMoCode installer for Windows.
+    AdpCli installer for Windows.
 .DESCRIPTION
-    Downloads and installs MiMoCode to $env:USERPROFILE\.mimocode\bin,
+    Downloads and installs AdpCli to $env:USERPROFILE\.adpcli\bin,
     then adds the directory to the user PATH.
 .PARAMETER Version
     Install a specific version (e.g., 0.1.0). Defaults to latest.
@@ -11,7 +11,7 @@
 .PARAMETER NoModifyPath
     Don't modify the user PATH environment variable.
 .LINK
-    https://mimo.xiaomi.com/coder
+    https://adp.xiaomi.com/coder
 .EXAMPLE
     irm https://cli.adp.grcbtest/install.ps1 | iex
 .EXAMPLE
@@ -58,7 +58,7 @@ if (($PSVersionTable.PSVersion.Major) -lt 5) {
 
 $Arch = if ($env:PROCESSOR_ARCHITECTURE -eq "ARM64") { "arm64" }
     elseif ([Environment]::Is64BitOperatingSystem) { "x64" }
-    else { Write-Err "MiMoCode requires a 64-bit operating system." }
+    else { Write-Err "AdpCli requires a 64-bit operating system." }
 
 # AVX2 baseline detection (only relevant for x64)
 $NeedsBaseline = $false
@@ -86,7 +86,7 @@ if ($NeedsBaseline) { $Target = "$Target-baseline" }
 
 # --- Resolve version ---
 
-$FdsBase = if ($env:MIMO_FDS_BASE) { $env:MIMO_FDS_BASE.TrimEnd('/') } else {
+$FdsBase = if ($env:ADP_FDS_BASE) { $env:ADP_FDS_BASE.TrimEnd('/') } else {
     "https://cli.adp.grcbtest"
 }
 
@@ -100,14 +100,14 @@ if (-not $Version) {
     $Version = $Version.TrimStart('v')
 }
 
-# Warn about old versions that don't support mimo upgrade via install.ps1
+# Warn about old versions that don't support adp upgrade via install.ps1
 $MajMin = $Version -replace '^(\d+\.\d+\.\d+).*', '$1'
 if ($MajMin -match '^\d+\.\d+\.\d+$') {
     $parts = $MajMin.Split('.')
     $semver = [int]$parts[0] * 10000 + [int]$parts[1] * 100 + [int]$parts[2]
     if ($semver -le 104) {
         Write-Host ""
-        Write-Host "WARNING: Installing v$Version via install.ps1 will cause 'mimo upgrade' to not function properly." -ForegroundColor Yellow
+        Write-Host "WARNING: Installing v$Version via install.ps1 will cause 'adp upgrade' to not function properly." -ForegroundColor Yellow
         Write-Host "This is a known limitation for versions before 0.1.5." -ForegroundColor Yellow
         Write-Host ""
     }
@@ -116,19 +116,19 @@ if ($MajMin -match '^\d+\.\d+\.\d+$') {
 # --- Check existing installation ---
 
 $Staging = $false
-if ($env:MIMOCODE_INSTALL_DIR) {
-    $InstallDir = $env:MIMOCODE_INSTALL_DIR
+if ($env:ADPCLI_INSTALL_DIR) {
+    $InstallDir = $env:ADPCLI_INSTALL_DIR
     $Staging = $true
 } else {
-    $InstallDir = Join-Path $env:USERPROFILE ".mimocode\bin"
+    $InstallDir = Join-Path $env:USERPROFILE ".adpcli\bin"
 }
 
 if (-not $Staging) {
-    $Existing = Get-Command mimo -ErrorAction SilentlyContinue
+    $Existing = Get-Command adp -ErrorAction SilentlyContinue
     if ($Existing) {
-        $InstalledVersion = & mimo --version 2>$null
+        $InstalledVersion = & adp --version 2>$null
         if ($InstalledVersion -eq $Version) {
-            Write-Host "MiMoCode v$Version is already installed." -ForegroundColor DarkGray
+            Write-Host "AdpCli v$Version is already installed." -ForegroundColor DarkGray
             Exit-Install 0
         }
         Write-Host "Installed version: $InstalledVersion" -ForegroundColor DarkGray
@@ -137,16 +137,16 @@ if (-not $Staging) {
 
 # --- Download and install ---
 
-$Filename = "mimocode-$Target.zip"
+$Filename = "adpcli-$Target.zip"
 $Url = "$FdsBase/releases/v$Version/$Filename"
 
 Write-Host ""
 Write-Host "Installing " -NoNewline -ForegroundColor DarkGray
-Write-Host "mimocode" -NoNewline
+Write-Host "adpcli" -NoNewline
 Write-Host " version: " -NoNewline -ForegroundColor DarkGray
 Write-Host "$Version"
 
-$TmpDir = Join-Path ([System.IO.Path]::GetTempPath()) "mimocode_install_$PID"
+$TmpDir = Join-Path ([System.IO.Path]::GetTempPath()) "adpcli_install_$PID"
 New-Item -ItemType Directory -Path $TmpDir -Force | Out-Null
 $ZipPath = Join-Path $TmpDir $Filename
 
@@ -172,12 +172,12 @@ try {
 }
 
 New-Item -ItemType Directory -Path $InstallDir -Force | Out-Null
-$BinName = if (Test-Path (Join-Path $TmpDir "mimo.exe")) { "mimo.exe" } else { "mimo" }
+$BinName = if (Test-Path (Join-Path $TmpDir "adp.exe")) { "adp.exe" } else { "adp" }
 try {
-    Move-Item -Path (Join-Path $TmpDir $BinName) -Destination (Join-Path $InstallDir "mimo.exe") -Force -ErrorAction Stop
+    Move-Item -Path (Join-Path $TmpDir $BinName) -Destination (Join-Path $InstallDir "adp.exe") -Force -ErrorAction Stop
 } catch {
     Remove-Item -Recurse -Force $TmpDir -ErrorAction SilentlyContinue
-    Write-Err "Failed to install binary. If MiMoCode is currently running, please close it and retry.`n$($_.Exception.Message)"
+    Write-Err "Failed to install binary. If AdpCli is currently running, please close it and retry.`n$($_.Exception.Message)"
 }
 Remove-Item -Recurse -Force $TmpDir -ErrorAction SilentlyContinue
 
@@ -226,8 +226,8 @@ if ($PathUpdated) {
 }
 Write-Host ""
 Write-Host "  cd <project>"
-Write-Host "  mimo"
+Write-Host "  adp"
 Write-Host ""
 Write-Host "For more information visit " -NoNewline -ForegroundColor DarkGray
-Write-Host "https://mimo.xiaomi.com/coder/docs"
+Write-Host "https://adp.xiaomi.com/coder/docs"
 Write-Host ""

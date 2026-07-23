@@ -35,7 +35,7 @@ import type { DirectoryAccessPolicy } from "@/server/directory-access"
 export const InstanceRoutes = (upgrade: UpgradeWebSocket, directoryAccess?: DirectoryAccessPolicy): Hono => {
   const app = new Hono()
 
-  if (Flag.MIMOCODE_EXPERIMENTAL_HTTPAPI) {
+  if (Flag.ADPCLI_EXPERIMENTAL_HTTPAPI) {
     const handler = ExperimentalHttpApiServer.webHandler(directoryAccess).handler
     const context = Context.empty() as Context.Context<unknown>
     app.get("/question", (c) => handler(c.req.raw, context))

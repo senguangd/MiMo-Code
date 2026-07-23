@@ -1,6 +1,6 @@
 import path from "path"
 import { Effect } from "effect"
-import { AppFileSystem } from "@mimo-ai/shared/filesystem"
+import { AppFileSystem } from "@adp-ai/shared/filesystem"
 import { Flag } from "@/flag/flag"
 import { Path as GlobalPath } from "@/global"
 import { InstallationLocal, InstallationVersion } from "@/installation/version"
@@ -111,7 +111,7 @@ export const extractBuiltinBundle = Effect.fn("Skill.extractBuiltinBundle")(func
   const enabled = new Set(
     Object.keys(BUILTIN_BUNDLE).filter(
       (name) =>
-        !(Flag.MIMOCODE_DISABLE_OFFICIAL_SKILLS && OFFICIAL_SKILL_NAMES.has(name)) &&
+        !(Flag.ADPCLI_DISABLE_OFFICIAL_SKILLS && OFFICIAL_SKILL_NAMES.has(name)) &&
         isBuiltinSkillInstalled(name),
     ),
   )

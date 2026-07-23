@@ -58,7 +58,7 @@ export function WorkspaceRouterMiddleware(upgrade: UpgradeWebSocket): Middleware
     const sessionWorkspaceID = await getSessionWorkspace(url)
     const workspaceID = sessionWorkspaceID || url.searchParams.get("workspace")
 
-    if (!workspaceID || url.pathname.startsWith("/console") || Flag.MIMOCODE_WORKSPACE_ID) {
+    if (!workspaceID || url.pathname.startsWith("/console") || Flag.ADPCLI_WORKSPACE_ID) {
       return next()
     }
 
@@ -114,7 +114,7 @@ export function WorkspaceRouterMiddleware(upgrade: UpgradeWebSocket): Middleware
     }
 
     const headers = new Headers(c.req.raw.headers)
-    headers.delete("x-mimocode-workspace")
+    headers.delete("x-adpcli-workspace")
 
     const req = new Request(c.req.raw, { headers })
     return ServerProxy.http(proxyURL, target.headers, req, workspace.id)

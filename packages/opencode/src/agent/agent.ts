@@ -201,7 +201,7 @@ export const layer = Layer.effect(
             hardPermission: Permission.fromConfig({
               edit: {
                 "*": "deny",
-                [path.join(".mimocode", "plans", "*.md")]: "allow",
+                [path.join(".adpcli", "plans", "*.md")]: "allow",
                 [path.relative(Instance.worktree, path.join(Global.Path.data, path.join("plans", "*.md")))]: "allow",
               },
             }),
@@ -225,11 +225,11 @@ export const layer = Layer.effect(
             native: true,
           },
           // Orchestrator mode is experimental and opt-in (default OFF): only
-          // registered when MIMOCODE_EXPERIMENTAL_ORCHESTRATOR is set. Gating the
+          // registered when ADPCLI_EXPERIMENTAL_ORCHESTRATOR is set. Gating the
           // registration here removes it from the TUI mode-cycle, the agent
           // dialog, defaultAgent, and prevents any `session`-tool peer spawns —
           // making the rest of the orchestrator feature dead code when off.
-          ...(Flag.MIMOCODE_EXPERIMENTAL_ORCHESTRATOR
+          ...(Flag.ADPCLI_EXPERIMENTAL_ORCHESTRATOR
             ? {
                 orchestrator: {
                   name: "orchestrator",

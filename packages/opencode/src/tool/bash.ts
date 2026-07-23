@@ -9,7 +9,7 @@ import { Instance } from "../project/instance"
 import { lazy } from "@/util/lazy"
 import { Language, type Node } from "web-tree-sitter"
 
-import { AppFileSystem } from "@mimo-ai/shared/filesystem"
+import { AppFileSystem } from "@adp-ai/shared/filesystem"
 import { fileURLToPath } from "url"
 import { Flag } from "@/flag/flag"
 import { Shell } from "@/shell/shell"
@@ -29,7 +29,7 @@ import { powerShellCommandArgs } from "@/shell/powershell"
 export { powerShellCommandArgs } from "@/shell/powershell"
 
 const MAX_METADATA_LENGTH = 30_000
-const DEFAULT_TIMEOUT = Flag.MIMOCODE_EXPERIMENTAL_BASH_DEFAULT_TIMEOUT_MS || 2 * 60 * 1000
+const DEFAULT_TIMEOUT = Flag.ADPCLI_EXPERIMENTAL_BASH_DEFAULT_TIMEOUT_MS || 2 * 60 * 1000
 const PS = new Set(["powershell", "pwsh"])
 const CWD = new Set(["cd", "push-location", "set-location"])
 const FILES = new Set([
@@ -648,7 +648,7 @@ export const BashTool = Tool.define(
       // archive stays raw and cleaning is skipped to keep the inline preview
       // consistent with the archive.
       const cleaned =
-        !file && Flag.MIMOCODE_EXPERIMENTAL_TOKEN_EFFICIENCY
+        !file && Flag.ADPCLI_EXPERIMENTAL_TOKEN_EFFICIENCY
           ? BashTokenEfficient.clean(end.text, { command: input.command })
           : null
       if (cleaned && cleaned.bytesOut < cleaned.bytesIn) {
@@ -664,8 +664,8 @@ export const BashTool = Tool.define(
       // doesn't shrink the bytes is discarded.
       const heuristic =
         !file &&
-        Flag.MIMOCODE_EXPERIMENTAL_TOKEN_EFFICIENCY &&
-        Flag.MIMOCODE_EXPERIMENTAL_TOKEN_EFFICIENCY_HEURISTIC
+        Flag.ADPCLI_EXPERIMENTAL_TOKEN_EFFICIENCY &&
+        Flag.ADPCLI_EXPERIMENTAL_TOKEN_EFFICIENCY_HEURISTIC
           ? BashTokenEfficientHeuristic.cleanHeuristic(cleaned?.text ?? end.text, { command: input.command })
           : null
       if (heuristic && heuristic.bytesOut < heuristic.bytesIn) {
@@ -777,9 +777,9 @@ export const BashTool = Tool.define(
               // the delete UI shows the full command (including any external
               // paths it touches), so a separate bash/external_directory
               // prompt would just be a second confirmation of the same thing.
-              // MIMOCODE_AUTO_APPROVE_DELETE trusts deletes and falls back to
+              // ADPCLI_AUTO_APPROVE_DELETE trusts deletes and falls back to
               // the regular ask (where a `bash: deny` rule still blocks).
-              if (scan.deletes.size > 0 && !Flag.MIMOCODE_AUTO_APPROVE_DELETE) {
+              if (scan.deletes.size > 0 && !Flag.ADPCLI_AUTO_APPROVE_DELETE) {
                 yield* askDelete(ctx, scan, params.command)
               } else {
                 yield* ask(ctx, scan)

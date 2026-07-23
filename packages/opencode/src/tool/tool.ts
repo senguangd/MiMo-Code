@@ -6,7 +6,7 @@ import type { SessionID, MessageID } from "../session/schema"
 import * as Truncate from "./truncate"
 import { RecoverableError } from "./recoverable"
 import { Agent } from "@/agent/agent"
-import type { ToolCapability } from "@mimo-ai/plugin/tool"
+import type { ToolCapability } from "@adp-ai/plugin/tool"
 import { RuntimeLease } from "@/runtime/lease"
 
 export interface Metadata {

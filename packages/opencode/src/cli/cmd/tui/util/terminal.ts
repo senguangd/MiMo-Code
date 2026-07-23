@@ -19,7 +19,7 @@ export function isWindowsTerminal(input?: { wtSession?: string }) {
 }
 
 export function isPlainTerminal(input?: { platform?: NodeJS.Platform; termProgram?: string; plain?: string }) {
-  const plain = input?.plain ?? process.env.MIMOCODE_TUI_PLAIN
+  const plain = input?.plain ?? process.env.ADPCLI_TUI_PLAIN
   if (plain === "false" || plain === "0") return false
   if (plain === "true" || plain === "1") return true
   return isMacNativeTerminal(input)

@@ -30,7 +30,7 @@ import { spawnRef } from "@/actor/spawn-ref"
 import { errors } from "../../error"
 import { lazy } from "@/util/lazy"
 import { Bus } from "@/bus"
-import { NamedError } from "@mimo-ai/shared/util/error"
+import { NamedError } from "@adp-ai/shared/util/error"
 import { jsonRequest, runRequest } from "./trace"
 import { RateLimitMiddleware } from "../../rate-limit"
 
@@ -41,7 +41,7 @@ const log = Log.create({ service: "server" })
 // event.ts/global.ts. Read per-request (not memoized) so it can be tuned at
 // runtime; smaller values are useful in tests.
 function promptHeartbeatIntervalMs() {
-  return Number(process.env["MIMOCODE_PROMPT_HEARTBEAT_INTERVAL_MS"]) || 10_000
+  return Number(process.env["ADPCLI_PROMPT_HEARTBEAT_INTERVAL_MS"]) || 10_000
 }
 
 function taskToTodo(t: Task) {
@@ -1056,7 +1056,7 @@ export const SessionRoutes = lazy(() =>
         c.header("Content-Type", "application/json")
         return stream(c, async (stream) => {
           const body = c.req.valid("json")
-          // If the HTTP client gives up (TUI exits, driver kills its `mimo run`
+          // If the HTTP client gives up (TUI exits, driver kills its `adp run`
           // client on its own per-turn timeout, network drop), we have to drive
           // the server-side runner to Idle ourselves. Otherwise the prompt
           // fiber keeps running with no consumer, and any next POST attaches
@@ -1082,7 +1082,7 @@ export const SessionRoutes = lazy(() =>
           // silent for a long time — most notably while the `question` tool
           // blocks on an un-timed Deferred waiting for a human reply (the Bun
           // server itself never times out: adapter.bun.ts idleTimeout:0). A
-          // client with its own request timeout (e.g. the external `mimo run`
+          // client with its own request timeout (e.g. the external `adp run`
           // driver's per-turn budget) would otherwise see a dead connection and
           // abort with "error sending request for url". Periodic whitespace
           // resets the client's idle timer; whitespace is JSON-insignificant,

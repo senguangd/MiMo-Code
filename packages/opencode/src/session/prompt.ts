@@ -75,7 +75,7 @@ import { Command } from "../command"
 import { pathToFileURL, fileURLToPath } from "url"
 import { ConfigMarkdown, ConfigCompose } from "../config"
 import { SessionSummary } from "./summary"
-import { NamedError } from "@mimo-ai/shared/util/error"
+import { NamedError } from "@adp-ai/shared/util/error"
 import { SessionProcessor } from "./processor"
 import { buildLLMRequestPrefix } from "./llm-request-prefix"
 import {
@@ -101,7 +101,7 @@ import { LLM } from "./llm"
 import { MaxMode } from "./max-mode"
 import { Shell } from "@/shell/shell"
 import { powerShellCommandArgs } from "@/shell/powershell"
-import { AppFileSystem } from "@mimo-ai/shared/filesystem"
+import { AppFileSystem } from "@adp-ai/shared/filesystem"
 import { Truncate } from "@/tool"
 import { decodeDataUrl } from "@/util/data-url"
 import { Process } from "@/util"
@@ -163,7 +163,7 @@ export function stableRootTitle(input: { agent: string | undefined; parentID: st
  * Cap on goal-driven main-loop re-entries per turn — the safety valve against
  * a never-satisfiable condition burning tokens forever. Higher than spawned
  * actors' MAX_PRE_REACT (=3) because main-session goals are usually larger.
- * TODO: lift to mimocode.json config (e.g. session.maxGoalReact).
+ * TODO: lift to adpcli.json config (e.g. session.maxGoalReact).
  */
 const MAX_GOAL_REACT = 12
 
@@ -227,9 +227,9 @@ const PREDICT_SYSTEM = `You predict the single most likely next message a user w
 
 const PREDICT_NUDGE = `Based on the conversation above, write the user's most likely next message:`
 
-const OUTPUT_LENGTH_CONTINUATION_LIMIT = Flag.MIMOCODE_OUTPUT_LENGTH_CONTINUATION_LIMIT
-const INVALID_OUTPUT_CONTINUATION_LIMIT = Flag.MIMOCODE_INVALID_OUTPUT_CONTINUATION_LIMIT
-const TEXT_TOOL_CALL_RETRY_LIMIT = Flag.MIMOCODE_TEXT_TOOL_CALL_RETRY_LIMIT
+const OUTPUT_LENGTH_CONTINUATION_LIMIT = Flag.ADPCLI_OUTPUT_LENGTH_CONTINUATION_LIMIT
+const INVALID_OUTPUT_CONTINUATION_LIMIT = Flag.ADPCLI_INVALID_OUTPUT_CONTINUATION_LIMIT
+const TEXT_TOOL_CALL_RETRY_LIMIT = Flag.ADPCLI_TEXT_TOOL_CALL_RETRY_LIMIT
 
 const log = Log.create({ service: "session.prompt" })
 
@@ -237,7 +237,7 @@ const log = Log.create({ service: "session.prompt" })
 // itself via mtime staleness checks (covers external editors too), so only
 // tools and skills need the write/edit-triggered registry reload.
 function isExtensionPath(filePath: string): boolean {
-  return /\/\.mimocode\/(tools?|skills?)\//.test(filePath)
+  return /\/\.adpcli\/(tools?|skills?)\//.test(filePath)
 }
 const elog = EffectLogger.create({ service: "session.prompt" })
 
@@ -859,7 +859,7 @@ export const layer = Layer.effect(
           providerOptions: ProviderTransform.providerOptions(mdl, ProviderTransform.smallOptions(mdl)),
           headers: {
             ...mdl.headers,
-            "User-Agent": `mimocode/${InstallationVersion}`,
+            "User-Agent": `adpcli/${InstallationVersion}`,
           },
           maxRetries: 1,
         }),
@@ -922,7 +922,7 @@ export const layer = Layer.effect(
       }
 
       const assistantMessage = input.messages.findLast((msg) => msg.info.role === "assistant")
-      if (!Flag.MIMOCODE_DISABLE_BUILTIN_SKILLS && !Flag.MIMOCODE_DISABLE_OFFICIAL_SKILLS) {
+      if (!Flag.ADPCLI_DISABLE_BUILTIN_SKILLS && !Flag.ADPCLI_DISABLE_OFFICIAL_SKILLS) {
         const fileCandidates = userMessage.parts.flatMap((p) => {
           if (p.type !== "file") return []
           const filenameFromSource =
@@ -1195,7 +1195,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
           : undefined,
         sessionParentID: input.session.parentID,
         agentName: input.agent.name,
-        orchestratorEnabled: Flag.MIMOCODE_EXPERIMENTAL_ORCHESTRATOR,
+        orchestratorEnabled: Flag.ADPCLI_EXPERIMENTAL_ORCHESTRATOR,
       })
       const askInteractive = askRouting.interactive
       const askForward = askRouting.forward
@@ -2594,7 +2594,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
               sessionID,
               phase,
               task_type: taskType,
-              surface: Flag.MIMOCODE_CLIENT,
+              surface: Flag.ADPCLI_CLIENT,
               total_tokens_in: agentMetrics.tokens_in,
               total_tokens_out: agentMetrics.tokens_out,
               files_changed: agentMetrics.files_changed,
@@ -3135,7 +3135,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
 
           // F37: filter by agentID so subagent slices stay isolated from the
           // main agent's slice within the same session. Without this, an actor
-          // (explore/general/etc) spawned via mimocode's shared-sessionID
+          // (explore/general/etc) spawned via adpcli's shared-sessionID
           // design would see the parent's full conversation here and drift
           // off-task. agentID === "main" => main agent slice (agent_id = 'main'
           // in DB), agentID === "explore-1" => only explore-1's slice.
@@ -3262,7 +3262,7 @@ NOTE: At any point in time through this workflow you should feel free to ask the
             // the session layer out of the app-runtime module-init cycle
             // (prompt → app-runtime → AppLayer → SessionPrompt). Only loaded when a
             // trigger actually fires. Detached fire-and-forget on the full runtime.
-            const needAppRuntime = dreamTrigger || distillTrigger || Flag.MIMOCODE_EXPERIMENTAL_CRON
+            const needAppRuntime = dreamTrigger || distillTrigger || Flag.ADPCLI_EXPERIMENTAL_CRON
             if (needAppRuntime) {
               const { AppRuntime } = yield* Effect.promise(() => import("@/effect/app-runtime"))
               if (dreamTrigger) {
@@ -3289,12 +3289,12 @@ NOTE: At any point in time through this workflow you should feel free to ask the
               }
               // T18-bridge mount: fire CronBridge.start(sessionID, workspaceRoot)
               // once per new top-level session boot. The bridge itself no-ops when
-              // MIMOCODE_EXPERIMENTAL_CRON is unset; the outer gate just skips the
+              // ADPCLI_EXPERIMENTAL_CRON is unset; the outer gate just skips the
               // resolve cost in the common case. Mirrors auto-dream's detached
               // dynamic-import pattern so prompt.ts stays out of the app-runtime
               // module-init cycle. Bridge.start is idempotent via its `started`
               // guard, and its Layer finalizer handles teardown on scope close.
-              if (Flag.MIMOCODE_EXPERIMENTAL_CRON) {
+              if (Flag.ADPCLI_EXPERIMENTAL_CRON) {
                 const workspaceRoot = (yield* InstanceState.context).worktree
                 const { CronBridge } = yield* Effect.promise(() => import("@/session/cron-bridge"))
                 AppRuntime.runPromise(
@@ -4761,7 +4761,7 @@ const quoteTrimRegex = /^["']|["']$/g
  *
  * Funnels a cron/loop fire through the SAME entry point typed user prompts use:
  * `SessionPrompt.Service.prompt`. The synthetic part carries `synthetic: true`
- * (mimocode convention for `isMeta`) so transcript-preview surfaces can hide it,
+ * (adpcli convention for `isMeta`) so transcript-preview surfaces can hide it,
  * and `metadata.origin = { kind: "cron", taskId, kindOfTask }` so the TUI can
  * render a clock icon. Sentinel expansion is intentionally NOT done here — T19
  * will wrap `value` before this call.

@@ -1,7 +1,7 @@
 import { describe, test, expect } from "bun:test"
 import { Effect, Layer, FileSystem } from "effect"
 import { NodeFileSystem } from "@effect/platform-node"
-import { AppFileSystem } from "@mimo-ai/shared/filesystem"
+import { AppFileSystem } from "@adp-ai/shared/filesystem"
 import { testEffect } from "../lib/effect"
 import path from "path"
 
@@ -337,7 +337,7 @@ describe("AppFileSystem", () => {
     })
 
     test("resolves non-existent paths through their nearest existing ancestor", () => {
-      const suffix = path.join(".mimocode-missing", "nested", "file.txt")
+      const suffix = path.join(".adpcli-missing", "nested", "file.txt")
       expect(AppFileSystem.resolveFromExistingAncestor(path.join(process.cwd(), suffix))).toBe(
         path.join(AppFileSystem.resolve(process.cwd()), suffix),
       )

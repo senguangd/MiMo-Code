@@ -1,7 +1,7 @@
 import path from "path"
 import { lstat, open, realpath } from "fs/promises"
 import { Filesystem } from "@/util"
-import { Glob } from "@mimo-ai/shared/util/glob"
+import { Glob } from "@adp-ai/shared/util/glob"
 
 export const WorkspaceLimits = {
   pathBytes: 4 * 1024,

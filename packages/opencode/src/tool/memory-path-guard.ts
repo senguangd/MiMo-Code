@@ -1,7 +1,7 @@
 import * as path from "path"
 import type { ProjectID } from "../project/schema"
 import type { SessionID } from "../session/schema"
-import { AppFileSystem } from "@mimo-ai/shared/filesystem"
+import { AppFileSystem } from "@adp-ai/shared/filesystem"
 
 const VALID_SCOPES = ["global", "projects", "sessions"] as const
 

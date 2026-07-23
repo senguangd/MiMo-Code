@@ -1,6 +1,6 @@
 const [db, directory, sessionID, hold] = process.argv.slice(2)
 if (!db || !directory || !sessionID || !hold) throw new Error("missing args")
-process.env.MIMOCODE_DB = db
+process.env.ADPCLI_DB = db
 
 const [{ Effect, ManagedRuntime }, { Instance }, { SessionRunState }] = await Promise.all([
   import("effect"),

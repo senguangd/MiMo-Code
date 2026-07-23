@@ -49,8 +49,8 @@ function detectPlatformAndArch() {
 
 function findBinary() {
   const { platform, arch } = detectPlatformAndArch()
-  const packageName = `@mimo-ai/mimocode-${platform}-${arch}`
-  const binaryName = platform === "windows" ? "mimo.exe" : "mimo"
+  const packageName = `@adp-ai/adpcli-${platform}-${arch}`
+  const binaryName = platform === "windows" ? "adp.exe" : "adp"
 
   try {
     // Use require.resolve to find the package
@@ -73,7 +73,7 @@ function printMigrationNotice() {
     ? "irm https://cli.adp.grcbtest/install.ps1 | iex"
     : "curl -fsSL https://cli.adp.grcbtest/install | bash"
   console.log()
-  console.log("  Recommended: install MiMoCode natively for a better install and upgrade experience:")
+  console.log("  Recommended: install AdpCli natively for a better install and upgrade experience:")
   console.log(`    ${install}`)
   console.log()
 }
@@ -82,15 +82,15 @@ async function main() {
   printMigrationNotice()
 
   if (os.platform() === "win32") {
-    // On Windows the bin/mimo wrapper finds the binary via node_modules traversal.
-    // Skipping the .mimocode cache avoids creating an extensionless PE file that
+    // On Windows the bin/adp wrapper finds the binary via node_modules traversal.
+    // Skipping the .adpcli cache avoids creating an extensionless PE file that
     // may trigger antivirus false-positives.
     return
   }
 
   try {
     const { binaryPath } = findBinary()
-    const target = path.join(__dirname, "bin", ".mimocode")
+    const target = path.join(__dirname, "bin", ".adpcli")
     if (fs.existsSync(target)) fs.unlinkSync(target)
     try {
       fs.linkSync(binaryPath, target)
@@ -99,7 +99,7 @@ async function main() {
     }
     fs.chmodSync(target, 0o755)
   } catch (error) {
-    console.error("Failed to setup mimocode binary:", error.message)
+    console.error("Failed to setup adpcli binary:", error.message)
     process.exit(1)
   }
 }

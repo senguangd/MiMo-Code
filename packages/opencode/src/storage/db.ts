@@ -6,7 +6,7 @@ import { LocalContext } from "../util"
 import { lazy } from "../util/lazy"
 import { Global } from "../global"
 import { Log } from "../util"
-import { NamedError } from "@mimo-ai/shared/util/error"
+import { NamedError } from "@adp-ai/shared/util/error"
 import z from "zod"
 import path from "path"
 import {
@@ -39,16 +39,16 @@ export const NotFoundError = NamedError.create(
 const log = Log.create({ service: "db" })
 
 export function getChannelPath() {
-  if (["latest", "beta", "prod"].includes(InstallationChannel) || Flag.MIMOCODE_DISABLE_CHANNEL_DB)
-    return path.join(Global.Path.data, "mimocode.db")
+  if (["latest", "beta", "prod"].includes(InstallationChannel) || Flag.ADPCLI_DISABLE_CHANNEL_DB)
+    return path.join(Global.Path.data, "adpcli.db")
   const safe = InstallationChannel.replace(/[^a-zA-Z0-9._-]/g, "-")
-  return path.join(Global.Path.data, `mimocode-${safe}.db`)
+  return path.join(Global.Path.data, `adpcli-${safe}.db`)
 }
 
 export const Path = iife(() => {
-  if (Flag.MIMOCODE_DB) {
-    if (Flag.MIMOCODE_DB === ":memory:" || path.isAbsolute(Flag.MIMOCODE_DB)) return Flag.MIMOCODE_DB
-    return path.join(Global.Path.data, Flag.MIMOCODE_DB)
+  if (Flag.ADPCLI_DB) {
+    if (Flag.ADPCLI_DB === ":memory:" || path.isAbsolute(Flag.ADPCLI_DB)) return Flag.ADPCLI_DB
+    return path.join(Global.Path.data, Flag.ADPCLI_DB)
   }
   return getChannelPath()
 })
@@ -251,7 +251,7 @@ export const Client = lazy(() => {
     typeof OPENCODE_MIGRATIONS !== "undefined"
       ? OPENCODE_MIGRATIONS
       : migrations(path.join(import.meta.dirname, "../../migration"))
-  if (entries.length > 0 && Flag.MIMOCODE_SKIP_MIGRATIONS) {
+  if (entries.length > 0 && Flag.ADPCLI_SKIP_MIGRATIONS) {
     for (const item of entries) {
       item.sql = "select 1;"
     }

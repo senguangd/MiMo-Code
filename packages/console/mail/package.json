@@ -1,5 +1,5 @@
 {
-  "name": "@mimo-ai/console-mail",
+  "name": "@adp-ai/console-mail",
   "version": "0.1.6",
   "dependencies": {
     "@jsx-email/all": "2.2.3",

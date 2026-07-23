@@ -1,4 +1,4 @@
-import type { ProviderDefaultModelStatus } from "@mimo-ai/sdk/v2"
+import type { ProviderDefaultModelStatus } from "@adp-ai/sdk/v2"
 import { createMemo, createSignal, type JSX } from "solid-js"
 import { useSDK } from "@tui/context/sdk"
 import { useSync } from "@tui/context/sync"
@@ -179,7 +179,7 @@ export function DialogDefaultModelRecovery() {
       },
     },
     {
-      title: "Exit MiMoCode",
+      title: "Exit AdpCli",
       value: "exit" as const,
       description: "Leave without changing the configuration",
       disabled: busy(),

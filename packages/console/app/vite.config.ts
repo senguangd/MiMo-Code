@@ -13,7 +13,7 @@ export default defineConfig({
       cloudflare: {
         nodeCompat: true,
         wrangler: {
-          name: "mimo-ai-console-app",
+          name: "adp-ai-console-app",
         },
       },
     }),

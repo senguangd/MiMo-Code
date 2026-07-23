@@ -2,13 +2,13 @@ import { describe, expect, test } from "bun:test"
 
 function read(value?: string) {
   const env = { ...process.env }
-  if (value === undefined) delete env.MIMOCODE_ENABLE_TRY_BEST_HANDOFF
-  else env.MIMOCODE_ENABLE_TRY_BEST_HANDOFF = value
+  if (value === undefined) delete env.ADPCLI_ENABLE_TRY_BEST_HANDOFF
+  else env.ADPCLI_ENABLE_TRY_BEST_HANDOFF = value
   const result = Bun.spawnSync({
     cmd: [
       process.execPath,
       "-e",
-      'import { Flag } from "./src/flag/flag.ts"; process.stdout.write(String(Flag.MIMOCODE_ENABLE_TRY_BEST_HANDOFF))',
+      'import { Flag } from "./src/flag/flag.ts"; process.stdout.write(String(Flag.ADPCLI_ENABLE_TRY_BEST_HANDOFF))',
     ],
     cwd: process.cwd(),
     env,
@@ -17,7 +17,7 @@ function read(value?: string) {
   return result.stdout.toString()
 }
 
-describe("MIMOCODE_ENABLE_TRY_BEST_HANDOFF", () => {
+describe("ADPCLI_ENABLE_TRY_BEST_HANDOFF", () => {
   test("is disabled by default and accepts explicit truthy values", () => {
     expect(read()).toBe("false")
     expect(read("true")).toBe("true")

@@ -17,7 +17,7 @@ export function InstanceMiddleware(
 ): MiddlewareHandler {
   return async (c, next) => {
     const directory = resolveDirectory(
-      c.req.query("directory") || c.req.header("x-mimocode-directory") || process.cwd(),
+      c.req.query("directory") || c.req.header("x-adpcli-directory") || process.cwd(),
     )
 
     if (!isDirectoryAllowed(directory, directoryAccess)) {

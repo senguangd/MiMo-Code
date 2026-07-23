@@ -8,8 +8,8 @@ import {
   type DragEvent,
 } from "@thisbeyond/solid-dnd"
 import { ConstrainDragXAxis } from "@/utils/solid-dnd"
-import { IconButton } from "@mimo-ai/ui/icon-button"
-import { Tooltip, TooltipKeybind } from "@mimo-ai/ui/tooltip"
+import { IconButton } from "@adp-ai/ui/icon-button"
+import { Tooltip, TooltipKeybind } from "@adp-ai/ui/tooltip"
 import { type LocalProject } from "@/context/layout"
 
 export const SidebarContent = (props: {

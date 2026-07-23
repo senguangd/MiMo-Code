@@ -20,18 +20,18 @@
 // This is the extension point used by the heuristic shape plugins (gitdiff /
 // pytest / npm / make / tsc / stacktrace / kubectl / json / md / gostest).
 //
-// Opt-out: `# nofilter` / `# raw` in the command, or env MIMOCODE_BASH_RAW=1.
+// Opt-out: `# nofilter` / `# raw` in the command, or env ADPCLI_BASH_RAW=1.
 //
 // Tunables (positive ints via env; defaults shown):
-//   MIMOCODE_EXPERIMENTAL_TOKEN_EFFICIENCY_MAX_LINE_CHARS=500
-//   MIMOCODE_EXPERIMENTAL_TOKEN_EFFICIENCY_LINE_HEAD_KEEP=160
-//   MIMOCODE_EXPERIMENTAL_TOKEN_EFFICIENCY_NEVER_WORSE_MARGIN=0
+//   ADPCLI_EXPERIMENTAL_TOKEN_EFFICIENCY_MAX_LINE_CHARS=500
+//   ADPCLI_EXPERIMENTAL_TOKEN_EFFICIENCY_LINE_HEAD_KEEP=160
+//   ADPCLI_EXPERIMENTAL_TOKEN_EFFICIENCY_NEVER_WORSE_MARGIN=0
 
 import { Flag } from "@/flag/flag"
 
-const MAX_LINE_CHARS = Flag.MIMOCODE_EXPERIMENTAL_TOKEN_EFFICIENCY_MAX_LINE_CHARS
-const LINE_HEAD_KEEP = Flag.MIMOCODE_EXPERIMENTAL_TOKEN_EFFICIENCY_LINE_HEAD_KEEP
-const NEVER_WORSE_MARGIN = Flag.MIMOCODE_EXPERIMENTAL_TOKEN_EFFICIENCY_NEVER_WORSE_MARGIN
+const MAX_LINE_CHARS = Flag.ADPCLI_EXPERIMENTAL_TOKEN_EFFICIENCY_MAX_LINE_CHARS
+const LINE_HEAD_KEEP = Flag.ADPCLI_EXPERIMENTAL_TOKEN_EFFICIENCY_LINE_HEAD_KEEP
+const NEVER_WORSE_MARGIN = Flag.ADPCLI_EXPERIMENTAL_TOKEN_EFFICIENCY_NEVER_WORSE_MARGIN
 
 const ANSI_CSI = /\x1b\[[0-?]*[ -/]*[@-~]/g
 const ANSI_OSC = /\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)/g
@@ -88,7 +88,7 @@ export type CleanPipeline = {
 }
 
 function shouldSkip(command: string | undefined): boolean {
-  if (process.env["MIMOCODE_BASH_RAW"] === "1") return true
+  if (process.env["ADPCLI_BASH_RAW"] === "1") return true
   if (!command) return false
   return SKIP_MARKERS.some((mark) => command.includes(mark))
 }

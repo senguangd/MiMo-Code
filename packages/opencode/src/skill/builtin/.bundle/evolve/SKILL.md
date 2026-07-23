@@ -1,11 +1,11 @@
 ---
 name: evolve
-description: Use when you want to modify ANY aspect of yourself — your capabilities (new/overridden tools), your behavior (hooks that intercept every tool call, LLM request, session and subagent lifecycle), your knowledge (skills that persist across sessions), your orchestration (workflow scripts), or even your UI (TUI panels, commands, dialogs). Nothing about you is fixed: every layer from what tools you expose, to how you react to events, to what the user sees on screen is rewritable through files in .mimocode/. Use proactively — repeated manual sequence 3+ times, repeated user correction, durable project knowledge, or any "I wish I could..." moment is a trigger to evolve.
+description: Use when you want to modify ANY aspect of yourself — your capabilities (new/overridden tools), your behavior (hooks that intercept every tool call, LLM request, session and subagent lifecycle), your knowledge (skills that persist across sessions), your orchestration (workflow scripts), or even your UI (TUI panels, commands, dialogs). Nothing about you is fixed: every layer from what tools you expose, to how you react to events, to what the user sees on screen is rewritable through files in .adpcli/. Use proactively — repeated manual sequence 3+ times, repeated user correction, durable project knowledge, or any "I wish I could..." moment is a trigger to evolve.
 ---
 
 # Evolve — Total Self-Modification
 
-Every layer of you is rewritable by writing files to `.mimocode/` (reload semantics differ per layer — see File Locations):
+Every layer of you is rewritable by writing files to `.adpcli/` (reload semantics differ per layer — see File Locations):
 
 - **What you can do** — create tools, or override any built-in (bash, read, edit, ...) with your own implementation
 - **How you behave** — hooks intercept everything: every tool call (block/rewrite args/rewrite output), every LLM request (system prompt, message list, temperature, headers), every session and subagent lifecycle event (cancel a run before it starts, gate a subagent's delivery and force it to redo work, inspect full trajectories after each step)
@@ -27,7 +27,7 @@ Act on these signals — don't wait for the user to ask:
 | A built-in tool's behavior conflicts with project needs | **Override** it (same-name tool) |
 | A workflow you hand-orchestrated worked well and may repeat | Save it as a **workflow** script |
 
-Before creating: check whether the extension already exists (`ls .mimocode/tools .mimocode/hooks .mimocode/skills`). Prefer improving an existing one over adding a near-duplicate.
+Before creating: check whether the extension already exists (`ls .adpcli/tools .adpcli/hooks .adpcli/skills`). Prefer improving an existing one over adding a near-duplicate.
 
 ## Decision flow
 
@@ -35,18 +35,18 @@ Before creating: check whether the extension already exists (`ls .mimocode/tools
 Need to change WHAT you can do  → tool   (new capability, wraps commands/APIs)
 Need to change HOW you behave   → hook   (intercept/modify/block existing behavior)
 Need to remember HOW to do X    → skill  (knowledge, loaded on demand)
-Need to redo a multi-agent run  → workflow (.mimocode/workflows/*.js)
-Need to change the UI           → TUI plugin (.mimocode/tui/*.tsx)
+Need to redo a multi-agent run  → workflow (.adpcli/workflows/*.js)
+Need to change the UI           → TUI plugin (.adpcli/tui/*.tsx)
 ```
 
 Rule of thumb: tools add verbs, hooks add reflexes, skills add memories.
 
 ## Creating Tools
 
-Write to `.mimocode/tools/<name>.ts`:
+Write to `.adpcli/tools/<name>.ts`:
 
 ```ts
-import { tool } from "@mimo-ai/plugin"
+import { tool } from "@adp-ai/plugin"
 
 export default tool({
   description: "What this tool does",
@@ -67,7 +67,7 @@ A tool with the same id as a built-in (bash, read, edit, ...) **replaces** it.
 
 ## Creating Hooks
 
-Write to `.mimocode/hooks/<name>.ts` — export a Hooks object:
+Write to `.adpcli/hooks/<name>.ts` — export a Hooks object:
 
 ```ts
 export default {
@@ -105,7 +105,7 @@ before writing a hook.
 
 ## Creating Skills
 
-Write to `.mimocode/skills/<name>/SKILL.md`:
+Write to `.adpcli/skills/<name>/SKILL.md`:
 
 ```markdown
 ---
@@ -119,11 +119,11 @@ Instructions here...
 
 | Type | Path | Hot-reload |
 |------|------|-----------|
-| Tools | `.mimocode/tools/*.ts` | next turn |
-| Hooks | `.mimocode/hooks/*.ts` | next turn |
-| Skills | `.mimocode/skills/*/SKILL.md` | next turn |
-| Workflows | `.mimocode/workflows/*.js` | on invoke |
-| TUI | `.mimocode/tui/*.tsx` | restart |
+| Tools | `.adpcli/tools/*.ts` | next turn |
+| Hooks | `.adpcli/hooks/*.ts` | next turn |
+| Skills | `.adpcli/skills/*/SKILL.md` | next turn |
+| Workflows | `.adpcli/workflows/*.js` | on invoke |
+| TUI | `.adpcli/tui/*.tsx` | restart |
 
 ## Evolution loop (do this every time)
 

@@ -43,7 +43,7 @@ test("loads npm tui plugin from package ./tui export", async () => {
     },
   })
 
-  process.env.MIMOCODE_PLUGIN_META_FILE = path.join(tmp.path, "plugin-meta.json")
+  process.env.ADPCLI_PLUGIN_META_FILE = path.join(tmp.path, "plugin-meta.json")
   const config: TuiConfig.Info = {
     plugin: [[tmp.extra.spec, { marker: tmp.extra.marker }]],
     plugin_origins: [
@@ -68,7 +68,7 @@ test("loads npm tui plugin from package ./tui export", async () => {
     await TuiPluginRuntime.dispose()
     install.mockRestore()
     wait.mockRestore()
-    delete process.env.MIMOCODE_PLUGIN_META_FILE
+    delete process.env.ADPCLI_PLUGIN_META_FILE
   }
 })
 
@@ -102,7 +102,7 @@ test("does not use npm package exports dot for tui entry", async () => {
     },
   })
 
-  process.env.MIMOCODE_PLUGIN_META_FILE = path.join(tmp.path, "plugin-meta.json")
+  process.env.ADPCLI_PLUGIN_META_FILE = path.join(tmp.path, "plugin-meta.json")
   const config: TuiConfig.Info = {
     plugin: [tmp.extra.spec],
     plugin_origins: [
@@ -124,7 +124,7 @@ test("does not use npm package exports dot for tui entry", async () => {
     await TuiPluginRuntime.dispose()
     install.mockRestore()
     wait.mockRestore()
-    delete process.env.MIMOCODE_PLUGIN_META_FILE
+    delete process.env.ADPCLI_PLUGIN_META_FILE
   }
 })
 
@@ -162,7 +162,7 @@ test("rejects npm tui export that resolves outside plugin directory", async () =
     },
   })
 
-  process.env.MIMOCODE_PLUGIN_META_FILE = path.join(tmp.path, "plugin-meta.json")
+  process.env.ADPCLI_PLUGIN_META_FILE = path.join(tmp.path, "plugin-meta.json")
   const config: TuiConfig.Info = {
     plugin: [tmp.extra.spec],
     plugin_origins: [
@@ -186,7 +186,7 @@ test("rejects npm tui export that resolves outside plugin directory", async () =
     await TuiPluginRuntime.dispose()
     install.mockRestore()
     wait.mockRestore()
-    delete process.env.MIMOCODE_PLUGIN_META_FILE
+    delete process.env.ADPCLI_PLUGIN_META_FILE
   }
 })
 
@@ -222,7 +222,7 @@ test("rejects npm tui plugin that exports server and tui together", async () => 
     },
   })
 
-  process.env.MIMOCODE_PLUGIN_META_FILE = path.join(tmp.path, "plugin-meta.json")
+  process.env.ADPCLI_PLUGIN_META_FILE = path.join(tmp.path, "plugin-meta.json")
   const config: TuiConfig.Info = {
     plugin: [tmp.extra.spec],
     plugin_origins: [
@@ -244,7 +244,7 @@ test("rejects npm tui plugin that exports server and tui together", async () => 
     await TuiPluginRuntime.dispose()
     install.mockRestore()
     wait.mockRestore()
-    delete process.env.MIMOCODE_PLUGIN_META_FILE
+    delete process.env.ADPCLI_PLUGIN_META_FILE
   }
 })
 
@@ -278,7 +278,7 @@ test("does not use npm package main for tui entry", async () => {
     },
   })
 
-  process.env.MIMOCODE_PLUGIN_META_FILE = path.join(tmp.path, "plugin-meta.json")
+  process.env.ADPCLI_PLUGIN_META_FILE = path.join(tmp.path, "plugin-meta.json")
   const config: TuiConfig.Info = {
     plugin: [tmp.extra.spec],
     plugin_origins: [
@@ -306,7 +306,7 @@ test("does not use npm package main for tui entry", async () => {
     wait.mockRestore()
     warn.mockRestore()
     error.mockRestore()
-    delete process.env.MIMOCODE_PLUGIN_META_FILE
+    delete process.env.ADPCLI_PLUGIN_META_FILE
   }
 })
 
@@ -341,7 +341,7 @@ test("does not use directory package main for tui entry", async () => {
     },
   })
 
-  process.env.MIMOCODE_PLUGIN_META_FILE = path.join(tmp.path, "plugin-meta.json")
+  process.env.ADPCLI_PLUGIN_META_FILE = path.join(tmp.path, "plugin-meta.json")
   const config: TuiConfig.Info = {
     plugin: [tmp.extra.spec],
     plugin_origins: [
@@ -361,7 +361,7 @@ test("does not use directory package main for tui entry", async () => {
   } finally {
     await TuiPluginRuntime.dispose()
     wait.mockRestore()
-    delete process.env.MIMOCODE_PLUGIN_META_FILE
+    delete process.env.ADPCLI_PLUGIN_META_FILE
   }
 })
 
@@ -386,7 +386,7 @@ test("uses directory index fallback for tui when package.json is missing", async
     },
   })
 
-  process.env.MIMOCODE_PLUGIN_META_FILE = path.join(tmp.path, "plugin-meta.json")
+  process.env.ADPCLI_PLUGIN_META_FILE = path.join(tmp.path, "plugin-meta.json")
   const config: TuiConfig.Info = {
     plugin: [tmp.extra.spec],
     plugin_origins: [
@@ -406,7 +406,7 @@ test("uses directory index fallback for tui when package.json is missing", async
   } finally {
     await TuiPluginRuntime.dispose()
     wait.mockRestore()
-    delete process.env.MIMOCODE_PLUGIN_META_FILE
+    delete process.env.ADPCLI_PLUGIN_META_FILE
   }
 })
 
@@ -441,7 +441,7 @@ test("uses npm package name when tui plugin id is omitted", async () => {
     },
   })
 
-  process.env.MIMOCODE_PLUGIN_META_FILE = path.join(tmp.path, "plugin-meta.json")
+  process.env.ADPCLI_PLUGIN_META_FILE = path.join(tmp.path, "plugin-meta.json")
   const config: TuiConfig.Info = {
     plugin: [[tmp.extra.spec, { marker: tmp.extra.marker }]],
     plugin_origins: [
@@ -463,6 +463,6 @@ test("uses npm package name when tui plugin id is omitted", async () => {
     await TuiPluginRuntime.dispose()
     install.mockRestore()
     wait.mockRestore()
-    delete process.env.MIMOCODE_PLUGIN_META_FILE
+    delete process.env.ADPCLI_PLUGIN_META_FILE
   }
 })

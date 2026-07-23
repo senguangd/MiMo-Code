@@ -7,7 +7,7 @@ import crypto from "node:crypto"
 const TARGET = "http://10.176.3.4:30031"
 const HOST = "127.0.0.1"
 const PORT = 30032
-const LOG_DIR = "./mimocode-trace-logs"
+const LOG_DIR = "./adpcli-trace-logs"
 
 const MAX_PRINT = 1200
 const MAX_LOG_TEXT = 200_000

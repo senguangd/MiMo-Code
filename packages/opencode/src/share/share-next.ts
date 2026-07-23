@@ -1,4 +1,4 @@
-import type * as SDK from "@mimo-ai/sdk/v2"
+import type * as SDK from "@adp-ai/sdk/v2"
 import { Effect, Exit, Layer, Option, Schema, Scope, Context, Stream } from "effect"
 import { FetchHttpClient, HttpClient, HttpClientRequest, HttpClientResponse } from "effect/unstable/http"
 import { Account } from "@/account/account"
@@ -16,7 +16,7 @@ import { isRecord } from "@/util/record"
 import { SessionShareTable } from "./share.sql"
 
 const log = Log.create({ service: "share-next" })
-const disabled = process.env["MIMOCODE_DISABLE_SHARE"] === "true" || process.env["MIMOCODE_DISABLE_SHARE"] === "1"
+const disabled = process.env["ADPCLI_DISABLE_SHARE"] === "true" || process.env["ADPCLI_DISABLE_SHARE"] === "1"
 
 export type Api = {
   create: string

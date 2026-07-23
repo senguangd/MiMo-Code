@@ -30,7 +30,7 @@ test("adds tui plugin at runtime from spec", async () => {
     },
   })
 
-  process.env.MIMOCODE_PLUGIN_META_FILE = path.join(tmp.path, "plugin-meta.json")
+  process.env.ADPCLI_PLUGIN_META_FILE = path.join(tmp.path, "plugin-meta.json")
   const config: TuiConfig.Info = {
     plugin: [],
     plugin_origins: undefined,
@@ -56,7 +56,7 @@ test("adds tui plugin at runtime from spec", async () => {
   } finally {
     await TuiPluginRuntime.dispose()
     wait.mockRestore()
-    delete process.env.MIMOCODE_PLUGIN_META_FILE
+    delete process.env.ADPCLI_PLUGIN_META_FILE
   }
 })
 
@@ -71,7 +71,7 @@ test("retries runtime add for file plugins after dependency wait", async () => {
     },
   })
 
-  process.env.MIMOCODE_PLUGIN_META_FILE = path.join(tmp.path, "plugin-meta.json")
+  process.env.ADPCLI_PLUGIN_META_FILE = path.join(tmp.path, "plugin-meta.json")
   const config: TuiConfig.Info = {
     plugin: [],
     plugin_origins: undefined,
@@ -102,6 +102,6 @@ test("retries runtime add for file plugins after dependency wait", async () => {
   } finally {
     await TuiPluginRuntime.dispose()
     wait.mockRestore()
-    delete process.env.MIMOCODE_PLUGIN_META_FILE
+    delete process.env.ADPCLI_PLUGIN_META_FILE
   }
 })

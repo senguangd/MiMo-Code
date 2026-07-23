@@ -322,7 +322,7 @@ actor({
   operation: {
     action: "run",
     subagent_type: "general",
-    model: "xiaomi/mimo-v2.5",   // recommended: vision-capable model
+    model: "xiaomi/adp-v2.5",   // recommended: vision-capable model
     description: "Visual QA slides",
     prompt: "Inspect the rendered slide images in qa/ for: text overflow, overlapping shapes, cut-off labels, wrong-scale icons, off-brand colors. Report each issue as 'slide N: <problem>'. Images: qa/slide-1.png through qa/slide-<N>.png."
   }
@@ -333,7 +333,7 @@ actor({
 
 | Your current model | Recommended vision subagent model | Notes |
 |--------------------|-----------------------------------|-------|
-| `xiaomi/mimo-v2.5-pro` | `xiaomi/mimo-v2.5` | mimo-v2.5-pro is text-only; mimo-v2.5 is multimodal |
+| `xiaomi/adp-v2.5-pro` | `xiaomi/adp-v2.5` | adp-v2.5-pro is text-only; adp-v2.5 is multimodal |
 | Any non-vision model | A vision-capable model | Query available vision models to pick one |
 | Already a vision model | Same model or any vision model | No change needed |
 

@@ -30,7 +30,7 @@ export const dict = {
   "tui.home.placeholder.example.todo": "Corriger un TODO dans le code",
   "tui.home.placeholder.example.stack": "Quelle est la stack technique de ce projet ?",
   "tui.home.placeholder.example.tests": "Réparer les tests cassés",
-  "tui.home.agreement.prefix": "En utilisant MiMoCode, vous acceptez nos ",
+  "tui.home.agreement.prefix": "En utilisant AdpCli, vous acceptez nos ",
   "tui.home.agreement.terms": "Conditions d'utilisation",
   "tui.home.agreement.separator": " et notre ",
   "tui.home.agreement.privacy": "Politique de confidentialité",
@@ -113,9 +113,9 @@ export const dict = {
   "tui.tips.cycle_sessions":
     "Appuyez sur {highlight}Ctrl+X Right/Left{/highlight} pour parcourir les sessions parent et enfant",
   "tui.tips.config_files":
-    "Créez {highlight}mimocode.json{/highlight} pour la configuration serveur et {highlight}tui.json{/highlight} pour le TUI",
+    "Créez {highlight}adpcli.json{/highlight} pour la configuration serveur et {highlight}tui.json{/highlight} pour le TUI",
   "tui.tips.global_config":
-    "Placez les paramètres TUI dans {highlight}~/.config/mimocode/tui.json{/highlight} comme configuration globale",
+    "Placez les paramètres TUI dans {highlight}~/.config/adpcli/tui.json{/highlight} comme configuration globale",
   "tui.tips.schema": "Ajoutez {highlight}$schema{/highlight} à votre config pour l'auto-complétion dans l'éditeur",
   "tui.tips.default_model": "Configurez {highlight}model{/highlight} dans la config pour définir le modèle par défaut",
   "tui.tips.keybinds":
@@ -125,15 +125,15 @@ export const dict = {
   "tui.tips.mcp_config":
     "Configurez les serveurs MCP locaux ou distants dans la section {highlight}mcp{/highlight}",
   "tui.tips.mcp_oauth":
-    "MiMoCode gère automatiquement OAuth pour les serveurs MCP distants nécessitant une authentification",
+    "AdpCli gère automatiquement OAuth pour les serveurs MCP distants nécessitant une authentification",
   "tui.tips.custom_command":
-    "Ajoutez des fichiers {highlight}.md{/highlight} dans {highlight}.mimocode/command/{/highlight} pour définir des invites personnalisées réutilisables",
+    "Ajoutez des fichiers {highlight}.md{/highlight} dans {highlight}.adpcli/command/{/highlight} pour définir des invites personnalisées réutilisables",
   "tui.tips.command_args":
     "Utilisez {highlight}$ARGUMENTS{/highlight}, {highlight}$1{/highlight}, {highlight}$2{/highlight} dans les commandes pour des entrées dynamiques",
   "tui.tips.command_backticks":
     "Utilisez des backticks dans les commandes pour injecter la sortie shell (ex. {highlight}`git status`{/highlight})",
   "tui.tips.custom_agent":
-    "Ajoutez des fichiers {highlight}.md{/highlight} dans {highlight}.mimocode/agent/{/highlight} pour des personas IA spécialisés",
+    "Ajoutez des fichiers {highlight}.md{/highlight} dans {highlight}.adpcli/agent/{/highlight} pour des personas IA spécialisés",
   "tui.tips.agent_perms":
     "Configurez par agent les permissions des outils {highlight}edit{/highlight}, {highlight}bash{/highlight} et {highlight}webfetch{/highlight}",
   "tui.tips.bash_allow":
@@ -142,43 +142,43 @@ export const dict = {
     'Définissez {highlight}"rm -rf *": "deny"{/highlight} pour bloquer les commandes destructrices',
   "tui.tips.bash_ask":
     'Configurez {highlight}"git push": "ask"{/highlight} pour exiger une confirmation avant le push',
-  "tui.tips.formatter": "MiMoCode formate automatiquement les fichiers avec prettier, gofmt, ruff, etc.",
+  "tui.tips.formatter": "AdpCli formate automatiquement les fichiers avec prettier, gofmt, ruff, etc.",
   "tui.tips.disable_formatter":
     'Définissez {highlight}"formatter": false{/highlight} dans la config pour désactiver le formatage automatique',
   "tui.tips.custom_formatter":
     "Définissez des commandes de formatage personnalisées par extension de fichier dans la config",
-  "tui.tips.lsp": "MiMoCode utilise des serveurs LSP pour une analyse de code intelligente",
+  "tui.tips.lsp": "AdpCli utilise des serveurs LSP pour une analyse de code intelligente",
   "tui.tips.custom_tool":
-    "Créez des fichiers {highlight}.ts{/highlight} dans {highlight}.mimocode/tools/{/highlight} pour définir de nouveaux outils LLM",
+    "Créez des fichiers {highlight}.ts{/highlight} dans {highlight}.adpcli/tools/{/highlight} pour définir de nouveaux outils LLM",
   "tui.tips.tool_scripts": "Les définitions d'outils peuvent invoquer des scripts en Python, Go, etc.",
   "tui.tips.plugins":
-    "Ajoutez des fichiers {highlight}.ts{/highlight} dans {highlight}.mimocode/plugin/{/highlight} pour des hooks d'événements",
+    "Ajoutez des fichiers {highlight}.ts{/highlight} dans {highlight}.adpcli/plugin/{/highlight} pour des hooks d'événements",
   "tui.tips.plugin_notify":
     "Utilisez des plugins pour envoyer des notifications système à la fin des sessions",
   "tui.tips.plugin_protect":
-    "Créez un plugin pour empêcher MiMoCode de lire des fichiers sensibles",
-  "tui.tips.run": "Utilisez {highlight}mimo run{/highlight} pour des scripts non interactifs",
-  "tui.tips.continue": "Utilisez {highlight}mimo --continue{/highlight} pour reprendre la dernière session",
+    "Créez un plugin pour empêcher AdpCli de lire des fichiers sensibles",
+  "tui.tips.run": "Utilisez {highlight}adp run{/highlight} pour des scripts non interactifs",
+  "tui.tips.continue": "Utilisez {highlight}adp --continue{/highlight} pour reprendre la dernière session",
   "tui.tips.attach_cli":
-    "Utilisez {highlight}mimo run -f file.ts{/highlight} pour joindre des fichiers via la CLI",
+    "Utilisez {highlight}adp run -f file.ts{/highlight} pour joindre des fichiers via la CLI",
   "tui.tips.format_json":
     "Utilisez {highlight}--format json{/highlight} pour une sortie lisible par machine dans les scripts",
-  "tui.tips.serve": "Exécutez {highlight}mimo serve{/highlight} pour exposer l'API MiMoCode en mode headless",
+  "tui.tips.serve": "Exécutez {highlight}adp serve{/highlight} pour exposer l'API AdpCli en mode headless",
   "tui.tips.attach_server":
-    "Utilisez {highlight}mimo run --attach{/highlight} pour vous connecter à un serveur en cours",
-  "tui.tips.upgrade": "Exécutez {highlight}mimo upgrade{/highlight} pour passer à la dernière version",
+    "Utilisez {highlight}adp run --attach{/highlight} pour vous connecter à un serveur en cours",
+  "tui.tips.upgrade": "Exécutez {highlight}adp upgrade{/highlight} pour passer à la dernière version",
   "tui.tips.auth_list":
-    "Exécutez {highlight}mimo auth list{/highlight} pour voir tous les fournisseurs configurés",
+    "Exécutez {highlight}adp auth list{/highlight} pour voir tous les fournisseurs configurés",
   "tui.tips.agent_create":
-    "Exécutez {highlight}mimo agent create{/highlight} pour créer un agent en mode guidé",
+    "Exécutez {highlight}adp agent create{/highlight} pour créer un agent en mode guidé",
   "tui.tips.github_install":
-    "Exécutez {highlight}mimo github install{/highlight} pour configurer le workflow GitHub",
+    "Exécutez {highlight}adp github install{/highlight} pour configurer le workflow GitHub",
   "tui.tips.github_oc":
     "Commentez {highlight}/oc{/highlight} sur une ligne de PR pour une revue ciblée",
   "tui.tips.theme_system":
     'Utilisez {highlight}"theme": "system"{/highlight} pour suivre les couleurs du terminal',
   "tui.tips.theme_files":
-    "Créez des fichiers de thème JSON dans le dossier {highlight}.mimocode/themes/{/highlight}",
+    "Créez des fichiers de thème JSON dans le dossier {highlight}.adpcli/themes/{/highlight}",
   "tui.tips.theme_variants": "Les thèmes prennent en charge des variantes claires/sombres pour les deux modes",
   "tui.tips.theme_ansi": "Référencez les couleurs ANSI 0-255 dans des thèmes personnalisés",
   "tui.tips.env_var":
@@ -208,7 +208,7 @@ export const dict = {
   "tui.tips.external_dir":
     "La permission {highlight}external_directory{/highlight} protège les fichiers en dehors du projet",
   "tui.tips.debug_config":
-    "Exécutez {highlight}mimo debug config{/highlight} pour diagnostiquer la configuration",
+    "Exécutez {highlight}adp debug config{/highlight} pour diagnostiquer la configuration",
   "tui.tips.print_logs":
     "Utilisez l'option {highlight}--print-logs{/highlight} pour afficher des journaux détaillés sur stderr",
   "tui.tips.timeline":
@@ -222,7 +222,7 @@ export const dict = {
   "tui.tips.username_toggle":
     "Activez/désactivez l'affichage du nom d'utilisateur via la palette de commandes ({highlight}Ctrl+P{/highlight})",
   "tui.tips.zen":
-    "Utilisez {highlight}/connect{/highlight} avec MiMo Code pour des modèles testés et sélectionnés",
+    "Utilisez {highlight}/connect{/highlight} avec Adp Cli pour des modèles testés et sélectionnés",
   "tui.tips.agents_md":
     "Versionnez le fichier {highlight}AGENTS.md{/highlight} de votre projet sur Git pour le partager avec l'équipe",
   "tui.tips.review":
@@ -264,14 +264,14 @@ export const dict = {
   "tui.skill.xlsx-official.description": "Créer, modifier et lire des classeurs Microsoft Excel (.xlsx)",
   "tui.skill.pdf-official.description": "Créer, modifier, transformer et lire des fichiers PDF",
   "tui.skill.pptx-official.description": "Créer, modifier et lire des présentations Microsoft PowerPoint (.pptx)",
-  "tui.skill.mimocode.description": "Documentation intégrée des fonctionnalités, config et commandes MiMoCode",
+  "tui.skill.adpcli.description": "Documentation intégrée des fonctionnalités, config et commandes AdpCli",
   "tui.skill.evolve.description": "Réécrivez chaque couche de vous-même — outils, hooks, connaissances, workflows, même l'UI",
   "tui.skill.frontend-design.description": "Conseils pour un design d'interface visuel distinctif et intentionnel",
   "tui.skill.loop.description": "Planifier l'exécution récurrente d'un prompt",
   "tui.skill.html-to-video-pipeline.description": "L'arme ultime pour vidéos courtes — créez des vidéos courtes avec du HTML",
   "tui.skill.arxiv.description": "Rechercher, citer, télécharger et suivre des articles arXiv",
   "tui.skill.skill-creator.description": "Créer, réviser et améliorer des skills d'agent",
-  "tui.skill.drive-mimo.description": "Piloter un autre processus MiMoCode — événements JSON headless ou TUI interactive via tmux",
+  "tui.skill.drive-adp.description": "Piloter un autre processus AdpCli — événements JSON headless ou TUI interactive via tmux",
   "tui.skill.research-paper-writing.description": "Rédiger, polir et critiquer des articles académiques avec l'œil d'un relecteur",
   "tui.skill.codex.description": "Exécuter Codex CLI de façon autonome dans les scripts, la CI, Docker et Kubernetes",
   "tui.skill.claude-code.description": "Déléguer des tâches de programmation à Claude Code CLI",
@@ -368,12 +368,12 @@ export const dict = {
   "tui.consent.revoked": "Accord du modèle gratuit révoqué — vous devrez l'accepter à nouveau",
   "tui.dialog.select.placeholder": "Rechercher",
   "tui.dialog.model.login_hint": "Astuce : exécutez /login pour vous connecter avant de changer de modèle",
-  "tui.model.mimo_auto.name": "MiMo Auto (MiMo-V2.5, gratuit pour une durée limitée)",
+  "tui.model.adp_auto.name": "Adp Auto (Adp-V2.5, gratuit pour une durée limitée)",
   "tui.dialog.token_plan.title": "Abonnez-vous à un Token Plan ou patientez dans la file",
   "tui.dialog.token_plan.line1":
     "En mode gratuit, les requêtes sont mises en file d'attente. Pour un service stable et de qualité,",
   "tui.dialog.token_plan.subscribe": "abonnez-vous à ",
-  "tui.dialog.token_plan.link": "MiMo Token Plan",
+  "tui.dialog.token_plan.link": "Adp Token Plan",
   "tui.dialog.token_plan.link_suffix": ".",
   "tui.dialog.token_plan.line3": "Vous pouvez aussi exécuter /login pour configurer votre propre clé API.",
   "tui.dialog.token_plan.confirm": "Compris",
@@ -410,7 +410,7 @@ export const dict = {
   "tui.dialog.try_best.action.verify": "vérification",
   "tui.dialog.try_best.action.same_kind": "même type",
   "tui.dialog.try_best.handoff.title": "Transférer à {{target}}",
-  "tui.dialog.try_best.handoff.description": "Demander à MiMo de déléguer le travail restant à ce harnais",
+  "tui.dialog.try_best.handoff.description": "Demander à Adp de déléguer le travail restant à ce harnais",
   "tui.dialog.try_best.continue.title": "Continuer avec {{model}}",
   "tui.dialog.try_best.continue.description": "Demander au modèle actuel d'abandonner cette approche et de replanifier",
   "tui.toast.instructions_loaded": "Chargé {{files}}",
@@ -418,7 +418,7 @@ export const dict = {
   "tui.toast.update_available.confirm": "La nouvelle version v{{version}} est disponible. Voulez-vous mettre à jour maintenant ?",
   "tui.toast.update_available.updating": "Mise à jour vers v{{version}}...",
   "tui.toast.update_available.failed": "La mise à jour a échoué",
-  "tui.toast.update_available.success": "Mis à jour vers MiMoCode v{{version}}. Veuillez redémarrer l'application.",
+  "tui.toast.update_available.success": "Mis à jour vers AdpCli v{{version}}. Veuillez redémarrer l'application.",
   "tui.toast.updated.title": "Mis à jour automatiquement",
   "tui.toast.updated.message": "Correctif appliqué automatiquement : v{{version}}. Redémarrez pour utiliser la nouvelle version. Désactivez avec autoupdate: false dans la configuration.",
   "tui.toast.native_installer_tip": "Conseil : l'installateur natif (curl/PowerShell) est recommandé pour une meilleure expérience.",
@@ -507,7 +507,7 @@ export const dict = {
   "tui.command.voice.control.title": "Basculer le contrôle vocal (multimodal)",
   "tui.command.voice.control.title_on": "Contrôle vocal : activé (multimodal) — cliquer pour désactiver",
   "tui.command.voice.control.title_off": "Contrôle vocal : désactivé (ASR rapide) — cliquer pour activer",
-  "tui.voice.error.no_auth": "Utilisez /connect pour vous connecter à MiMo, ou configurez voice.asr_model pour un autre fournisseur",
+  "tui.voice.error.no_auth": "Utilisez /connect pour vous connecter à Adp, ou configurez voice.asr_model pour un autre fournisseur",
   "tui.voice.error.no_auth_provider": "Le fournisseur vocal \"{{provider}}\" n'est pas authentifié, vérifiez son apiKey",
   "tui.voice.error.provider_not_found": "Fournisseur \"{{provider}}\" indisponible — /connect pour s'authentifier, ou déclarez models dans la config pour les endpoints personnalisés",
   "tui.voice.error.no_url": "Le fournisseur \"{{provider}}\" n'a pas de baseURL configuré — définissez options.baseURL dans la configuration",
@@ -526,12 +526,12 @@ export const dict = {
   "tui.command.plugins.list.title": "Plugins",
   "tui.command.plugins.install.title": "Installer un plugin",
 
-  // MiMo Auto (free) — TUI login dialog
-  "tui.dialog.login.mimo_free": "MiMo Auto (free)",
-  "tui.dialog.login.mimo_free.desc": "Canal anonyme gratuit — aucune connexion requise",
-  "tui.dialog.login.mimo_free.success": "MiMo Auto (free) est prêt — modèle par défaut défini sur mimo/mimo-auto",
-  "tui.dialog.login.mimo_free.unavailable": "Fournisseur MiMo Auto (free) non chargé",
-  "tui.dialog.login.flow.title": "Connexion MiMo",
+  // Adp Auto (free) — TUI login dialog
+  "tui.dialog.login.adp_free": "Adp Auto (free)",
+  "tui.dialog.login.adp_free.desc": "Canal anonyme gratuit — aucune connexion requise",
+  "tui.dialog.login.adp_free.success": "Adp Auto (free) est prêt — modèle par défaut défini sur adp/adp-auto",
+  "tui.dialog.login.adp_free.unavailable": "Fournisseur Adp Auto (free) non chargé",
+  "tui.dialog.login.flow.title": "Connexion Adp",
   "tui.dialog.login.flow.placeholder": "Collez le code (ou attendez le rappel du navigateur)",
   "tui.dialog.login.flow.busy": "Connexion en cours...",
   "tui.dialog.login.flow.manual_hint": "Le navigateur ne s'est pas ouvert ? Cliquez sur le lien ci-dessous pour copier :",
@@ -542,16 +542,16 @@ export const dict = {
   // CLI: providers command (auth login)
   "cli.providers.select": "Sélectionner un fournisseur",
   "cli.providers.other": "Autre fournisseur",
-  "cli.providers.mimo.recommended_hint": "recommandé",
-  "cli.providers.mimo_free.hint": "Canal anonyme gratuit / mimo-auto",
-  "cli.providers.mimo_free.verifying": "Vérification du canal MiMo Auto (free)...",
-  "cli.providers.mimo_free.ready": "Canal MiMo Auto (free) prêt",
-  "cli.providers.mimo_free.failed": "Échec de la vérification de MiMo Auto (free)",
-  "cli.providers.mimo_free.default_set": "Modèle par défaut défini sur mimo/mimo-auto (contexte 1M, gratuit)",
-  "cli.providers.mimo_free.usage_hint":
-    "Aucune connexion requise — exécutez simplement mimo. Pour les modèles payants/premium, choisissez plutôt la connexion navigateur MiMo.",
-  "cli.providers.mimo_login.decrypt_retry": "Échec du déchiffrement, veuillez réessayer ({remaining} tentatives restantes)",
-  "cli.providers.mimo_login.decrypt_exhausted": "Échec du déchiffrement, nombre maximal de tentatives atteint",
+  "cli.providers.adp.recommended_hint": "recommandé",
+  "cli.providers.adp_free.hint": "Canal anonyme gratuit / adp-auto",
+  "cli.providers.adp_free.verifying": "Vérification du canal Adp Auto (free)...",
+  "cli.providers.adp_free.ready": "Canal Adp Auto (free) prêt",
+  "cli.providers.adp_free.failed": "Échec de la vérification de Adp Auto (free)",
+  "cli.providers.adp_free.default_set": "Modèle par défaut défini sur adp/adp-auto (contexte 1M, gratuit)",
+  "cli.providers.adp_free.usage_hint":
+    "Aucune connexion requise — exécutez simplement adp. Pour les modèles payants/premium, choisissez plutôt la connexion navigateur Adp.",
+  "cli.providers.adp_login.decrypt_retry": "Échec du déchiffrement, veuillez réessayer ({remaining} tentatives restantes)",
+  "cli.providers.adp_login.decrypt_exhausted": "Échec du déchiffrement, nombre maximal de tentatives atteint",
 
   // Question i18n — plan_enter
   "tui.question.plan_enter.question": "Voulez-vous basculer en mode plan pour une planification structurée ?",
@@ -575,7 +575,7 @@ export const dict = {
   // Workspace trust
   "trust.title": "Accès à l'espace de travail :",
   "trust.safety_check": "Vérification rapide : est-ce un projet que vous avez créé ou auquel vous faites confiance ? (Votre propre code, un projet open source reconnu ou un travail de votre équipe). Sinon, prenez un moment pour examiner le contenu de ce dossier.",
-  "trust.capabilities": "MiMo Code pourra lire, modifier et exécuter des fichiers ici.",
+  "trust.capabilities": "Adp Cli pourra lire, modifier et exécuter des fichiers ici.",
   "trust.plugin_warn": "Si des plugins malveillants existent dans ce répertoire, ils peuvent exécuter du code arbitraire, lire, modifier ou exfiltrer vos fichiers.",
   "trust.option.yes": "Oui, je fais confiance à ce dossier",
   "trust.option.no": "Non, quitter",
@@ -589,7 +589,7 @@ export const dict = {
   "trust.dangerous.option.no": "Quitter (recommandé)",
   "skip_permissions.title": "AVERTISSEMENT : mode contournement des permissions",
   "skip_permissions.body":
-    "Vous avez démarré avec --dangerously-skip-permissions. MiMo Code va lire, modifier et exécuter des fichiers et lancer des commandes shell SANS demander d'approbation. Seules les règles que vous avez explicitement refusées (deny) dans la configuration restent appliquées. Vous êtes seul responsable de tout ce qu'il fait.",
+    "Vous avez démarré avec --dangerously-skip-permissions. Adp Cli va lire, modifier et exécuter des fichiers et lancer des commandes shell SANS demander d'approbation. Seules les règles que vous avez explicitement refusées (deny) dans la configuration restent appliquées. Vous êtes seul responsable de tout ce qu'il fait.",
   "skip_permissions.plugin_warn":
     "Dans ce mode, une invite, un fichier ou un plugin malveillant peut exécuter des commandes arbitraires et modifier ou exfiltrer vos données sans aucune confirmation.",
   "skip_permissions.root_warn":

@@ -1,5 +1,5 @@
 import z from "zod"
-import { NamedError } from "@mimo-ai/shared/util/error"
+import { NamedError } from "@adp-ai/shared/util/error"
 import { Global } from "../global"
 import { Instance } from "../project/instance"
 import { InstanceBootstrap } from "../project/bootstrap"
@@ -8,7 +8,7 @@ import { Database, eq } from "../storage"
 import { ProjectTable } from "../project/project.sql"
 import type { ProjectID } from "../project/schema"
 import { Log } from "../util"
-import { Slug } from "@mimo-ai/shared/util/slug"
+import { Slug } from "@adp-ai/shared/util/slug"
 import { errorMessage } from "../util/error"
 import { removeDirectory } from "../util/remove-directory"
 import { BusEvent } from "@/bus/bus-event"
@@ -17,7 +17,7 @@ import { Git } from "@/git"
 import { Effect, Layer, Path, Scope, Context, Semaphore, Stream } from "effect"
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
 import { NodePath } from "@effect/platform-node"
-import { AppFileSystem } from "@mimo-ai/shared/filesystem"
+import { AppFileSystem } from "@adp-ai/shared/filesystem"
 import { BootstrapRuntime } from "@/effect/bootstrap-runtime"
 import * as CrossSpawnSpawner from "@/effect/cross-spawn-spawner"
 import { InstanceState } from "@/effect"
@@ -217,7 +217,7 @@ export const layer: Layer.Layer<
       const ctx = yield* InstanceState.context
       for (const attempt of Array.from({ length: MAX_NAME_ATTEMPTS }, (_, i) => i)) {
         const name = base ? (attempt === 0 ? base : `${base}-${Slug.create()}`) : Slug.create()
-        const branch = `mimocode/${name}`
+        const branch = `adpcli/${name}`
         const directory = pathSvc.join(root, name)
 
         if (yield* fs.exists(directory).pipe(Effect.orDie)) continue

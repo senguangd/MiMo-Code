@@ -1,7 +1,7 @@
 import { stat, writeFile } from "fs/promises"
 import { join } from "path"
 
-export const MIMOCODE_GITIGNORE_ENTRIES = [
+export const ADPCLI_GITIGNORE_ENTRIES = [
   "node_modules",
   "package.json",
   "package-lock.json",
@@ -11,12 +11,12 @@ export const MIMOCODE_GITIGNORE_ENTRIES = [
   "scheduled_tasks.json",
 ]
 
-export async function ensureMimocodeGitignore(dir: string) {
+export async function ensureAdpcliGitignore(dir: string) {
   const gitignorePath = join(dir, ".gitignore")
   const exists = await stat(gitignorePath).then(
     () => true,
     () => false,
   )
   if (exists) return
-  await writeFile(gitignorePath, MIMOCODE_GITIGNORE_ENTRIES.join("\n")).catch(() => {})
+  await writeFile(gitignorePath, ADPCLI_GITIGNORE_ENTRIES.join("\n")).catch(() => {})
 }

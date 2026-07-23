@@ -7,22 +7,22 @@ import type { DirectoryAccessPolicy } from "../../src/server/directory-access"
 import { tmpdir } from "../fixture/fixture"
 
 const previous = {
-  password: Flag.MIMOCODE_SERVER_PASSWORD,
-  experimentalHttpApi: Flag.MIMOCODE_EXPERIMENTAL_HTTPAPI,
-  workspaceID: Flag.MIMOCODE_WORKSPACE_ID,
+  password: Flag.ADPCLI_SERVER_PASSWORD,
+  experimentalHttpApi: Flag.ADPCLI_EXPERIMENTAL_HTTPAPI,
+  workspaceID: Flag.ADPCLI_WORKSPACE_ID,
 }
 
 beforeAll(() => {
-  ;(Flag as any).MIMOCODE_SERVER_PASSWORD = undefined
-  ;(Flag as any).MIMOCODE_EXPERIMENTAL_HTTPAPI = false
-  ;(Flag as any).MIMOCODE_WORKSPACE_ID = undefined
+  ;(Flag as any).ADPCLI_SERVER_PASSWORD = undefined
+  ;(Flag as any).ADPCLI_EXPERIMENTAL_HTTPAPI = false
+  ;(Flag as any).ADPCLI_WORKSPACE_ID = undefined
 })
 
 afterAll(async () => {
   await Instance.disposeAll()
-  ;(Flag as any).MIMOCODE_SERVER_PASSWORD = previous.password
-  ;(Flag as any).MIMOCODE_EXPERIMENTAL_HTTPAPI = previous.experimentalHttpApi
-  ;(Flag as any).MIMOCODE_WORKSPACE_ID = previous.workspaceID
+  ;(Flag as any).ADPCLI_SERVER_PASSWORD = previous.password
+  ;(Flag as any).ADPCLI_EXPERIMENTAL_HTTPAPI = previous.experimentalHttpApi
+  ;(Flag as any).ADPCLI_WORKSPACE_ID = previous.workspaceID
 })
 
 async function withServer(directoryAccess: DirectoryAccessPolicy | undefined, fn: (url: URL) => Promise<void>) {
@@ -104,7 +104,7 @@ describe("web directory access", () => {
 
   test("host policy is also applied to the experimental HTTP API", async () => {
     await using tmp = await tmpdir({ outsideGit: true })
-    ;(Flag as any).MIMOCODE_EXPERIMENTAL_HTTPAPI = true
+    ;(Flag as any).ADPCLI_EXPERIMENTAL_HTTPAPI = true
     try {
       await withServer("host", async (base) => {
         const response = await fetch(url(base, "/project/current", { directory: tmp.path }))
@@ -112,7 +112,7 @@ describe("web directory access", () => {
         expect(await response.json()).toHaveProperty("id")
       })
     } finally {
-      ;(Flag as any).MIMOCODE_EXPERIMENTAL_HTTPAPI = false
+      ;(Flag as any).ADPCLI_EXPERIMENTAL_HTTPAPI = false
     }
   }, 30_000)
 })

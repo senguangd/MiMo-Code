@@ -138,7 +138,7 @@ export namespace User {
         )
 
         const [{ InviteEmail }, { render }] = await Promise.all([
-          import("@mimo-ai/console-mail/InviteEmail.jsx"),
+          import("@adp-ai/console-mail/InviteEmail.jsx"),
           import("@jsx-email/render"),
         ])
         await AWS.sendEmail({

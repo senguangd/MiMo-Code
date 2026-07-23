@@ -10,11 +10,11 @@ import { ProviderAvailability } from "../../src/provider"
 import { Instance } from "../../src/project/instance"
 import { Server } from "../../src/server/server"
 import { tmpdir } from "../fixture/fixture"
-import { Flock } from "@mimo-ai/shared/util/flock"
+import { Flock } from "@adp-ai/shared/util/flock"
 
 const providerID = "availability-test"
 const modelID = "gateway-model"
-const globalConfig = path.join(Global.Path.config, "mimocode.jsonc")
+const globalConfig = path.join(Global.Path.config, "adpcli.jsonc")
 
 function invalidate() {
   return AppRuntime.runPromise(
@@ -88,7 +88,7 @@ describe("provider availability", () => {
     await using tmp = await tmpdir({
       init: async (dir) => {
         await Bun.write(
-          path.join(dir, "mimocode.json"),
+          path.join(dir, "adpcli.json"),
           JSON.stringify({
             model: "anthropic/claude-sonnet-4-20250514",
           }),
@@ -148,7 +148,7 @@ describe("provider availability", () => {
       await using tmp = await tmpdir({
         init: async (dir) => {
           await Bun.write(
-            path.join(dir, "mimocode.json"),
+            path.join(dir, "adpcli.json"),
             JSON.stringify({
               model: `${providerID}/${modelID}`,
               provider: {
@@ -218,7 +218,7 @@ describe("provider availability", () => {
       await using tmp = await tmpdir({
         init: async (dir) => {
           await Bun.write(
-            path.join(dir, "mimocode.json"),
+            path.join(dir, "adpcli.json"),
             JSON.stringify({
               provider: {
                 [providerID]: {
@@ -242,7 +242,7 @@ describe("provider availability", () => {
       const app = Server.Default().app
       const headers = {
         "content-type": "application/json",
-        "x-mimocode-directory": tmp.path,
+        "x-adpcli-directory": tmp.path,
       }
 
       const setModel = await app.request("/provider/default-model", {
@@ -317,7 +317,7 @@ describe("provider availability", () => {
       await using tmp = await tmpdir({
         init: async (dir) => {
           await Bun.write(
-            path.join(dir, "mimocode.json"),
+            path.join(dir, "adpcli.json"),
             JSON.stringify({
               model: `${providerID}/${modelID}`,
               provider: {
@@ -410,7 +410,7 @@ describe("provider availability", () => {
     await fs.writeFile(globalConfig, "{}\n")
     await invalidate()
 
-    const lease = await Flock.acquire(ConfigPaths.lockKey(Global.Path.config, "mimocode"))
+    const lease = await Flock.acquire(ConfigPaths.lockKey(Global.Path.config, "adpcli"))
     let settled = false
     const pending = updateGlobal({ username: "locked" }).then(() => {
       settled = true

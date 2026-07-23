@@ -63,9 +63,9 @@ const textRef = `${textModel.providerID}/${textModel.id}`
 // so plain alphabetic order would place it last — but vision preference must
 // float it to the top (in-house beats alphabetic).
 const inHouseVisionModel = ProviderTest.model({
-  id: ModelID.make("mimo-v2.5"),
+  id: ModelID.make("adp-v2.5"),
   providerID: ProviderID.make("xiaomi"),
-  name: "MiMo Vision",
+  name: "Adp Vision",
   capabilities: {
     toolcall: true,
     attachment: true,
@@ -181,7 +181,7 @@ describe("actor tool — models action", () => {
 
         const result = yield* def.execute({ operation: { action: "models", vision: true } }, ctxFor(chat.id))
 
-        // xiaomi/mimo-v2.5 sorts alphabetically AFTER acme/vision-1, but in-house
+        // xiaomi/adp-v2.5 sorts alphabetically AFTER acme/vision-1, but in-house
         // preference must list it first.
         expect(result.output.indexOf(inHouseVisionRef)).toBeLessThan(result.output.indexOf(visionRef))
       }),

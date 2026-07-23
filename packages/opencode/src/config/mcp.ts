@@ -2,7 +2,7 @@ import { Schema } from "effect"
 import { isRecord } from "@/util/record"
 import { zod } from "@/util/effect-zod"
 import { withStatics } from "@/util/schema"
-import { TOOL_CAPABILITIES } from "@mimo-ai/plugin/tool"
+import { TOOL_CAPABILITIES } from "@adp-ai/plugin/tool"
 
 const ToolCapability = Schema.Literals(TOOL_CAPABILITIES)
 const ToolCapabilities = Schema.Record(Schema.String, Schema.mutable(Schema.Array(ToolCapability)))

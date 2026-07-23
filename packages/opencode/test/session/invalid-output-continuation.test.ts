@@ -38,7 +38,7 @@ function run<A, E>(fx: Effect.Effect<A, E, SessionPrompt.Service | Session.Servi
 
 function writeConfig(dir: string, origin: string) {
   return Bun.write(
-    path.join(dir, "mimocode.json"),
+    path.join(dir, "adpcli.json"),
     JSON.stringify({
       $schema: "https://opencode.ai/config.json",
       enabled_providers: ["alibaba"],
@@ -138,7 +138,7 @@ describe("invalid-output continuation — integration", () => {
                 parts: [{ type: "text", text: "Answer my question." }],
               })
               // EMPTY_STEP_MAX_RECOVERY soft nudges + 1 halting step.
-              expect(stub.captures.length).toBe(Flag.MIMOCODE_EMPTY_STEP_MAX_RECOVERY + 1)
+              expect(stub.captures.length).toBe(Flag.ADPCLI_EMPTY_STEP_MAX_RECOVERY + 1)
               expect(result.info.role).toBe("assistant")
               if (result.info.role === "assistant") {
                 expect(result.info.error).toBeDefined()

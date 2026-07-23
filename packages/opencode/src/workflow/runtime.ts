@@ -895,11 +895,11 @@ export const layer = Layer.effect(
       // subagents don't cross-contaminate. context:"none" keeps each worker free
       // of parent history (parallel fan-out is the use case). NEVER throw to the
       // guest for spawn/turn failures — resolve to null so the script continues.
-      // TEST SEAM: MIMOCODE_TEST_SPAWN_FAIL_ONCE=<n> makes the next <n> shared
+      // TEST SEAM: ADPCLI_TEST_SPAWN_FAIL_ONCE=<n> makes the next <n> shared
       // spawn attempts throw a synthetic spawn-reject (retryable), so a test can
       // drive the engine retry path deterministically without depending on LLM /
       // actor failure modes. No-op unless the env var is set. Run-scoped counter.
-      let testSpawnFailsLeft = Number(process.env.MIMOCODE_TEST_SPAWN_FAIL_ONCE ?? 0) || 0
+      let testSpawnFailsLeft = Number(process.env.ADPCLI_TEST_SPAWN_FAIL_ONCE ?? 0) || 0
       const spawnShared = async (
         actor: NonNullable<typeof spawnRef.current>,
         prompt: string,
@@ -1820,7 +1820,7 @@ export const layer = Layer.effect(
             // that supplied an explicit override), so a UI-side resume that doesn't know
             // the original launch params (e.g. TUI's /workflows resume) inherits the
             // original timeout instead of silently dropping to unbounded — which used to
-            // let a wedged mimo TTFT stall the resumed run forever.
+            // let a wedged adp TTFT stall the resumed run forever.
             agentTimeoutMs: input.agentTimeoutMs ?? row.agentTimeoutMs,
           },
           input.runID,

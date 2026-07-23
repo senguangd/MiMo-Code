@@ -434,7 +434,7 @@ export function Autocomplete(props: {
     const isCompose = local.agent.current()?.name === "compose"
     const skills = skillMap()
     for (const serverCommand of sync.data.command) {
-      if (serverCommand.source === "skill" && Flag.MIMOCODE_DISABLE_SLASH_SKILLS) continue
+      if (serverCommand.source === "skill" && Flag.ADPCLI_DISABLE_SLASH_SKILLS) continue
       if (serverCommand.source === "skill" && !isCompose && serverCommand.name.startsWith("compose:")) continue
       const label = serverCommand.source === "mcp" ? ":mcp" : ""
       const info = serverCommand.source === "skill" ? skills?.get(serverCommand.name) : undefined

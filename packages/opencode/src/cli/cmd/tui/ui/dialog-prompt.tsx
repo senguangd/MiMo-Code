@@ -127,7 +127,7 @@ DialogPrompt.show = (dialog: DialogContext, title: string, options?: Omit<Dialog
 // dialog. The dialog stays open until `handler` resolves so the caller can
 // swap in a result dialog; on empty input or cancel it clears and resolves null.
 // The busy signal lives inside an internal component (same pattern as
-// DialogMimoLogin) so toggling busy updates props reactively without remounting.
+// DialogAdpLogin) so toggling busy updates props reactively without remounting.
 // `handler` receives an `active()` accessor that returns false once the busy
 // dialog was dismissed (Escape/click-away), so callers can skip surfacing a
 // now-stale answer.

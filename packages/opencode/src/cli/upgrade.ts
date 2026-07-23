@@ -17,13 +17,13 @@ export async function upgrade() {
   })
   if (!latest) return
 
-  if (Flag.MIMOCODE_ALWAYS_NOTIFY_UPDATE) {
+  if (Flag.ADPCLI_ALWAYS_NOTIFY_UPDATE) {
     await Bus.publish(Installation.Event.UpdateAvailable, { version: latest, method })
     return
   }
 
   if (InstallationVersion === latest) return
-  if (config.autoupdate === false || Flag.MIMOCODE_DISABLE_AUTOUPDATE) return
+  if (config.autoupdate === false || Flag.ADPCLI_DISABLE_AUTOUPDATE) return
 
   const kind = Installation.getReleaseType(InstallationVersion, latest)
 

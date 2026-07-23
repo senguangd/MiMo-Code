@@ -25,10 +25,10 @@ async function removeWithWindowsShell(target: string) {
       "-NoProfile",
       "-NonInteractive",
       "-Command",
-      "Remove-Item -LiteralPath $env:MIMOCODE_REMOVE_DIRECTORY_TARGET -Recurse -Force -ErrorAction Stop",
+      "Remove-Item -LiteralPath $env:ADPCLI_REMOVE_DIRECTORY_TARGET -Recurse -Force -ErrorAction Stop",
     ],
     {
-      env: { ...process.env, MIMOCODE_REMOVE_DIRECTORY_TARGET: target },
+      env: { ...process.env, ADPCLI_REMOVE_DIRECTORY_TARGET: target },
       stdin: "ignore",
       stdout: "ignore",
       stderr: "pipe",

@@ -4,7 +4,7 @@ import { mkdir, open, rename, rm, writeFile } from "fs/promises"
 import { z } from "zod"
 import { Filesystem, Log } from "@/util"
 import { Path as GlobalPath } from "@/global"
-import { Flock } from "@mimo-ai/shared/util/flock"
+import { Flock } from "@adp-ai/shared/util/flock"
 
 export type TrustLevel = "trusted" | "untrusted" | "dangerous"
 

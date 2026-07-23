@@ -12,7 +12,7 @@ import { Bus } from "../../src/bus"
 import { makeLayer, ref, providerCfg } from "./lib"
 
 afterEach(async () => {
-  delete process.env.MIMOCODE_TEST_SPAWN_FAIL_ONCE
+  delete process.env.ADPCLI_TEST_SPAWN_FAIL_ONCE
   await Instance.disposeAll()
 })
 
@@ -21,7 +21,7 @@ const it = testEffect(makeLayer())
 // The reliable signal that the ENGINE retried is a WorkflowAgentFailed event:
 // the engine publishes exactly one per FAILED spawn attempt. A transient failure
 // that then succeeds on the engine's retry emits exactly one failed event and a
-// completed run. The MIMOCODE_TEST_SPAWN_FAIL_ONCE seam forces the first N shared
+// completed run. The ADPCLI_TEST_SPAWN_FAIL_ONCE seam forces the first N shared
 // spawn attempts to throw a spawn-reject (retryable) deterministically, without
 // depending on LLM/actor failure modes (HTTP errors become terminal
 // no-deliverable, stream errors are retried inside the model layer, hangs don't
@@ -30,7 +30,7 @@ describe("WorkflowRuntime agent() retry", () => {
   it.live("retries a spawn-reject and succeeds on the second attempt", () =>
     provideTmpdirServer(
       Effect.fnUntraced(function* ({ llm }) {
-        process.env.MIMOCODE_TEST_SPAWN_FAIL_ONCE = "1" // first spawn attempt throws
+        process.env.ADPCLI_TEST_SPAWN_FAIL_ONCE = "1" // first spawn attempt throws
         const runtime = yield* WorkflowRuntime.Service
         const session = yield* Session.Service
         const bus = yield* Bus.Service
@@ -59,7 +59,7 @@ describe("WorkflowRuntime agent() retry", () => {
   it.live("no retry option => a spawn-reject is not retried (one failed attempt, run returns null)", () =>
     provideTmpdirServer(
       Effect.fnUntraced(function* ({ llm }) {
-        process.env.MIMOCODE_TEST_SPAWN_FAIL_ONCE = "1"
+        process.env.ADPCLI_TEST_SPAWN_FAIL_ONCE = "1"
         const runtime = yield* WorkflowRuntime.Service
         const session = yield* Session.Service
         const bus = yield* Bus.Service
@@ -89,7 +89,7 @@ describe("WorkflowRuntime agent() retry", () => {
   it.live("retry exhausted => still null; every attempt emits a failed event", () =>
     provideTmpdirServer(
       Effect.fnUntraced(function* () {
-        process.env.MIMOCODE_TEST_SPAWN_FAIL_ONCE = "5" // more than attempts -> all fail
+        process.env.ADPCLI_TEST_SPAWN_FAIL_ONCE = "5" // more than attempts -> all fail
         const runtime = yield* WorkflowRuntime.Service
         const session = yield* Session.Service
         const bus = yield* Bus.Service
@@ -121,7 +121,7 @@ describe("WorkflowRuntime agent() retry", () => {
     () =>
       provideTmpdirServer(
         Effect.fnUntraced(function* ({ dir, llm }) {
-          process.env.MIMOCODE_TEST_SPAWN_FAIL_ONCE = "1"
+          process.env.ADPCLI_TEST_SPAWN_FAIL_ONCE = "1"
           const runtime = yield* WorkflowRuntime.Service
           const session = yield* Session.Service
           const bus = yield* Bus.Service

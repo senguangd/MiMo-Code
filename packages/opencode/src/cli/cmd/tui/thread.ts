@@ -10,12 +10,12 @@ import { errorMessage } from "@/util/error"
 import { withTimeout } from "@/util/timeout"
 import { withNetworkOptions, resolveNetworkOptionsNoConfig } from "@/cli/network"
 import { Filesystem } from "@/util"
-import type { GlobalEvent } from "@mimo-ai/sdk/v2"
+import type { GlobalEvent } from "@adp-ai/sdk/v2"
 import type { EventSource } from "./context/sdk"
 import { win32DisableProcessedInput, win32InstallCtrlCGuard } from "./win32"
 import { writeHeapSnapshot } from "v8"
 import { TuiConfig } from "./config/tui"
-import { MIMOCODE_PROCESS_ROLE, MIMOCODE_RUN_ID, ensureRunID, sanitizedProcessEnv } from "@/util/mimo-process"
+import { ADPCLI_PROCESS_ROLE, ADPCLI_RUN_ID, ensureRunID, sanitizedProcessEnv } from "@/util/adp-process"
 import { checkTrust, markTrusted } from "@/project/workspace-trust"
 import { t } from "@/cli/i18n"
 
@@ -156,12 +156,12 @@ async function promptDangerousPermissions(): Promise<boolean> {
 
 export const TuiThreadCommand = cmd({
   command: "$0 [project]",
-  describe: "start mimocode tui",
+  describe: "start adpcli tui",
   builder: (yargs) =>
     withNetworkOptions(yargs)
       .positional("project", {
         type: "string",
-        describe: "path to start mimocode in",
+        describe: "path to start adpcli in",
       })
       .option("model", {
         type: "string",
@@ -261,12 +261,12 @@ export const TuiThreadCommand = cmd({
         // Propagate to the worker (which loads config) via the env it inherits
         // from sanitizedProcessEnv. Config injects an allow-all base under the
         // user's permission rules so denies still win.
-        process.env.MIMOCODE_DANGEROUSLY_SKIP_PERMISSIONS = "1"
+        process.env.ADPCLI_DANGEROUSLY_SKIP_PERMISSIONS = "1"
       }
 
       const env = sanitizedProcessEnv({
-        [MIMOCODE_PROCESS_ROLE]: "worker",
-        [MIMOCODE_RUN_ID]: ensureRunID(),
+        [ADPCLI_PROCESS_ROLE]: "worker",
+        [ADPCLI_RUN_ID]: ensureRunID(),
       })
 
       const worker = new Worker(file, {

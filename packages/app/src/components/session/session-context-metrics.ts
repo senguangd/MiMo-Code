@@ -1,4 +1,4 @@
-import type { AssistantMessage, Message, Part, SessionStatus } from "@mimo-ai/sdk/v2/client"
+import type { AssistantMessage, Message, Part, SessionStatus } from "@adp-ai/sdk/v2/client"
 
 type Provider = {
   id: string

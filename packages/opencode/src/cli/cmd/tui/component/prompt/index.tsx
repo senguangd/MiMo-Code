@@ -31,7 +31,7 @@ import * as Editor from "@tui/util/editor"
 import * as Voice from "@tui/util/voice"
 import { useExit } from "../../context/exit"
 import * as Clipboard from "../../util/clipboard"
-import type { FilePart, SessionStatus, UserMessage } from "@mimo-ai/sdk/v2"
+import type { FilePart, SessionStatus, UserMessage } from "@adp-ai/sdk/v2"
 import { TuiEvent } from "../../event"
 import { iife } from "@/util/iife"
 import { Locale } from "@/util"
@@ -1781,8 +1781,8 @@ export function Prompt(props: PromptProps) {
                           >
                             {local.model.parsed().model}
                           </text>
-                          {/* Hide provider label for mimo-auto since model name already contains "MiMo" */}
-                          <Show when={!(local.model.current()?.providerID === "mimo" && local.model.current()?.modelID === "mimo-auto")}>
+                          {/* Hide provider label for adp-auto since model name already contains "Adp" */}
+                          <Show when={!(local.model.current()?.providerID === "adp" && local.model.current()?.modelID === "adp-auto")}>
                             <text fg={fadeColor(theme.textMuted, modelMetaAlpha())}>
                               {currentProviderLabel()}
                             </text>

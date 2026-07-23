@@ -177,7 +177,7 @@ export function Tips() {
   const theme = useTheme().theme
   const lang = useLanguage()
   const local = useLocal()
-  const allKeys = buildTipKeys(Flag.MIMOCODE_EXPERIMENTAL_ORCHESTRATOR, process.platform)
+  const allKeys = buildTipKeys(Flag.ADPCLI_EXPERIMENTAL_ORCHESTRATOR, process.platform)
   const [key, setKey] = createSignal(pickWeighted(allKeys))
   const interval = setInterval(() => setKey(pickWeighted(allKeys)), TIP_ROTATION_MS)
   onCleanup(() => clearInterval(interval))

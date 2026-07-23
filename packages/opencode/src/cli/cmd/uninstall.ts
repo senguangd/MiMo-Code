@@ -26,7 +26,7 @@ interface RemovalTargets {
 
 export const UninstallCommand = {
   command: "uninstall",
-  describe: "uninstall mimocode and remove all related files",
+  describe: "uninstall adpcli and remove all related files",
   builder: (yargs: Argv) =>
     yargs
       .option("keep-config", {
@@ -57,7 +57,7 @@ export const UninstallCommand = {
     UI.empty()
     UI.println(UI.logo("  "))
     UI.empty()
-    prompts.intro("Uninstall MiMoCode")
+    prompts.intro("Uninstall AdpCli")
 
     const method = await AppRuntime.runPromise(Installation.Service.use((svc) => svc.method()))
     prompts.log.info(`Installation method: ${method}`)
@@ -135,13 +135,13 @@ async function showRemovalSummary(targets: RemovalTargets, method: Installation.
 
   if (method !== "curl" && method !== "unknown") {
     const cmds: Record<string, string> = {
-      npm: "npm uninstall -g @mimo-ai/cli",
-      pnpm: "pnpm uninstall -g @mimo-ai/cli",
-      bun: "bun remove -g @mimo-ai/cli",
-      // TODO(mimocode): uncomment when published to these channels
-      // brew: "brew uninstall mimocode",
-      // choco: "choco uninstall mimocode",
-      // scoop: "scoop uninstall mimocode",
+      npm: "npm uninstall -g @adp-ai/cli",
+      pnpm: "pnpm uninstall -g @adp-ai/cli",
+      bun: "bun remove -g @adp-ai/cli",
+      // TODO(adpcli): uncomment when published to these channels
+      // brew: "brew uninstall adpcli",
+      // choco: "choco uninstall adpcli",
+      // scoop: "scoop uninstall adpcli",
     }
     prompts.log.info(`  ✓ Package: ${cmds[method] || method}`)
   }
@@ -197,13 +197,13 @@ async function executeUninstall(method: Installation.Method, targets: RemovalTar
 
   if (method !== "curl" && method !== "unknown") {
     const cmds: Record<string, string[]> = {
-      npm: ["npm", "uninstall", "-g", "@mimo-ai/cli"],
-      pnpm: ["pnpm", "uninstall", "-g", "@mimo-ai/cli"],
-      bun: ["bun", "remove", "-g", "@mimo-ai/cli"],
-      // TODO(mimocode): uncomment when published to these channels
-      // brew: ["brew", "uninstall", "mimocode"],
-      // choco: ["choco", "uninstall", "mimocode"],
-      // scoop: ["scoop", "uninstall", "mimocode"],
+      npm: ["npm", "uninstall", "-g", "@adp-ai/cli"],
+      pnpm: ["pnpm", "uninstall", "-g", "@adp-ai/cli"],
+      bun: ["bun", "remove", "-g", "@adp-ai/cli"],
+      // TODO(adpcli): uncomment when published to these channels
+      // brew: ["brew", "uninstall", "adpcli"],
+      // choco: ["choco", "uninstall", "adpcli"],
+      // scoop: ["scoop", "uninstall", "adpcli"],
     }
 
     const cmd = cmds[method]
@@ -229,7 +229,7 @@ async function executeUninstall(method: Installation.Method, targets: RemovalTar
     prompts.log.info(`  rm "${targets.binary}"`)
 
     const binDir = path.dirname(targets.binary)
-    if (binDir.includes(".mimocode")) {
+    if (binDir.includes(".adpcli")) {
       prompts.log.info(`  rmdir "${binDir}" 2>/dev/null`)
     }
   }
@@ -243,7 +243,7 @@ async function executeUninstall(method: Installation.Method, targets: RemovalTar
   }
 
   UI.empty()
-  prompts.log.success("Thank you for using MiMoCode!")
+  prompts.log.success("Thank you for using AdpCli!")
 }
 
 async function getShellConfigFile(): Promise<string | null> {
@@ -280,7 +280,7 @@ async function getShellConfigFile(): Promise<string | null> {
     if (!exists) continue
 
     const content = await Filesystem.readText(file).catch(() => "")
-    if (content.includes("# mimocode") || content.includes(".mimocode/bin")) {
+    if (content.includes("# adpcli") || content.includes(".adpcli/bin")) {
       return file
     }
   }
@@ -298,21 +298,21 @@ async function cleanShellConfig(file: string) {
   for (const line of lines) {
     const trimmed = line.trim()
 
-    if (trimmed === "# mimocode") {
+    if (trimmed === "# adpcli") {
       skip = true
       continue
     }
 
     if (skip) {
       skip = false
-      if (trimmed.includes(".mimocode/bin") || trimmed.includes("fish_add_path")) {
+      if (trimmed.includes(".adpcli/bin") || trimmed.includes("fish_add_path")) {
         continue
       }
     }
 
     if (
-      (trimmed.startsWith("export PATH=") && trimmed.includes(".mimocode/bin")) ||
-      (trimmed.startsWith("fish_add_path") && trimmed.includes(".mimocode"))
+      (trimmed.startsWith("export PATH=") && trimmed.includes(".adpcli/bin")) ||
+      (trimmed.startsWith("fish_add_path") && trimmed.includes(".adpcli"))
     ) {
       continue
     }
@@ -360,9 +360,9 @@ function formatSize(bytes: number): string {
 
 
 async function cleanWindowsPath() {
-  const installDir = path.join(os.homedir(), ".mimocode", "bin")
+  const installDir = path.join(os.homedir(), ".adpcli", "bin")
   const script = `
-    $installDir = $env:MIMOCODE_UNINSTALL_DIR
+    $installDir = $env:ADPCLI_UNINSTALL_DIR
     $userPath = [Environment]::GetEnvironmentVariable('PATH', 'User')
     if ($userPath -and $userPath -like "*$installDir*") {
       $newPath = ($userPath -split ';' | Where-Object { $_ -ne $installDir }) -join ';'
@@ -371,7 +371,7 @@ async function cleanWindowsPath() {
   `
   const result = await Process.run(["powershell", "-ep", "Bypass", "-c", script], {
     nothrow: true,
-    env: { ...process.env, MIMOCODE_UNINSTALL_DIR: installDir },
+    env: { ...process.env, ADPCLI_UNINSTALL_DIR: installDir },
   })
   if (result.code !== 0) throw new Error(result.stderr.toString() || "Failed to clean User PATH")
 }

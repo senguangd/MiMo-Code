@@ -33,7 +33,7 @@ import {
 import { Log } from "../util"
 import { pathToFileURL } from "url"
 import { Filesystem } from "../util"
-import { Hash } from "@mimo-ai/shared/util/hash"
+import { Hash } from "@adp-ai/shared/util/hash"
 import { ACPSessionManager } from "./session"
 import type { ACPConfig } from "./types"
 import { Provider } from "../provider"
@@ -48,7 +48,7 @@ import { ConfigMCP } from "@/config/mcp"
 import { allowRoot } from "@/server/allowed-root"
 import { z } from "zod"
 import { LoadAPIKeyError } from "ai"
-import type { AssistantMessage, Event, OpencodeClient, SessionMessageResponse, ToolPart } from "@mimo-ai/sdk/v2"
+import type { AssistantMessage, Event, OpencodeClient, SessionMessageResponse, ToolPart } from "@adp-ai/sdk/v2"
 import { applyPatch } from "diff"
 import { InstallationVersion } from "@/installation/version"
 
@@ -535,7 +535,7 @@ export class Agent implements ACPAgent {
       },
       authMethods: [authMethod],
       agentInfo: {
-        name: "MiMoCode",
+        name: "AdpCli",
         version: InstallationVersion,
       },
     }

@@ -1,5 +1,5 @@
 import { defineConfig } from "electron-vite"
-import appPlugin from "@mimo-ai/app/vite"
+import appPlugin from "@adp-ai/app/vite"
 import * as fs from "node:fs/promises"
 import { electronViteEsmShimPlugin } from "./scripts/electron-vite-esm-shim"
 

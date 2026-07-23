@@ -18,8 +18,8 @@ function mimeToModality(mime: string): Modality | undefined {
   return undefined
 }
 
-export const OUTPUT_TOKEN_MAX = Flag.MIMOCODE_EXPERIMENTAL_OUTPUT_TOKEN_MAX || 32_000
-const MIMO_OUTPUT_TOKEN_MAX = 128_000
+export const OUTPUT_TOKEN_MAX = Flag.ADPCLI_EXPERIMENTAL_OUTPUT_TOKEN_MAX || 32_000
+const ADP_OUTPUT_TOKEN_MAX = 128_000
 
 // Maps npm package to the key the AI SDK expects for providerOptions
 function sdkKey(npm: string): string | undefined {
@@ -623,7 +623,7 @@ function providerImageCap(model: Provider.Model): number {
 //
 // The size cap is PROVIDER-AWARE (providerImageCap): only Anthropic/Bedrock have
 // the ~5 MB hard limit, so only they get DEFAULT_MAX_IMAGE_BYTES; other providers
-// get Infinity (untouched). An explicit Flag.MIMOCODE_MAX_PROMPT_IMAGE_SIZE always
+// get Infinity (untouched). An explicit Flag.ADPCLI_MAX_PROMPT_IMAGE_SIZE always
 // wins when set.
 //
 // For the capped providers the size cap runs by default (no flag needed) because a
@@ -632,8 +632,8 @@ function providerImageCap(model: Provider.Model): number {
 // compressing it in transform, which runs immediately before send, self-heals such
 // "poison" history (including images already sitting in history / tool_result).
 function limitImages(msgs: ModelMessage[], model: Provider.Model): ModelMessage[] {
-  const maxImages = Flag.MIMOCODE_MAX_PROMPT_IMAGES
-  const maxSize = Flag.MIMOCODE_MAX_PROMPT_IMAGE_SIZE ?? providerImageCap(model)
+  const maxImages = Flag.ADPCLI_MAX_PROMPT_IMAGES
+  const maxSize = Flag.ADPCLI_MAX_PROMPT_IMAGE_SIZE ?? providerImageCap(model)
 
   // Zero-allocation fast path: with no image-count cap and no size cap there is
   // nothing to drop or shrink, so return the messages untouched instead of
@@ -824,7 +824,7 @@ export function temperature(model: Provider.Model) {
   if (id.includes("glm-4.6")) return 1.0
   if (id.includes("glm-4.7")) return 1.0
   if (id.includes("minimax-m2")) return 1.0
-  if (id.includes("mimo")) return 1.0
+  if (id.includes("adp")) return 1.0
   if (id.includes("kimi-k2")) {
     // kimi-k2-thinking & kimi-k2.5 && kimi-k2p5 && kimi-k2-5
     if (["thinking", "k2.", "k2p", "k2-5"].some((s) => id.includes(s))) {
@@ -1487,8 +1487,8 @@ export function providerOptions(model: Provider.Model, options: { [x: string]: a
 }
 
 export function maxOutputTokens(model: Provider.Model): number {
-  if (model.providerID === "mimo" || model.providerID === "xiaomi" || model.id.toLowerCase().includes("mimo")) {
-    return MIMO_OUTPUT_TOKEN_MAX
+  if (model.providerID === "adp" || model.providerID === "xiaomi" || model.id.toLowerCase().includes("adp")) {
+    return ADP_OUTPUT_TOKEN_MAX
   }
   return Math.min(model.limit.output, OUTPUT_TOKEN_MAX) || OUTPUT_TOKEN_MAX
 }
@@ -1615,7 +1615,7 @@ function isMoonshot(model: Provider.Model): boolean {
 // `oneOf` is normalized the same way defensively (some SDKs, e.g.
 // `@ai-sdk/anthropic` used by kimi-for-coding, rewrite `oneOf` → `anyOf`).
 // Scoped to Moonshot/Kimi so the parent `type` other models rely on (e.g.
-// mimo-v2.5-pro / MiniMax-M3, which stringify the whole envelope without it —
+// adp-v2.5-pro / MiniMax-M3, which stringify the whole envelope without it —
 // see #1371) stays intact.
 function sanitizeMoonshot(node: any): any {
   if (node === null || typeof node !== "object") return node

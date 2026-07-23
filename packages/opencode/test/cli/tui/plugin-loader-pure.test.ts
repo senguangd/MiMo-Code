@@ -32,10 +32,10 @@ test("skips external tui plugins in pure mode", async () => {
     },
   })
 
-  const pure = process.env.MIMOCODE_PURE
-  const meta = process.env.MIMOCODE_PLUGIN_META_FILE
-  process.env.MIMOCODE_PURE = "1"
-  process.env.MIMOCODE_PLUGIN_META_FILE = tmp.extra.meta
+  const pure = process.env.ADPCLI_PURE
+  const meta = process.env.ADPCLI_PLUGIN_META_FILE
+  process.env.ADPCLI_PURE = "1"
+  process.env.ADPCLI_PLUGIN_META_FILE = tmp.extra.meta
 
   const config: TuiConfig.Info = {
     plugin: [[tmp.extra.spec, { marker: tmp.extra.marker }]],
@@ -56,14 +56,14 @@ test("skips external tui plugins in pure mode", async () => {
     await TuiPluginRuntime.dispose()
     wait.mockRestore()
     if (pure === undefined) {
-      delete process.env.MIMOCODE_PURE
+      delete process.env.ADPCLI_PURE
     } else {
-      process.env.MIMOCODE_PURE = pure
+      process.env.ADPCLI_PURE = pure
     }
     if (meta === undefined) {
-      delete process.env.MIMOCODE_PLUGIN_META_FILE
+      delete process.env.ADPCLI_PLUGIN_META_FILE
     } else {
-      process.env.MIMOCODE_PLUGIN_META_FILE = meta
+      process.env.ADPCLI_PLUGIN_META_FILE = meta
     }
   }
 })

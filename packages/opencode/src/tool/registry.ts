@@ -20,7 +20,7 @@ import { InvalidTool } from "./invalid"
 import { SkillTool } from "./skill"
 import * as Tool from "./tool"
 import { Config } from "../config"
-import { type ToolContext as PluginToolContext, type ToolDefinition } from "@mimo-ai/plugin"
+import { type ToolContext as PluginToolContext, type ToolDefinition } from "@adp-ai/plugin"
 import z from "zod"
 import { Plugin } from "../plugin"
 import { Provider } from "../provider"
@@ -36,7 +36,7 @@ import { LspTool } from "./lsp"
 import * as Truncate from "./truncate"
 import { ApplyPatchTool } from "./apply_patch"
 import { ChangeDirectoryTool } from "./change-directory"
-import { Glob } from "@mimo-ai/shared/util/glob"
+import { Glob } from "@adp-ai/shared/util/glob"
 import path from "path"
 import { pathToFileURL } from "url"
 import { Effect, Layer, Context } from "effect"
@@ -50,7 +50,7 @@ import { Question } from "../question"
 import { Todo } from "../session/todo"
 import { LSP } from "../lsp"
 import { Instruction } from "../session/instruction"
-import { AppFileSystem } from "@mimo-ai/shared/filesystem"
+import { AppFileSystem } from "@adp-ai/shared/filesystem"
 import { Bus } from "../bus"
 import { Agent } from "../agent/agent"
 import { Skill } from "../skill"
@@ -247,7 +247,7 @@ export const layer = Layer.effect(
 
         yield* config.get()
         const questionEnabled =
-          ["app", "cli", "desktop"].includes(Flag.MIMOCODE_CLIENT) || Flag.MIMOCODE_ENABLE_QUESTION_TOOL
+          ["app", "cli", "desktop"].includes(Flag.ADPCLI_CLIENT) || Flag.ADPCLI_ENABLE_QUESTION_TOOL
 
         const tool = yield* Effect.all({
           invalid: Tool.init(invalid),
@@ -297,16 +297,16 @@ export const layer = Layer.effect(
             tool.skill,
             tool.patch,
             tool.changedir,
-            ...(Flag.MIMOCODE_EXPERIMENTAL_LSP_TOOL ? [tool.lsp] : []),
+            ...(Flag.ADPCLI_EXPERIMENTAL_LSP_TOOL ? [tool.lsp] : []),
             tool.planexit,
             tool.planenter,
             tool.memory,
             tool.history,
             tool.task,
             tool.toolscript,
-            ...(Flag.MIMOCODE_EXPERIMENTAL_CRON ? [tool.cron] : []),
-            ...(Flag.MIMOCODE_EXPERIMENTAL_ORCHESTRATOR ? [tool.session] : []),
-            ...(Flag.MIMOCODE_EXPERIMENTAL_WORKFLOW_TOOL ? [tool.workflow] : []),
+            ...(Flag.ADPCLI_EXPERIMENTAL_CRON ? [tool.cron] : []),
+            ...(Flag.ADPCLI_EXPERIMENTAL_ORCHESTRATOR ? [tool.session] : []),
+            ...(Flag.ADPCLI_EXPERIMENTAL_WORKFLOW_TOOL ? [tool.workflow] : []),
           ],
           actor: tool.actor,
           read: tool.read,
@@ -352,13 +352,13 @@ export const layer = Layer.effect(
       const webSearchBackend = WebSearchBackend.resolve({
         providerID: input.providerID,
         xiaomiApiKey: xiaomiAuth?.type === "api" ? xiaomiAuth.key : undefined,
-        exaEnabled: Flag.MIMOCODE_ENABLE_EXA,
+        exaEnabled: Flag.ADPCLI_ENABLE_EXA,
       })
 
       let filtered = (yield* all()).filter((tool) => {
         if (tool.id === WebSearchTool.id) return webSearchBackend !== undefined
         if (tool.id === CodeSearchTool.id) {
-          return input.providerID === ProviderID.opencode || Flag.MIMOCODE_ENABLE_EXA
+          return input.providerID === ProviderID.opencode || Flag.ADPCLI_ENABLE_EXA
         }
 
         const usePatch =

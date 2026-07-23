@@ -26,7 +26,7 @@ const FORWARD_DENY_TIMEOUT_MS = 5 * 60 * 1000
 // human — but the human is likely away. Bounded wait, then auto-reject with
 // model-actionable feedback instead of hanging the unattended run.
 // Read lazily so tests (and unusual deployments) can override via env.
-const skipAllForcedAskTimeoutMs = () => Number(process.env.MIMOCODE_SKIP_ALL_FORCED_ASK_TIMEOUT_MS) || 60 * 1000
+const skipAllForcedAskTimeoutMs = () => Number(process.env.ADPCLI_SKIP_ALL_FORCED_ASK_TIMEOUT_MS) || 60 * 1000
 
 const log = Log.create({ service: "permission" })
 
@@ -191,7 +191,7 @@ export function evaluate(permission: string, pattern: string, ...rulesets: Rules
 // these — the whole point of a forced-ask permission is that the intent to
 // perform an irreversible action must be recorded in-band, not inherited from
 // a broad blanket rule. Explicit deny still wins; the tool-side env opt-out
-// (e.g. MIMOCODE_AUTO_APPROVE_DELETE for bash_delete) is the only bypass.
+// (e.g. ADPCLI_AUTO_APPROVE_DELETE for bash_delete) is the only bypass.
 const FORCED_ASK = new Set(["bash_delete"])
 
 export class Service extends Context.Service<Service, Interface>()("@opencode/Permission") {}

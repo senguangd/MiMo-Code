@@ -1,7 +1,7 @@
 import { describe, test, expect } from "bun:test"
 import path from "path"
 import fs from "fs/promises"
-import { Glob } from "@mimo-ai/shared/util/glob"
+import { Glob } from "@adp-ai/shared/util/glob"
 import { tmpdir } from "../fixture/fixture"
 
 async function expectRejects(promise: Promise<unknown>, pattern: RegExp) {

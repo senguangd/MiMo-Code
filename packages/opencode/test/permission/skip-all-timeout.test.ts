@@ -4,7 +4,7 @@ import type { Permission as PermissionType } from "../../src/permission"
 
 // Read lazily by the permission service at ask() time. Short timeout so the
 // real-clock test resolves quickly.
-process.env.MIMOCODE_SKIP_ALL_FORCED_ASK_TIMEOUT_MS = "300"
+process.env.ADPCLI_SKIP_ALL_FORCED_ASK_TIMEOUT_MS = "300"
 
 const { Bus } = await import("../../src/bus")
 const CrossSpawnSpawner = await import("../../src/effect/cross-spawn-spawner")

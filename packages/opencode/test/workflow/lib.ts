@@ -16,7 +16,7 @@ import { Question } from "../../src/question"
 import { Todo } from "../../src/session/todo"
 import { Session } from "../../src/session"
 import { LLM } from "../../src/session/llm"
-import { AppFileSystem } from "@mimo-ai/shared/filesystem"
+import { AppFileSystem } from "@adp-ai/shared/filesystem"
 import { SessionPrune } from "../../src/session/prune"
 import { SessionSummary } from "../../src/session/summary"
 import { Instruction } from "../../src/session/instruction"
@@ -199,7 +199,7 @@ export const ref = {
 }
 
 const cfg = {
-  $schema: "https://mimo.xiaomi.com/mimocode/config.json",
+  $schema: "https://adp.xiaomi.com/adpcli/config.json",
   provider: {
     test: {
       name: "Test",
