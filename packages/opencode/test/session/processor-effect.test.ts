@@ -894,7 +894,7 @@ it.live("session.processor effect tests compact on structured context overflow",
   ),
 )
 
-it.live("session.processor exposes partial write input while tool arguments stream", () =>
+it.live("session.processor streams decoded write content without persisting partial input", () =>
   provideTmpdirServer(
     ({ dir, llm }) =>
       Effect.gen(function* () {
@@ -903,8 +903,8 @@ it.live("session.processor exposes partial write input while tool arguments stre
           { length: 40 },
           (_, index) => "line " + (index + 1) + ": streaming write preview",
         ).join("\n")
-
         const filepath = path.join(dir, "preview.txt")
+        const deltas: string[] = []
 
         yield* llm.toolHang("write", {
           content,
@@ -915,6 +915,11 @@ it.live("session.processor exposes partial write input while tool arguments stre
         const parent = yield* user(chat.id, "write a large file")
         const msg = yield* assistant(chat.id, parent.id, path.resolve(dir))
         const mdl = yield* provider.getModel(ref.providerID, ref.modelID)
+        const bus = yield* Bus.Service
+        const unsubscribe = yield* bus.subscribeCallback(MessageV2.Event.PartDelta, (event) => {
+          if (event.properties.messageID !== msg.id || event.properties.field !== "inputPreview") return
+          deltas.push(event.properties.delta)
+        })
         const handle = yield* processors.create({
           assistantMessage: msg,
           sessionID: chat.id,
@@ -941,26 +946,28 @@ it.live("session.processor exposes partial write input while tool arguments stre
           .pipe(Effect.forkChild)
 
         yield* llm.wait(1)
-        const preview = yield* Effect.promise(async () => {
+        yield* Effect.promise(async () => {
           const end = Date.now() + 1_000
           while (Date.now() < end) {
-            const part = MessageV2.parts(msg.id).find((item): item is MessageV2.ToolPart => item.type === "tool")
-            if (part) return structuredClone(part)
+            if (deltas.length > 0) return
             await Bun.sleep(10)
           }
-          throw new Error("timed out waiting for pending write tool input")
+          throw new Error("timed out waiting for streamed write preview delta")
         })
 
+        const part = MessageV2.parts(msg.id).find((item): item is MessageV2.ToolPart => item.type === "tool")
         yield* Fiber.interrupt(run)
         yield* Fiber.await(run)
+        unsubscribe()
 
-        expect(preview.state.status).toBe("pending")
-        if (preview.state.status !== "pending") return
-        expect(preview.state.raw.length).toBeGreaterThan(0)
-        expect(typeof preview.state.input.content).toBe("string")
-        expect(preview.state.input.content.length).toBeGreaterThan(0)
-        expect(content.startsWith(preview.state.input.content)).toBe(true)
-        expect(preview.state.input.content.length).toBeLessThan(content.length)
+        const preview = deltas.join("")
+        expect(preview.length).toBeGreaterThan(0)
+        expect(content.startsWith(preview)).toBe(true)
+        expect(preview.length).toBeLessThan(content.length)
+        expect(part?.state.status).toBe("pending")
+        if (part?.state.status !== "pending") return
+        expect(part.state.raw).toBe("")
+        expect(part.state.input).toEqual({})
         expect(yield* Effect.promise(() => Bun.file(filepath).exists())).toBe(false)
       }),
     { git: true, config: (url) => providerCfg(url) },

@@ -9,3 +9,8 @@ export function writeStreamPreview(lines: string[]) {
   if (lines.length > MAX_LINES) preview.unshift("…")
   return preview.join("\n")
 }
+
+export function writeDisplayContent(input: { status: string; content: unknown; preview: unknown }) {
+  if (input.status === "pending" && typeof input.preview === "string") return input.preview
+  return typeof input.content === "string" ? input.content : ""
+}

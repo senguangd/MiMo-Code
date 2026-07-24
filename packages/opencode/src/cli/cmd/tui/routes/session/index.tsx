@@ -102,7 +102,7 @@ import {
   UserMessageMetadata,
   formatSessionTimestamp,
 } from "./timestamp"
-import { writeStreamPreview } from "./write-preview"
+import { writeDisplayContent, writeStreamPreview } from "./write-preview"
 
 addDefaultParsers(parsers.parsers)
 
@@ -2939,10 +2939,13 @@ function Write(props: ToolProps<typeof WriteTool>) {
   const [expanded, setExpanded] = createSignal(false)
   const status = createMemo(() => props.part.state.status)
   const streaming = createMemo(() => status() === "pending" || status() === "running")
-  const code = createMemo(() => {
-    if (typeof props.input.content !== "string") return ""
-    return props.input.content
-  })
+  const code = createMemo(() =>
+    writeDisplayContent({
+      status: status(),
+      content: props.input.content,
+      preview: (props.part as ToolPart & { inputPreview?: string }).inputPreview,
+    }),
+  )
   const filepath = createMemo(() => {
     if (typeof props.input.file_path !== "string" || !props.input.file_path) return undefined
     return normalizePath(props.input.file_path)

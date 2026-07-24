@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { writeStreamPreview } from "../../../src/cli/cmd/tui/routes/session/write-preview"
+import { writeDisplayContent, writeStreamPreview } from "../../../src/cli/cmd/tui/routes/session/write-preview"
 
 describe("writeStreamPreview", () => {
   test("keeps a short streamed write intact", () => {
@@ -17,5 +17,11 @@ describe("writeStreamPreview", () => {
     expect(preview.startsWith("…")).toBe(true)
     expect(preview.endsWith("-tail")).toBe(true)
     expect(preview.length).toBe(241)
+  })
+
+  test("uses the streamed preview only while tool input is pending", () => {
+    expect(writeDisplayContent({ status: "pending", content: undefined, preview: "partial" })).toBe("partial")
+    expect(writeDisplayContent({ status: "running", content: "final", preview: "partial" })).toBe("final")
+    expect(writeDisplayContent({ status: "completed", content: "final", preview: "partial" })).toBe("final")
   })
 })

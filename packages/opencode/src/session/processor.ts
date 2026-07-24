@@ -1,5 +1,4 @@
 import { Cause, Deferred, Effect, Layer, Context, Scope } from "effect"
-import { parse as parsePartialJSON } from "partial-json"
 import * as Stream from "effect/Stream"
 import { Agent } from "@/agent/agent"
 import { SYSTEM_SPAWNED_AGENT_TYPES } from "@/agent/config"
@@ -27,26 +26,10 @@ import { Log } from "@/util"
 import { createTextNgramMonitor, type TextNgramMonitor } from "./prompt/text-ngram-detection"
 import { Flag } from "@/flag/flag"
 import { monitor as tryBestMonitor, type TryBestIncident } from "./try-best-detector"
+import { createWriteContentDecoder } from "./write-content-decoder"
 
 const DOOM_LOOP_THRESHOLD = 3
-const TOOL_INPUT_PREVIEW_INTERVAL_MS = 100
-const TOOL_INPUT_PREVIEW_CHARS = 32 * 1024
 const log = Log.create({ service: "session.processor" })
-
-function parsePartialToolInput(raw: string, fallback: Record<string, unknown>) {
-  if (!raw) return fallback
-  try {
-    const input: unknown = parsePartialJSON(raw)
-    if (!input || typeof input !== "object" || Array.isArray(input)) return fallback
-    return Object.fromEntries(Object.entries(input))
-  } catch {
-    return fallback
-  }
-}
-
-function hasPartialToolInputValue(input: Record<string, unknown>) {
-  return Object.values(input).some((value) => typeof value !== "string" || value.length > 0)
-}
 
 function describeTryBest(incident: TryBestIncident) {
   if (incident.reason === "edit_repeat") {
@@ -165,10 +148,7 @@ type ToolCall = {
   messageID: MessageV2.ToolPart["messageID"]
   sessionID: MessageV2.ToolPart["sessionID"]
   done: Deferred.Deferred<void>
-  toolName: string
-  inputRaw: string
-  publishedInputLength: number
-  publishedInputAt: number
+  previewDecoder: ReturnType<typeof createWriteContentDecoder> | undefined
 }
 
 interface ProcessorContext extends Input {
@@ -556,45 +536,6 @@ export const layer: Layer.Layer<
         return part
       })
 
-      const flushPendingToolInput = Effect.fnUntraced(function* (toolCallID: string, force = false) {
-        const call = ctx.toolcalls[toolCallID]
-        if (!call || call.toolName !== "write" || !call.inputRaw) return
-
-        const now = Date.now()
-        const added = call.inputRaw.length - call.publishedInputLength
-        const elapsed = now - call.publishedInputAt
-        if (
-          !force &&
-          call.publishedInputLength > 0 &&
-          added < TOOL_INPUT_PREVIEW_CHARS &&
-          elapsed < TOOL_INPUT_PREVIEW_INTERVAL_MS
-        ) {
-          return
-        }
-
-        const match = yield* readToolCall(toolCallID)
-        if (!match || match.part.state.status !== "pending") return
-        const input = parsePartialToolInput(call.inputRaw, match.part.state.input)
-        if (!force && call.publishedInputLength === 0 && !hasPartialToolInputValue(input)) return
-        const part = yield* session.updatePart({
-          ...match.part,
-          state: {
-            ...match.part.state,
-            raw: call.inputRaw,
-            input,
-          },
-        })
-        ctx.toolcalls[toolCallID] = {
-          ...call,
-          partID: part.id,
-          messageID: part.messageID,
-          sessionID: part.sessionID,
-          publishedInputLength: call.inputRaw.length,
-          publishedInputAt: now,
-        }
-        return part
-      })
-
       const completeToolCall = Effect.fn("SessionProcessor.completeToolCall")(function* (
         toolCallID: string,
         output: {
@@ -740,23 +681,26 @@ export const layer: Layer.Layer<
               partID: part.id,
               messageID: part.messageID,
               sessionID: part.sessionID,
-              toolName: value.toolName,
-              inputRaw: "",
-              publishedInputLength: 0,
-              publishedInputAt: 0,
+              previewDecoder: value.toolName === "write" ? createWriteContentDecoder() : undefined,
             }
             return
 
           case "tool-input-delta": {
             const call = ctx.toolcalls[value.id]
-            if (!call || !value.delta) return
-            call.inputRaw += value.delta
-            yield* flushPendingToolInput(value.id)
+            if (!call?.previewDecoder || !value.delta) return
+            const delta = call.previewDecoder.feed(value.delta)
+            if (!delta) return
+            yield* session.updatePartDelta({
+              sessionID: call.sessionID,
+              messageID: call.messageID,
+              partID: call.partID,
+              field: "inputPreview",
+              delta,
+            })
             return
           }
 
           case "tool-input-end":
-            yield* flushPendingToolInput(value.id, true)
             return
 
           case "tool-call": {
