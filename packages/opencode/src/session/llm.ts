@@ -1,7 +1,7 @@
 import path from "path"
 import { Provider } from "@/provider"
 import { Log } from "@/util"
-import { Clock, Context, Duration, Effect, Layer, Record, Schedule, Ref, Cause } from "effect"
+import { Context, Effect, Layer, Record, Cause } from "effect"
 import * as Stream from "effect/Stream"
 import {
   InvalidToolInputError,
@@ -28,7 +28,6 @@ import { Bus } from "@/bus"
 import { Wildcard, ToolCompat } from "@/util"
 import { asSchema } from "@ai-sdk/provider-utils"
 import { SessionID } from "@/session/schema"
-import * as Session from "@/session/session"
 import { migrateProjectMemory } from "./checkpoint-paths"
 import { ProjectID } from "@/project/schema"
 import { Auth } from "@/auth"
@@ -67,26 +66,6 @@ type Result = Awaited<ReturnType<typeof streamText>>
 export function isTransientCapacityError(error: unknown): boolean {
   return isRetryableTransientError(error)
 }
-
-/**
- * Persistent-retry schedule with exponential backoff.
- *
- * Exponential backoff 500ms × 2 (i.e. 0.5, 1, 2, 4, 8, 16, 32, 64, 128, 256s),
- * each individual delay capped at 5 minutes, total attempts capped at 10.
- *
- * Worst-case total = 11 attempts × chunkTimeout + cumulative backoff
- *                  ≈ 11 × 8min + 9min ≈ 97 min (with DEFAULT_CHUNK_TIMEOUT = 8min).
- *
- * Intentionally NOT capped via Schedule.upTo() — retry persistence under
- * brief upstream outages is the design goal. Bounding per-attempt latency
- * via chunkTimeout is the primary lever for hang-time control.
- */
-export const persistentRetrySchedule = Schedule.exponential("500 millis", 2).pipe(
-  Schedule.modifyDelay((_, delay) =>
-    Effect.succeed(Duration.isLessThanOrEqualTo(delay, Duration.minutes(5)) ? delay : Duration.minutes(5)),
-  ),
-  Schedule.both(Schedule.recurs(10)),
-)
 
 /**
  * Memory-system instructions appended to the main agent's system prompt.
@@ -202,16 +181,8 @@ export type StreamInput = {
   small?: boolean
   tools: Record<string, Tool>
   usableToolIDs?: readonly string[]
-  retries?: number
   toolChoice?: "auto" | "required" | "none"
   agentID?: string
-  onRetry?: (info: {
-    attempt: number
-    maxAttempts: number
-    message: string
-    next: number
-    delay: number
-  }) => Effect.Effect<void>
 }
 
 export type StreamRequest = StreamInput & {
@@ -657,16 +628,10 @@ const live: Layer.Layer<
           ...headers,
           "User-Agent": `adpcli/${InstallationVersion}`,
         },
-        // AI SDK's internal retry loop is SILENT — it emits no events and does
-        // not update session status, so the TUI shows only a dead spinner while
-        // it runs. Its backoff is also UNCAPPED (delay *= 2 each attempt, capped
-        // only by a retry-after header), so the prior default of 10 meant up to
-        // ~34 min (2+4+…+1024s) of invisible retrying before the error surfaced.
-        // We keep this layer short (absorb a couple of quick blips) and let the
-        // VISIBLE processor-level SessionRetry.policy own long-haul resilience —
-        // it publishes `type: "retry"` so the `[retrying attempt #N]` banner
-        // shows, and its per-attempt delay is capped at 30s.
-        maxRetries: input.retries ?? 2,
+        // SessionProcessor / MaxMode own retry policy and user-visible state.
+        // Keep the SDK to one wire attempt so failures surface immediately to
+        // that authoritative owner instead of being retried invisibly here.
+        maxRetries: 0,
         messages,
         model: wrapLanguageModel({
           model: language,
@@ -707,60 +672,7 @@ const live: Layer.Layer<
                 Effect.sync(() => new AbortController()),
                 (ctrl) => Effect.sync(() => ctrl.abort()),
               )
-              const attemptRef = yield* Ref.make(0)
-
-              const publishRetryEvent = (error: unknown, nextAttempt: number) =>
-                Effect.gen(function* () {
-                  const reason = error instanceof Error ? error.message : String(error)
-                  log.debug("retry attempt", {
-                    sessionID: input.sessionID,
-                    messageID: input.user.id,
-                    attempt: nextAttempt,
-                    reason,
-                  })
-                  if (nextAttempt > 10) return
-
-                  const delayMs = Math.min(500 * 2 ** (nextAttempt - 1), 300_000)
-                  const now = yield* Clock.currentTimeMillis
-                  const next = now + delayMs
-
-                  if (input.onRetry) {
-                    yield* input.onRetry({
-                      attempt: nextAttempt,
-                      maxAttempts: 10,
-                      message: reason,
-                      next,
-                      delay: delayMs,
-                    })
-                  }
-
-                  yield* Effect.promise(() =>
-                    Bus.publish(Session.Event.RetryAttempt, {
-                      sessionID: SessionID.make(input.sessionID),
-                      messageID: input.user.id,
-                      attempt: nextAttempt,
-                      maxAttempts: 10,
-                      reason,
-                      nextDelayMs: delayMs,
-                    })
-                  )
-                })
-
-              const streamWithTelemetry = run({ ...input, abort: ctrl.signal, dropAssistantPrefill }).pipe(
-                Effect.tapError((error) => {
-                  if (!isTransientCapacityError(error)) return Effect.void
-                  return Ref.updateAndGet(attemptRef, (n) => n + 1).pipe(
-                    Effect.flatMap((nextAttempt) => publishRetryEvent(error, nextAttempt))
-                  )
-                })
-              )
-
-              const result = yield* streamWithTelemetry.pipe(
-                Effect.retry({
-                  while: isTransientCapacityError,
-                  schedule: persistentRetrySchedule,
-                }),
-              )
+              const result = yield* run({ ...input, abort: ctrl.signal, dropAssistantPrefill })
 
               // Structurally identical to the pre-guard stream: a bare scoped
               // stream over the provider's fullStream. No per-event combinator, no

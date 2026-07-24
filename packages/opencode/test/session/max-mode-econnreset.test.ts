@@ -19,7 +19,7 @@ function expectCandidate(value: Candidate | null | "text-repeat"): Candidate {
  *   3. a non-transient error part falls through to the catch fallback.
  *
  * The mock stream yields synchronously-constructed events, so the only real
- * wall-clock cost is persistentRetrySchedule's first backoff (~500ms/attempt).
+ * wall-clock cost is the bounded SessionRetry policy's backoff.
  */
 
 const econnreset = () => Object.assign(new Error("socket connection closed unexpectedly"), { code: "ECONNRESET" })
@@ -89,6 +89,28 @@ describe("max-mode ECONNRESET handling (integration)", () => {
     expect(candidate.finishReason).toBe("tool-calls")
   })
 
+  test("candidate enforces a wall-clock deadline across a hanging stream", async () => {
+    let attempts = 0
+    const llm = {
+      buildSystemArray: () => Effect.succeed([]),
+      stream: () => {
+        attempts++
+        return Stream.never
+      },
+    } as unknown as LLM.Interface
+    const input = {
+      ...baseInput(llm),
+      retryBudget: { maxRetries: 2, maxElapsedMs: 50, maxDelayMs: 10 },
+    }
+
+    const started = Date.now()
+    const candidate = await Effect.runPromise(runCandidate(input, 0))
+
+    expect(candidate).toBeNull()
+    expect(attempts).toBe(1)
+    expect(Date.now() - started).toBeLessThan(1_000)
+  })
+
   test("candidate gives up (returns null) on a non-transient error part", async () => {
     const { llm, attempts } = mockLLM({
       failTimes: 99, // always fail
@@ -123,6 +145,27 @@ describe("max-mode ECONNRESET handling (integration)", () => {
 
     expect(attempts()).toBe(2) // 1 failed + 1 success
     expect(result.pick).toBe(1) // recovered the real pick, not the pick-0 fallback
+  })
+
+  test("judge enforces a wall-clock deadline and falls back", async () => {
+    const llm = {
+      buildSystemArray: () => Effect.succeed([]),
+      stream: () => Stream.never,
+    } as unknown as LLM.Interface
+    const input = {
+      ...baseInput(llm),
+      retryBudget: { maxRetries: 2, maxElapsedMs: 50, maxDelayMs: 10 },
+    }
+    const candidates = [
+      { index: 0, reasoning: "", text: "a", toolCalls: [], finishReason: "stop" },
+      { index: 1, reasoning: "", text: "b", toolCalls: [], finishReason: "stop" },
+    ]
+
+    const started = Date.now()
+    const result = await Effect.runPromise(judge(input, candidates as any))
+
+    expect(result.pick).toBe(0)
+    expect(Date.now() - started).toBeLessThan(1_000)
   })
 
   test("judge falls back to pick 0 on a non-transient error part", async () => {
@@ -179,7 +222,7 @@ describe("max-mode defect handling (SSE timeout surfaces as Cause.die)", () => {
 
   const sseTimeout = () => new Error("SSE read timed out")
   // A non-transient defect: not retried, so containment is proven in 1 attempt
-  // without waiting out persistentRetrySchedule's ~8min backoff exhaustion.
+  // without waiting out the full bounded retry budget.
   const fatalDefect = () => new Error("unexpected internal stream failure")
 
   test("candidate contains a transient defect and retries to recovery (no fiber crash)", async () => {

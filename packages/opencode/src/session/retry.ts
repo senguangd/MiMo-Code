@@ -31,6 +31,36 @@ export const RETRY_BACKOFF_FACTOR = 2
 export const RETRY_MAX_DELAY_NO_HEADERS = 30_000 // 30 seconds
 export const RETRY_MAX_DELAY = 2_147_483_647 // max 32-bit signed integer for setTimeout
 
+export type RetryBudget = {
+  /** Number of retries after the initial attempt. */
+  maxRetries: number
+  /** Maximum wall-clock budget enforced by the retry owner. */
+  maxElapsedMs: number
+  /** Upper bound for one backoff, including provider Retry-After hints. */
+  maxDelayMs: number
+}
+
+export const DEFAULT_RETRY_BUDGET: RetryBudget = {
+  maxRetries: 2,
+  maxElapsedMs: 10 * 60_000,
+  maxDelayMs: 2 * 60_000,
+}
+
+export const MAX_MODE_RETRY_BUDGET: RetryBudget = {
+  maxRetries: 2,
+  maxElapsedMs: 6 * 60_000,
+  maxDelayMs: 30_000,
+}
+
+export type RetryStopReason = "retries_exhausted" | "elapsed_exhausted" | "unsafe_replay"
+
+export type RetryExhaustedInfo = {
+  reason: RetryStopReason
+  attempts: number
+  elapsedMs: number
+  message: string
+}
+
 const SSE_TIMEOUT_MESSAGE = "SSE read timed out"
 
 const NETWORK_ERROR_CODES = new Set(["ECONNRESET", "EPIPE", "ETIMEDOUT", "UND_ERR_SOCKET"])
@@ -138,6 +168,29 @@ export function isRetryableTransientError(error: unknown): boolean {
 
 function cap(ms: number) {
   return Math.min(ms, RETRY_MAX_DELAY)
+}
+
+export function decideBudget(input: {
+  attempt: number
+  firstFailureAt: number
+  now: number
+  requestedDelayMs: number
+  budget: RetryBudget
+}):
+  | { type: "retry"; delayMs: number; elapsedMs: number; remainingMs: number }
+  | { type: "stop"; reason: "retries_exhausted" | "elapsed_exhausted"; elapsedMs: number } {
+  const elapsedMs = Math.max(0, input.now - input.firstFailureAt)
+  if (input.attempt > input.budget.maxRetries) {
+    return { type: "stop", reason: "retries_exhausted", elapsedMs }
+  }
+
+  const remainingMs = Math.max(0, input.budget.maxElapsedMs - elapsedMs)
+  const delayMs = Math.max(0, Math.min(input.requestedDelayMs, input.budget.maxDelayMs))
+  if (remainingMs <= delayMs) {
+    return { type: "stop", reason: "elapsed_exhausted", elapsedMs }
+  }
+
+  return { type: "retry", delayMs, elapsedMs, remainingMs }
 }
 
 export function delay(attempt: number, error?: MessageV2.APIError) {
@@ -275,8 +328,22 @@ export function retryable(error: Err) {
 
 export function policy(opts: {
   parse: (error: unknown) => Err
-  set: (input: { attempt: number; message: string; next: number }) => Effect.Effect<void>
+  set: (input: {
+    attempt: number
+    maxAttempts: number
+    message: string
+    next: number
+    delay: number
+    elapsedMs: number
+    remainingMs: number
+  }) => Effect.Effect<void>
+  budget?: Partial<RetryBudget>
+  canRetry?: () => Effect.Effect<boolean>
+  onExhausted?: (info: RetryExhaustedInfo) => Effect.Effect<void>
 }) {
+  const budget: RetryBudget = { ...DEFAULT_RETRY_BUDGET, ...opts.budget }
+  let firstFailureAt: number | undefined
+
   return Schedule.fromStepWithMetadata(
     Effect.succeed((meta: Schedule.InputMetadata<unknown>) => {
       const error = opts.parse(meta.input)
@@ -284,10 +351,52 @@ export function policy(opts: {
       if (!message) return Cause.done(meta.attempt)
 
       return Effect.gen(function* () {
-        const wait = delay(meta.attempt, MessageV2.APIError.isInstance(error) ? error : undefined)
         const now = yield* Clock.currentTimeMillis
-        yield* opts.set({ attempt: meta.attempt, message, next: now + wait })
-        return [meta.attempt, Duration.millis(wait)] as [number, Duration.Duration]
+        firstFailureAt ??= now
+
+        const replaySafe = opts.canRetry ? yield* opts.canRetry() : true
+        if (!replaySafe) {
+          if (opts.onExhausted) {
+            yield* opts.onExhausted({
+              reason: "unsafe_replay",
+              attempts: meta.attempt,
+              elapsedMs: Math.max(0, now - firstFailureAt),
+              message,
+            })
+          }
+          return yield* Cause.done(meta.attempt)
+        }
+
+        const requestedDelayMs = delay(meta.attempt, MessageV2.APIError.isInstance(error) ? error : undefined)
+        const decision = decideBudget({
+          attempt: meta.attempt,
+          firstFailureAt,
+          now,
+          requestedDelayMs,
+          budget,
+        })
+        if (decision.type === "stop") {
+          if (opts.onExhausted) {
+            yield* opts.onExhausted({
+              reason: decision.reason,
+              attempts: meta.attempt,
+              elapsedMs: decision.elapsedMs,
+              message,
+            })
+          }
+          return yield* Cause.done(meta.attempt)
+        }
+
+        yield* opts.set({
+          attempt: meta.attempt,
+          maxAttempts: budget.maxRetries + 1,
+          message,
+          next: now + decision.delayMs,
+          delay: decision.delayMs,
+          elapsedMs: decision.elapsedMs,
+          remainingMs: decision.remainingMs,
+        })
+        return [meta.attempt, Duration.millis(decision.delayMs)] as [number, Duration.Duration]
       })
     }),
   )

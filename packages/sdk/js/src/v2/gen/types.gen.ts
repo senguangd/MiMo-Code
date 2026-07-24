@@ -497,6 +497,17 @@ export type MessageAbortedError = {
   }
 }
 
+export type RetryExhaustedError = {
+  name: "RetryExhaustedError"
+  data: {
+    message: string
+    attempts: number
+    elapsedMs: number
+    lastError: string
+    reason: "retries_exhausted" | "elapsed_exhausted"
+  }
+}
+
 export type StructuredOutputError = {
   name: "StructuredOutputError"
   data: {
@@ -567,6 +578,7 @@ export type EventSessionError = {
       | UnknownError
       | MessageOutputLengthError
       | MessageAbortedError
+      | RetryExhaustedError
       | StructuredOutputError
       | ContextOverflowError
       | InvalidOutputError
@@ -1035,6 +1047,7 @@ export type AssistantMessage = {
     | UnknownError
     | MessageOutputLengthError
     | MessageAbortedError
+    | RetryExhaustedError
     | StructuredOutputError
     | ContextOverflowError
     | InvalidOutputError
@@ -4357,6 +4370,10 @@ export type SessionDeleteErrors = {
    * Not found
    */
   404: NotFoundError
+  /**
+   * Conflict — session resource is busy
+   */
+  409: ConflictError
 }
 
 export type SessionDeleteError = SessionDeleteErrors[keyof SessionDeleteErrors]
@@ -4960,6 +4977,10 @@ export type SessionDeleteMessageErrors = {
    * Not found
    */
   404: NotFoundError
+  /**
+   * Conflict — session resource is busy
+   */
+  409: ConflictError
 }
 
 export type SessionDeleteMessageError = SessionDeleteMessageErrors[keyof SessionDeleteMessageErrors]
@@ -5034,6 +5055,10 @@ export type PartDeleteErrors = {
    * Not found
    */
   404: NotFoundError
+  /**
+   * Conflict — session resource is busy
+   */
+  409: ConflictError
 }
 
 export type PartDeleteError = PartDeleteErrors[keyof PartDeleteErrors]
@@ -5070,6 +5095,10 @@ export type PartUpdateErrors = {
    * Not found
    */
   404: NotFoundError
+  /**
+   * Conflict — session resource is busy
+   */
+  409: ConflictError
 }
 
 export type PartUpdateError = PartUpdateErrors[keyof PartUpdateErrors]

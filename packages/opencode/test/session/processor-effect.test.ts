@@ -23,12 +23,16 @@ import * as CrossSpawnSpawner from "../../src/effect/cross-spawn-spawner"
 import { provideTmpdirInstance, provideTmpdirServer } from "../fixture/fixture"
 import { testEffect } from "../lib/effect"
 import { raw, reply, TestLLMServer } from "../lib/llm-server"
+import { MockLLM, type MockEvent, textReply } from "../lib/mock-llm"
 import { resetAllMonitors } from "../../src/session/try-best-detector"
 
 void Log.init({ print: false })
 
+const retryMock = new MockLLM()
+
 beforeEach(() => {
   resetAllMonitors()
+  retryMock.reset()
 })
 
 const summary = Layer.succeed(
@@ -173,9 +177,22 @@ const deps = Layer.mergeAll(
 ).pipe(Layer.provideMerge(infra))
 const processorEnv = SessionProcessor.layer.pipe(Layer.provide(summary), Layer.provideMerge(deps))
 const env = Layer.mergeAll(TestLLMServer.layer, processorEnv)
+const retryDeps = Layer.mergeAll(
+  Session.defaultLayer,
+  Snapshot.defaultLayer,
+  AgentSvc.defaultLayer,
+  Permission.defaultLayer,
+  Plugin.defaultLayer,
+  Config.defaultLayer,
+  retryMock.layer(),
+  Provider.defaultLayer,
+  status,
+).pipe(Layer.provideMerge(infra))
+const retryProcessorEnv = SessionProcessor.layer.pipe(Layer.provide(summary), Layer.provideMerge(retryDeps))
 
 const it = testEffect(env)
 const processorIt = testEffect(processorEnv)
+const retryProcessorIt = testEffect(retryProcessorEnv)
 
 const boot = Effect.fn("test.boot")(function* () {
   const processors = yield* SessionProcessor.Service
@@ -559,18 +576,230 @@ it.live("session.processor effect tests retry recognized structured json errors"
   ),
 )
 
-// TODO: Re-enable after we restructure the retry-status path.
-// Task 1 of docs/superpowers/plans/2026-05-17-retry-and-timeout-tuning.md
-// bumped streamText maxRetries 0→10. AI SDK now consumes 503 (and other
-// transient HTTP errors) inside its own exp-backoff loop, so the outer
-// Effect-based SessionRetry.policy at processor.ts:568 never sees this
-// error and the `type: "retry"` status banner never publishes for the
-// single-503 fixture this test uses. The user-facing contract changed:
-// silent retries during the SDK window, banner only when AI SDK gives
-// up after 10+ retries. A proper rewrite would either inject 11+
-// errors (so AI SDK exhausts then outer retry fires) or use a
-// non-AI-SDK-retryable error path.
-it.live.skip("session.processor effect tests publish retry status updates", () =>
+retryProcessorIt.live(
+  "session.processor retries a socket reset during pending tool input and removes the stale tool card",
+  () =>
+    provideTmpdirInstance(
+      (dir) =>
+        Effect.gen(function* () {
+          const { processors, session, provider } = yield* boot()
+          const callID = "call_pending_write"
+          const reset = Object.assign(new Error("The socket connection was closed unexpectedly"), {
+            code: "ECONNRESET",
+          })
+          retryMock.enqueue(
+            [
+              { type: "start-step" },
+              { type: "tool-input-start", id: callID, toolName: "write" },
+              { type: "error", error: reset },
+            ] satisfies MockEvent[],
+            textReply("recovered"),
+          )
+
+          const chat = yield* session.create({})
+          const parent = yield* user(chat.id, "write the design")
+          const msg = yield* assistant(chat.id, parent.id, path.resolve(dir))
+          const mdl = yield* provider.getModel(ref.providerID, ref.modelID)
+          const handle = yield* processors.create({ assistantMessage: msg, sessionID: chat.id, model: mdl })
+
+          const value = yield* handle.process({
+            user: {
+              id: parent.id,
+              sessionID: chat.id,
+              role: "user",
+              time: parent.time,
+              agent: parent.agent,
+              model: { providerID: ref.providerID, modelID: ref.modelID },
+            } satisfies MessageV2.User,
+            sessionID: chat.id,
+            model: mdl,
+            agent: agent(),
+            system: [],
+            messages: [{ role: "user", content: "write the design" }],
+            tools: {},
+          })
+
+          const parts = MessageV2.parts(msg.id)
+          expect(value).toBe("continue")
+          expect(retryMock.calls).toBe(2)
+          expect(parts.some((part) => part.type === "tool")).toBe(false)
+          expect(parts.some((part) => part.type === "text" && part.text === "recovered")).toBe(true)
+          expect(handle.message.error).toBeUndefined()
+        }),
+      { git: true, config: cfg },
+    ),
+)
+
+retryProcessorIt.live(
+  "session.processor does not replay a transient failure after a tool result may have side effects",
+  () =>
+    provideTmpdirInstance(
+      (dir) =>
+        Effect.gen(function* () {
+          const { processors, session, provider } = yield* boot()
+          const callID = "call_completed_write"
+          const reset = Object.assign(new Error("The socket connection was closed unexpectedly"), {
+            code: "ECONNRESET",
+          })
+          retryMock.enqueue(
+            [
+              { type: "start-step" },
+              { type: "tool-input-start", id: callID, toolName: "write" },
+              { type: "tool-call", toolCallId: callID, toolName: "write", input: { file_path: "DES-001.md" } },
+              {
+                type: "tool-result",
+                toolCallId: callID,
+                output: { title: "DES-001.md", metadata: {}, output: "written" },
+              },
+              { type: "error", error: reset },
+            ] satisfies MockEvent[],
+            textReply("must not run"),
+          )
+
+          const chat = yield* session.create({})
+          const parent = yield* user(chat.id, "write once")
+          const msg = yield* assistant(chat.id, parent.id, path.resolve(dir))
+          const mdl = yield* provider.getModel(ref.providerID, ref.modelID)
+          const handle = yield* processors.create({ assistantMessage: msg, sessionID: chat.id, model: mdl })
+
+          const value = yield* handle.process({
+            user: {
+              id: parent.id,
+              sessionID: chat.id,
+              role: "user",
+              time: parent.time,
+              agent: parent.agent,
+              model: { providerID: ref.providerID, modelID: ref.modelID },
+            } satisfies MessageV2.User,
+            sessionID: chat.id,
+            model: mdl,
+            agent: agent(),
+            system: [],
+            messages: [{ role: "user", content: "write once" }],
+            tools: {},
+          })
+
+          const tool = MessageV2.parts(msg.id).find((part): part is MessageV2.ToolPart => part.type === "tool")
+          expect(value).toBe("stop")
+          expect(retryMock.calls).toBe(1)
+          expect(tool?.state.status).toBe("completed")
+          expect(handle.message.error?.name).toBe("APIError")
+        }),
+      { git: true, config: cfg },
+    ),
+)
+
+it.live(
+  "session.processor enforces the total retry wall-clock budget during a hanging attempt",
+  () =>
+    provideTmpdirServer(
+      ({ dir, llm }) =>
+        Effect.gen(function* () {
+          const { processors, session, provider } = yield* boot()
+          yield* llm.hang
+
+          const chat = yield* session.create({})
+          const parent = yield* user(chat.id, "wait forever")
+          const msg = yield* assistant(chat.id, parent.id, path.resolve(dir))
+          const mdl = yield* provider.getModel(ref.providerID, ref.modelID)
+          const handle = yield* processors.create({
+            assistantMessage: msg,
+            sessionID: chat.id,
+            model: mdl,
+            retryBudget: { maxRetries: 2, maxElapsedMs: 150, maxDelayMs: 25 },
+          })
+
+          const started = Date.now()
+          const value = yield* handle.process({
+            user: {
+              id: parent.id,
+              sessionID: chat.id,
+              role: "user",
+              time: parent.time,
+              agent: parent.agent,
+              model: { providerID: ref.providerID, modelID: ref.modelID },
+            } satisfies MessageV2.User,
+            sessionID: chat.id,
+            model: mdl,
+            agent: agent(),
+            system: [],
+            messages: [{ role: "user", content: "wait forever" }],
+            tools: {},
+          })
+
+          expect(value).toBe("stop")
+          expect(Date.now() - started).toBeLessThan(2_000)
+          expect(yield* llm.calls).toBe(1)
+          expect(handle.message.error?.name).toBe("RetryExhaustedError")
+          if (handle.message.error?.name === "RetryExhaustedError") {
+            expect(handle.message.error.data.reason).toBe("elapsed_exhausted")
+            expect(handle.message.error.data.attempts).toBe(1)
+          }
+        }),
+      { git: true, config: (url) => providerCfg(url) },
+    ),
+  10_000,
+)
+
+retryProcessorIt.live("session.processor cancellation interrupts retry backoff before another request starts", () =>
+  provideTmpdirInstance(
+    (dir) =>
+      Effect.gen(function* () {
+        const { processors, session, provider } = yield* boot()
+        const bus = yield* Bus.Service
+        const retrySeen = defer<void>()
+        const reset = Object.assign(new Error("The socket connection was closed unexpectedly"), {
+          code: "ECONNRESET",
+        })
+        retryMock.enqueue([{ type: "error", error: reset }] satisfies MockEvent[], textReply("must not run"))
+
+        const chat = yield* session.create({})
+        const parent = yield* user(chat.id, "cancel retry")
+        const msg = yield* assistant(chat.id, parent.id, path.resolve(dir))
+        const mdl = yield* provider.getModel(ref.providerID, ref.modelID)
+        const off = yield* bus.subscribeCallback(SessionStatus.Event.Status, (evt) => {
+          if (evt.properties.sessionID === chat.id && evt.properties.status.type === "retry") retrySeen.resolve()
+        })
+        const handle = yield* processors.create({
+          assistantMessage: msg,
+          sessionID: chat.id,
+          model: mdl,
+          retryBudget: { maxRetries: 2, maxElapsedMs: 10_000, maxDelayMs: 5_000 },
+        })
+
+        const run = yield* handle
+          .process({
+            user: {
+              id: parent.id,
+              sessionID: chat.id,
+              role: "user",
+              time: parent.time,
+              agent: parent.agent,
+              model: { providerID: ref.providerID, modelID: ref.modelID },
+            } satisfies MessageV2.User,
+            sessionID: chat.id,
+            model: mdl,
+            agent: agent(),
+            system: [],
+            messages: [{ role: "user", content: "cancel retry" }],
+            tools: {},
+          })
+          .pipe(Effect.forkChild)
+
+        yield* Effect.promise(() => retrySeen.promise)
+        yield* Fiber.interrupt(run)
+        const exit = yield* Fiber.await(run)
+        off()
+
+        expect(Exit.isFailure(exit)).toBe(true)
+        expect(retryMock.calls).toBe(1)
+        expect(handle.message.error?.name).toBe("MessageAbortedError")
+      }),
+    { git: true, config: cfg },
+  ),
+)
+
+it.live("session.processor effect tests publish retry status updates", () =>
   provideTmpdirServer(
     ({ dir, llm }) =>
       Effect.gen(function* () {

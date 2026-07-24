@@ -36,6 +36,16 @@ export { isMedia }
 
 export const OutputLengthError = NamedError.create("MessageOutputLengthError", z.object({}))
 export const AbortedError = NamedError.create("MessageAbortedError", z.object({ message: z.string() }))
+export const RetryExhaustedError = NamedError.create(
+  "RetryExhaustedError",
+  z.object({
+    message: z.string(),
+    attempts: z.number().int().positive(),
+    elapsedMs: z.number().int().nonnegative(),
+    lastError: z.string(),
+    reason: z.enum(["retries_exhausted", "elapsed_exhausted"]),
+  }),
+)
 export const StructuredOutputError = NamedError.create(
   "StructuredOutputError",
   z.object({
@@ -477,6 +487,7 @@ export const Assistant = Base.extend({
       NamedError.Unknown.Schema,
       OutputLengthError.Schema,
       AbortedError.Schema,
+      RetryExhaustedError.Schema,
       StructuredOutputError.Schema,
       ContextOverflowError.Schema,
       InvalidOutputError.Schema,
@@ -1113,6 +1124,8 @@ export function fromError(
         { cause: e },
       ).toObject()
     }
+    case RetryExhaustedError.isInstance(e):
+      return e.toObject()
     case OutputLengthError.isInstance(e):
       return e
     case LoadAPIKeyError.isInstance(e):

@@ -134,6 +134,8 @@ type Input = {
   sessionID: SessionID
   model: Provider.Model
   agentMetrics?: AgentMetrics
+  /** Internal override used by focused tests and specialized bounded callers. */
+  retryBudget?: Partial<SessionRetry.RetryBudget>
 }
 
 export interface Interface {
@@ -195,6 +197,10 @@ export const layer: Layer.Layer<
     const status = yield* SessionStatus.Service
 
     const create = Effect.fn("SessionProcessor.create")(function* (input: Input) {
+      const retryBudget: SessionRetry.RetryBudget = {
+        ...SessionRetry.DEFAULT_RETRY_BUDGET,
+        ...input.retryBudget,
+      }
       // Pre-capture snapshot before the LLM stream starts. The AI SDK
       // may execute tools internally before emitting start-step events,
       // so capturing inside the event handler can be too late.
@@ -263,8 +269,10 @@ export const layer: Layer.Layer<
 
       const publishRetryStatus = Effect.fn("SessionProcessor.publishRetryStatus")(function* (info: {
         attempt: number
+        maxAttempts: number
         message: string
         next: number
+        delay: number
       }) {
         if (!isMain) return
 
@@ -277,6 +285,14 @@ export const layer: Layer.Layer<
           message: info.message,
           next: info.next,
           messageID: ctx.assistantMessage.id,
+        })
+        yield* bus.publish(Session.Event.RetryAttempt, {
+          sessionID: ctx.sessionID,
+          messageID: ctx.assistantMessage.id,
+          attempt: info.attempt,
+          maxAttempts: info.maxAttempts,
+          reason: info.message,
+          nextDelayMs: info.delay,
         })
       })
 
@@ -303,6 +319,19 @@ export const layer: Layer.Layer<
         }
 
         resetAttemptState()
+      })
+
+      const isAttemptReplaySafe = Effect.fn("SessionProcessor.isAttemptReplaySafe")(function* () {
+        const owned = new Set(ctx.stepPartIds)
+        for (const part of MessageV2.parts(ctx.assistantMessage.id)) {
+          if (!owned.has(part.id) || part.type !== "tool") continue
+          // A pending client-side tool input is speculative and can be discarded.
+          // Once a tool reaches running/completed/error, or the provider executed
+          // it remotely, replay could duplicate an external side effect.
+          if (part.metadata?.providerExecuted) return false
+          if (part.state.status !== "pending") return false
+        }
+        return true
       })
 
       // Only the main agent owns session-level status. Subagents (explore,
@@ -963,17 +992,12 @@ export const layer: Layer.Layer<
         ctx.shouldBreak = (yield* config.get()).experimental?.continue_loop_on_deny !== true
 
         return yield* Effect.gen(function* () {
+          let retryStop: SessionRetry.RetryExhaustedInfo | undefined
+          let attempts = 1
+          let lastRetryMessage = "Model response timed out"
           yield* Effect.gen(function* () {
             yield* beginAttempt()
-            const stream = llm.stream({
-              ...streamInput,
-              onRetry: (info) =>
-                publishRetryStatus({
-                  attempt: info.attempt,
-                  message: info.message,
-                  next: info.next,
-                }),
-            })
+            const stream = llm.stream(streamInput)
 
             yield* stream.pipe(
               Stream.tap((event) => handleEvent(event)),
@@ -981,6 +1005,59 @@ export const layer: Layer.Layer<
               Stream.runDrain,
             )
           }).pipe(
+            Effect.catchCauseIf(
+              (cause) => !Cause.hasInterruptsOnly(cause),
+              (cause) => Effect.fail(Cause.squash(cause)),
+            ),
+            Effect.retry(
+              SessionRetry.policy({
+                parse,
+                budget: retryBudget,
+                canRetry: isAttemptReplaySafe,
+                set: (info) =>
+                  Effect.gen(function* () {
+                    attempts = info.attempt + 1
+                    lastRetryMessage = info.message
+                    yield* rollbackAttemptParts()
+                    yield* publishRetryStatus(info)
+                  }),
+                onExhausted: (info) => Effect.sync(() => void (retryStop = info)),
+              }),
+            ),
+            Effect.catch((error) => {
+              if (retryStop && retryStop.reason !== "unsafe_replay") {
+                return halt(
+                  new MessageV2.RetryExhaustedError(
+                    {
+                      message: `Connection did not recover after ${retryStop.attempts} attempts.`,
+                      attempts: retryStop.attempts,
+                      elapsedMs: retryStop.elapsedMs,
+                      lastError: errorMessage(error),
+                      reason: retryStop.reason,
+                    },
+                    { cause: error },
+                  ),
+                )
+              }
+              return halt(error)
+            }),
+            Effect.timeoutOrElse({
+              duration: retryBudget.maxElapsedMs,
+              orElse: () =>
+                halt(
+                  new MessageV2.RetryExhaustedError({
+                    message: `Model request exceeded its ${
+                      retryBudget.maxElapsedMs >= 60_000
+                        ? `${Math.ceil(retryBudget.maxElapsedMs / 60_000)} minute`
+                        : `${retryBudget.maxElapsedMs} ms`
+                    } retry budget.`,
+                    attempts,
+                    elapsedMs: retryBudget.maxElapsedMs,
+                    lastError: lastRetryMessage,
+                    reason: "elapsed_exhausted",
+                  }),
+                ),
+            }),
             Effect.onInterrupt(() =>
               Effect.gen(function* () {
                 aborted = true
@@ -989,22 +1066,6 @@ export const layer: Layer.Layer<
                 }
               }),
             ),
-            Effect.catchCauseIf(
-              (cause) => !Cause.hasInterruptsOnly(cause),
-              (cause) => Effect.fail(Cause.squash(cause)),
-            ),
-            Effect.tapError(() =>
-              Effect.gen(function* () {
-                yield* rollbackAttemptParts()
-              }),
-            ),
-            Effect.retry(
-              SessionRetry.policy({
-                parse,
-                set: (info) => publishRetryStatus(info),
-              }),
-            ),
-            Effect.catch(halt),
             Effect.ensuring(cleanup()),
           )
 

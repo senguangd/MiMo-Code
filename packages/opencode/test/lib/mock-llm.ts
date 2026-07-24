@@ -17,7 +17,7 @@ import { LLM } from "../../src/session/llm"
 import fs from "fs"
 
 // Minimal event shapes that satisfy the processor's switch cases
-type MockEvent =
+export type MockEvent =
   | { type: "start-step" }
   | { type: "text-start"; providerMetadata?: unknown }
   | { type: "text-delta"; text: string; providerMetadata?: unknown }
@@ -29,7 +29,13 @@ type MockEvent =
   | { type: "tool-input-end" }
   | { type: "tool-call"; toolCallId: string; toolName: string; input: unknown; providerMetadata?: unknown }
   | { type: "tool-result"; toolCallId: string; output: unknown }
-  | { type: "finish-step"; finishReason: string; usage: { inputTokens: number; outputTokens: number; reasoningTokens?: number }; providerMetadata?: unknown }
+  | { type: "error"; error: unknown }
+  | {
+      type: "finish-step"
+      finishReason: string
+      usage: { inputTokens: number; outputTokens: number; reasoningTokens?: number }
+      providerMetadata?: unknown
+    }
 
 export function textReply(text: string): MockEvent[] {
   return [
@@ -71,8 +77,8 @@ export interface TrajectoryStep {
     sessionID: string
     agentID?: string
     system: string[]
-    messages: unknown[]  // ModelMessage[]
-    tools: string[]      // tool names available
+    messages: unknown[] // ModelMessage[]
+    tools: string[] // tool names available
   }
   output: {
     events: MockEvent[]

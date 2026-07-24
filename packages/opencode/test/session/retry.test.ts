@@ -123,6 +123,60 @@ describe("session.retry.delay", () => {
   })
 })
 
+describe("session.retry.budget", () => {
+  const budget: SessionRetry.RetryBudget = {
+    maxRetries: 2,
+    maxElapsedMs: 60_000,
+    maxDelayMs: 30_000,
+  }
+
+  test("allows only the configured number of retries", () => {
+    expect(
+      SessionRetry.decideBudget({
+        attempt: 1,
+        firstFailureAt: 1_000,
+        now: 1_000,
+        requestedDelayMs: 2_000,
+        budget,
+      }),
+    ).toEqual({ type: "retry", delayMs: 2_000, elapsedMs: 0, remainingMs: 60_000 })
+
+    expect(
+      SessionRetry.decideBudget({
+        attempt: 3,
+        firstFailureAt: 1_000,
+        now: 2_000,
+        requestedDelayMs: 2_000,
+        budget,
+      }),
+    ).toEqual({ type: "stop", reason: "retries_exhausted", elapsedMs: 1_000 })
+  })
+
+  test("does not schedule a retry beyond the remaining wall-clock budget", () => {
+    expect(
+      SessionRetry.decideBudget({
+        attempt: 2,
+        firstFailureAt: 1_000,
+        now: 59_500,
+        requestedDelayMs: 5_000,
+        budget,
+      }),
+    ).toEqual({ type: "stop", reason: "elapsed_exhausted", elapsedMs: 58_500 })
+  })
+
+  test("caps provider retry-after delays", () => {
+    expect(
+      SessionRetry.decideBudget({
+        attempt: 1,
+        firstFailureAt: 1_000,
+        now: 2_000,
+        requestedDelayMs: 700_000,
+        budget,
+      }),
+    ).toEqual({ type: "retry", delayMs: 30_000, elapsedMs: 1_000, remainingMs: 59_000 })
+  })
+})
+
 describe("session.retry.retryable", () => {
   test("maps too_many_requests json messages", () => {
     const error = wrap(JSON.stringify({ type: "error", error: { type: "too_many_requests" } }))

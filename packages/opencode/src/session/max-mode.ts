@@ -6,7 +6,8 @@ import { SessionProcessor } from "./processor"
 import * as Session from "./session"
 import type { Provider } from "@/provider"
 import type { Agent } from "@/agent/agent"
-import type { MessageV2 } from "./message-v2"
+import { MessageV2 } from "./message-v2"
+import { SessionRetry } from "./retry"
 import {
   createTextNgramMonitor,
   isTextNgramRepeat,
@@ -21,6 +22,10 @@ export const DEFAULT_CANDIDATES = 5
 
 /** Name of the built-in max-mode primary agent. */
 export const MAX_MODE_AGENT = "max"
+
+function retryBudget(input: MaxStepInput): SessionRetry.RetryBudget {
+  return { ...SessionRetry.MAX_MODE_RETRY_BUDGET, ...input.retryBudget }
+}
 
 /** One candidate's collected output from a propose-only stream. */
 export type Candidate = {
@@ -66,6 +71,8 @@ export type MaxStepInput = {
   toolChoice?: "auto" | "required" | "none"
   /** Number of parallel candidates (default 5). */
   candidates?: number
+  /** Internal override for focused fault-injection tests. */
+  retryBudget?: Partial<SessionRetry.RetryBudget>
   /**
    * Optional hook to surface progress to the UI during the (otherwise
    * invisible) candidate + judge phases. Called with a short English label,
@@ -95,7 +102,7 @@ export function toSchemaOnlyTools(tools: Record<string, AITool>): Record<string,
  * single bad draw doesn't sink the whole step.
  *
  * Transient network failures (ECONNRESET / EPIPE / SSE timeout / 5xx) are
- * retried with the same persistent schedule the normal stream path uses. This
+ * retried with the same bounded SessionRetry policy the normal stream path uses. This
  * is safe — and deliberately broader than the normal path — because a
  * candidate emits NOTHING externally until it completes: each attempt rebuilds
  * a fresh accumulator, so re-streaming after a mid-stream reset cannot
@@ -189,10 +196,14 @@ export const runCandidate = (
       (cause) => !Cause.hasInterruptsOnly(cause),
       (cause) => Effect.fail(Cause.squash(cause)),
     ),
-    Effect.retry({
-      while: LLM.isTransientCapacityError,
-      schedule: LLM.persistentRetrySchedule,
-    }),
+    Effect.retry(
+      SessionRetry.policy({
+        parse: (error) => MessageV2.fromError(error, { providerID: input.model.providerID }),
+        set: () => Effect.void,
+        budget: retryBudget(input),
+      }),
+    ),
+    Effect.timeout(retryBudget(input).maxElapsedMs),
     Effect.catchIf(isTextNgramRepeat, () => Effect.succeed("text-repeat" as const)),
     Effect.catch((e) =>
       Effect.sync(() => {
@@ -301,10 +312,14 @@ export const judge = (input: MaxStepInput, candidates: Candidate[]): Effect.Effe
     // `out`/`usage` locally and emits nothing externally until it returns, so
     // re-streaming after a mid-stream reset is safe. Without this, a single
     // ECONNRESET during judging silently collapses the whole step to pick 0.
-    Effect.retry({
-      while: LLM.isTransientCapacityError,
-      schedule: LLM.persistentRetrySchedule,
-    }),
+    Effect.retry(
+      SessionRetry.policy({
+        parse: (error) => MessageV2.fromError(error, { providerID: input.model.providerID }),
+        set: () => Effect.void,
+        budget: retryBudget(input),
+      }),
+    ),
+    Effect.timeout(retryBudget(input).maxElapsedMs),
     Effect.catch((e) => {
       log.warn("judge failed, defaulting to candidate 0", {
         error: e instanceof Error ? e.message : String(e),

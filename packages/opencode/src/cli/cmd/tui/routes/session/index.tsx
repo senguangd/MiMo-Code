@@ -1832,6 +1832,7 @@ function errorMeta(error: MessageError): string | undefined {
   }
   if (error.name === "ProviderAuthError") return `provider: ${error.data.providerID}`
   if (error.name === "StructuredOutputError") return `retries: ${error.data.retries}`
+  if (error.name === "RetryExhaustedError") return `attempts: ${error.data.attempts}`
   return undefined
 }
 
