@@ -894,6 +894,79 @@ it.live("session.processor effect tests compact on structured context overflow",
   ),
 )
 
+it.live("session.processor exposes partial write input while tool arguments stream", () =>
+  provideTmpdirServer(
+    ({ dir, llm }) =>
+      Effect.gen(function* () {
+        const { processors, session, provider } = yield* boot()
+        const content = Array.from(
+          { length: 40 },
+          (_, index) => "line " + (index + 1) + ": streaming write preview",
+        ).join("\n")
+
+        const filepath = path.join(dir, "preview.txt")
+
+        yield* llm.toolHang("write", {
+          content,
+          file_path: filepath,
+        })
+
+        const chat = yield* session.create({})
+        const parent = yield* user(chat.id, "write a large file")
+        const msg = yield* assistant(chat.id, parent.id, path.resolve(dir))
+        const mdl = yield* provider.getModel(ref.providerID, ref.modelID)
+        const handle = yield* processors.create({
+          assistantMessage: msg,
+          sessionID: chat.id,
+          model: mdl,
+        })
+
+        const run = yield* handle
+          .process({
+            user: {
+              id: parent.id,
+              sessionID: chat.id,
+              role: "user",
+              time: parent.time,
+              agent: parent.agent,
+              model: { providerID: ref.providerID, modelID: ref.modelID },
+            } satisfies MessageV2.User,
+            sessionID: chat.id,
+            model: mdl,
+            agent: agent(),
+            system: [],
+            messages: [{ role: "user", content: "write a large file" }],
+            tools: {},
+          })
+          .pipe(Effect.forkChild)
+
+        yield* llm.wait(1)
+        const preview = yield* Effect.promise(async () => {
+          const end = Date.now() + 1_000
+          while (Date.now() < end) {
+            const part = MessageV2.parts(msg.id).find((item): item is MessageV2.ToolPart => item.type === "tool")
+            if (part) return structuredClone(part)
+            await Bun.sleep(10)
+          }
+          throw new Error("timed out waiting for pending write tool input")
+        })
+
+        yield* Fiber.interrupt(run)
+        yield* Fiber.await(run)
+
+        expect(preview.state.status).toBe("pending")
+        if (preview.state.status !== "pending") return
+        expect(preview.state.raw.length).toBeGreaterThan(0)
+        expect(typeof preview.state.input.content).toBe("string")
+        expect(preview.state.input.content.length).toBeGreaterThan(0)
+        expect(content.startsWith(preview.state.input.content)).toBe(true)
+        expect(preview.state.input.content.length).toBeLessThan(content.length)
+        expect(yield* Effect.promise(() => Bun.file(filepath).exists())).toBe(false)
+      }),
+    { git: true, config: (url) => providerCfg(url) },
+  ),
+)
+
 it.live("session.processor effect tests discard incomplete pending tools on cleanup", () =>
   provideTmpdirServer(
     ({ dir, llm }) =>

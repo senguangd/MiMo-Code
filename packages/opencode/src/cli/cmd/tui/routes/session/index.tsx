@@ -102,6 +102,7 @@ import {
   UserMessageMetadata,
   formatSessionTimestamp,
 } from "./timestamp"
+import { writeStreamPreview } from "./write-preview"
 
 addDefaultParsers(parsers.parsers)
 
@@ -2936,48 +2937,90 @@ function Bash(props: ToolProps<typeof BashTool>) {
 function Write(props: ToolProps<typeof WriteTool>) {
   const { theme, syntax } = useTheme()
   const [expanded, setExpanded] = createSignal(false)
+  const status = createMemo(() => props.part.state.status)
+  const streaming = createMemo(() => status() === "pending" || status() === "running")
   const code = createMemo(() => {
-    if (!props.input.content) return ""
+    if (typeof props.input.content !== "string") return ""
     return props.input.content
+  })
+  const filepath = createMemo(() => {
+    if (typeof props.input.file_path !== "string" || !props.input.file_path) return undefined
+    return normalizePath(props.input.file_path)
+  })
+  const title = createMemo(() => {
+    const file = filepath()
+    if (status() === "completed") return "# Wrote " + (file ?? "file")
+    if (status() === "error") return "# Write failed" + (file ? " · " + file : "")
+    if (file) return "# Writing " + file
+    if (code()) return "# Writing..."
+    return "# Preparing write..."
   })
   const lineCount = createMemo(() => displayLines(code()).length)
   const collapsed = createMemo(() => lineCount() > TOOL_COLLAPSE_MAX_LINES || hasLongDisplayLine(code()))
+  const preview = createMemo(() => writeStreamPreview(displayLines(code())))
+  const showBlock = createMemo(() => code().length > 0 || props.metadata.diagnostics !== undefined)
 
   return (
     <Switch>
-      <Match when={props.metadata.diagnostics !== undefined}>
+      <Match when={showBlock()}>
         <BlockTool
-          title={"# Wrote " + normalizePath(props.input.file_path!)}
+          title={title()}
           part={props.part}
-          onClick={collapsed() ? () => setExpanded((prev) => !prev) : undefined}
+          spinner={streaming()}
+          onClick={!streaming() && collapsed() ? () => setExpanded((prev) => !prev) : undefined}
         >
           <Show
-            when={!collapsed() || expanded()}
+            when={streaming()}
             fallback={
-              <text fg={theme.textMuted}>
-                Click to expand ({lineCount()} {lineCount() === 1 ? "line" : "lines"})
-              </text>
+              <Show
+                when={!collapsed() || expanded()}
+                fallback={
+                  <text fg={theme.textMuted}>
+                    Click to expand ({lineCount()} {lineCount() === 1 ? "line" : "lines"})
+                  </text>
+                }
+              >
+                <line_number fg={theme.textMuted} minWidth={3} paddingRight={1}>
+                  <code
+                    conceal={false}
+                    fg={theme.text}
+                    filetype={filetype(props.input.file_path)}
+                    syntaxStyle={syntax()}
+                    content={code()}
+                  />
+                </line_number>
+                <Show when={collapsed()}>
+                  <text fg={theme.textMuted}>Click to collapse</text>
+                </Show>
+              </Show>
             }
           >
-            <line_number fg={theme.textMuted} minWidth={3} paddingRight={1}>
-              <code
-                conceal={false}
-                fg={theme.text}
-                filetype={filetype(props.input.file_path!)}
-                syntaxStyle={syntax()}
-                content={code()}
-              />
-            </line_number>
-            <Show when={collapsed()}>
-              <text fg={theme.textMuted}>Click to collapse</text>
-            </Show>
+            <text fg={theme.textMuted}>
+              Streaming {lineCount()} {lineCount() === 1 ? "line" : "lines"}
+            </text>
+            <code
+              conceal={false}
+              fg={theme.text}
+              filetype={filetype(props.input.file_path)}
+              syntaxStyle={syntax()}
+              streaming={true}
+              content={preview()}
+            />
           </Show>
-          <Diagnostics diagnostics={props.metadata.diagnostics} filePath={props.input.file_path ?? ""} />
+          <Show when={props.metadata.diagnostics !== undefined}>
+            <Diagnostics diagnostics={props.metadata.diagnostics} filePath={props.input.file_path ?? ""} />
+          </Show>
         </BlockTool>
       </Match>
       <Match when={true}>
-        <InlineTool icon="←" pending="Preparing write..." complete={props.input.file_path} part={props.part}>
-          Write {normalizePath(props.input.file_path!)}
+        <InlineTool
+          icon="←"
+          pending="Preparing write..."
+          complete={!streaming() && filepath()}
+          spinner={streaming()}
+          part={props.part}
+        >
+          {filepath() ? "Write " + filepath() : "Preparing write..."}
         </InlineTool>
       </Match>
     </Switch>
