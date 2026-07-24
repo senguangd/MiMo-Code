@@ -18,6 +18,13 @@ const userCreated = new Date(2026, 6, 21, 8, 41, 52, 848).getTime()
 const assistantCreated = new Date(2026, 6, 21, 8, 41, 52, 896).getTime()
 const assistantCompleted = new Date(2026, 6, 21, 8, 42, 22, 841).getTime()
 
+const userActionProps = {
+  copyHover: false,
+  text,
+  onCopy: () => undefined,
+  onHoverChange: () => undefined,
+}
+
 async function capture(node: () => JSX.Element, width = 60) {
   const app = await testRender(node, { width, height: 4 })
   try {
@@ -42,13 +49,14 @@ describe("session timestamps", () => {
         queuedBackground={queuedBackground}
         queuedForeground={queuedForeground}
         muted={muted}
+        {...userActionProps}
       />
     ))
     expect(frame).toContain("QUEUED")
     expect(frame).toContain(formatSessionTimestamp(timestamp))
   })
 
-  test("does not allocate visible metadata when timestamps are hidden and the message is not queued", async () => {
+  test("preserves copy when user timestamps are hidden and the message is not queued", async () => {
     const frame = await capture(() => (
       <UserMessageMetadata
         queued={false}
@@ -57,10 +65,73 @@ describe("session timestamps", () => {
         queuedBackground={queuedBackground}
         queuedForeground={queuedForeground}
         muted={muted}
+        {...userActionProps}
       />
     ))
     expect(frame).not.toContain(formatSessionTimestamp(timestamp))
     expect(frame).not.toContain("QUEUED")
+    expect(frame).toContain("copy")
+  })
+
+  test("aligns queued state left and user timestamp plus copy at the right edge", async () => {
+    const frame = await capture(
+      () => (
+        <UserMessageMetadata
+          queued={true}
+          showTimestamp={true}
+          timestamp={timestamp}
+          queuedBackground={queuedBackground}
+          queuedForeground={queuedForeground}
+          muted={muted}
+          {...userActionProps}
+        />
+      ),
+      48,
+    )
+    const row = frame.split("\n").find((line) => line.includes("QUEUED"))
+    expect(row).toBeDefined()
+    expect(row!.indexOf("QUEUED")).toBeLessThan(row!.indexOf(formatSessionTimestamp(timestamp)))
+    expect(row!.endsWith("⎘ copy")).toBe(true)
+  })
+
+  test("user copy click does not bubble to the message container", async () => {
+    let copied = 0
+    let opened = 0
+    const app = await testRender(
+      () => (
+        <box onMouseUp={() => opened++}>
+          <UserMessageMetadata
+            queued={false}
+            showTimestamp={false}
+            timestamp={timestamp}
+            queuedBackground={queuedBackground}
+            queuedForeground={queuedForeground}
+            muted={muted}
+            copyHover={false}
+            text={text}
+            onCopy={() => copied++}
+            onHoverChange={() => undefined}
+          />
+        </box>
+      ),
+      { width: 40, height: 4 },
+    )
+    try {
+      await app.flush()
+      const rows = app.captureCharFrame().split("\n")
+      const y = rows.findIndex((line) => line.includes("copy"))
+      expect(y).toBeGreaterThanOrEqual(0)
+      const x = rows[y]!.indexOf("copy")
+      expect(x).toBeGreaterThanOrEqual(0)
+
+      await app.mockMouse.click(x, y)
+      await app.flush()
+
+      expect(copied).toBe(1)
+      expect(opened).toBe(0)
+    } finally {
+      app.renderer.destroy()
+    }
   })
 
   test("omits assistant completion metadata while streaming", async () => {

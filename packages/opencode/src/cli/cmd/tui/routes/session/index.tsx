@@ -1450,6 +1450,21 @@ const MIME_BADGE: Record<string, string> = {
   "application/x-directory": "dir",
 }
 
+function useMessageCopy(content: () => string) {
+  const toast = useToast()
+  const renderer = useRenderer()
+  const t = useLanguage().t
+
+  return () => {
+    if (renderer.getSelection()?.getSelectedText()) return
+    const value = content().trim()
+    if (!value) return
+    Clipboard.copy(value)
+      .then(() => toast.show({ message: t("tui.toast.copied_to_clipboard"), variant: "success" }))
+      .catch(() => toast.show({ message: "Failed to copy to clipboard", variant: "error" }))
+  }
+}
+
 function UserMessage(props: {
   message: UserMessage
   parts: Part[]
@@ -1487,10 +1502,11 @@ function UserMessage(props: {
   })
   const { theme } = useTheme()
   const [hover, setHover] = createSignal(false)
+  const [copyHover, setCopyHover] = createSignal(false)
+  const handleCopy = useMessageCopy(() => text()?.text ?? "")
   const queued = createMemo(() => props.pending && props.message.id > props.pending)
   const color = createMemo(() => local.agent.color(props.message.agent))
   const queuedFg = createMemo(() => selectedForeground(theme, color()))
-  const metadataVisible = createMemo(() => queued() || ctx.showTimestamps())
 
   return (
     <>
@@ -1579,7 +1595,7 @@ function UserMessage(props: {
           >
             <text fg={theme.text}>{text()?.text}</text>
             <Show when={files().length}>
-              <box flexDirection="row" paddingBottom={metadataVisible() ? 1 : 0} paddingTop={1} gap={1} flexWrap="wrap">
+              <box flexDirection="row" paddingBottom={1} paddingTop={1} gap={1} flexWrap="wrap">
                 <For each={files()}>
                   {(file) => {
                     const bg = createMemo(() => {
@@ -1603,7 +1619,11 @@ function UserMessage(props: {
               timestamp={props.message.time.created}
               queuedBackground={color()}
               queuedForeground={queuedFg()}
+              copyHover={copyHover()}
               muted={theme.textMuted}
+              text={theme.text}
+              onCopy={handleCopy}
+              onHoverChange={setCopyHover}
             />
           </box>
         </box>
@@ -1617,8 +1637,6 @@ function AssistantMessage(props: { message: AssistantMessage; parts: Part[]; las
   const local = useLocal()
   const { theme } = useTheme()
   const sync = useSync()
-  const toast = useToast()
-  const renderer = useRenderer()
   const t = useLanguage().t
   const [copyHover, setCopyHover] = createSignal(false)
   const messages = createMemo(() => sync.data.message[props.message.sessionID]?.[props.message.agentID ?? "main"] ?? [])
@@ -1658,18 +1676,12 @@ function AssistantMessage(props: { message: AssistantMessage; parts: Part[]; las
 
   const keybind = useKeybind()
 
-  const handleCopy = () => {
-    if (renderer.getSelection()?.getSelectedText()) return
-    const text = props.parts
+  const handleCopy = useMessageCopy(() =>
+    props.parts
       .filter((p) => p.type === "text")
       .map((p) => (p as TextPart).text)
-      .join("\n")
-      .trim()
-    if (!text) return
-    Clipboard.copy(text)
-      .then(() => toast.show({ message: t("tui.toast.copied_to_clipboard"), variant: "success" }))
-      .catch(() => toast.show({ message: "Failed to copy to clipboard", variant: "error" }))
-  }
+      .join("\n"),
+  )
 
   // Goal judge verdict for this specific turn, if the stop-condition judge
   // evaluated it. Rendered as a foldable per-turn marker so the user can trace
